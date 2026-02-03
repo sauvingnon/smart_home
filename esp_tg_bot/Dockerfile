@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-# Обновляем пакеты и ставим ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Обновляем пакеты
+RUN apt-get update
 
 # Устанавливаем рабочую директорию
 WORKDIR /app
