@@ -61,8 +61,8 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }} \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
-              echo '${{ secrets.ESP_TG_BOT_ENV_FILE }}' > /srv/esp_system/esp_service/.env &&
-              echo '${{ secrets.ESP_SERVICE_ENV_FILE }}' > /srv/esp_system/esp_tg_bot/.env
+              echo '${{ secrets.ESP_TG_BOT_ENV_FILE }}' > /srv/esp_system/esp_tg_bot/.env &&
+              echo '${{ secrets.ESP_SERVICE_ENV_FILE }}' > /srv/esp_system/esp_service/.env
             "
       - name: Deploy over SSH
         run: |
