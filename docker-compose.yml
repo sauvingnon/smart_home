@@ -58,7 +58,7 @@ services:
       - internal
     ports:
       - "8005:8005"
-    mem_limit: 160m
+    mem_limit: 300m
     cpus: "0.2"
 
   esp_tg_bot: 
@@ -72,7 +72,7 @@ services:
       - ./esp_tg_bot/.env
     networks:
       - internal
-    mem_limit: 128m
+    mem_limit: 200m
     cpus: "0.2"
     command: python main.py
 
