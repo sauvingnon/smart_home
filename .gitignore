@@ -2,3 +2,4 @@
 *.md
 *.db
 *.log
+mosquitto/config/passwd

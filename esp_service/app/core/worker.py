@@ -170,7 +170,6 @@ class WeatherBackgroundWorker:
             logger.info(f"⏳ Жду {self.update_time_interval} сек до следующей проверки")
             await asyncio.sleep(self.update_time_interval)
 
-
     async def _check_heartbeat_esp_loop(self):
         """Периодическая проверка работы устройства."""
         logger.info("👁️ Начинаем мониторинг устройства greenhouse_01")
@@ -350,8 +349,6 @@ class WeatherBackgroundWorker:
     async def handle_telemetry(self, device_id: str, data: dict):
         """Обработчик телеметрии от платы"""
         try:
-            # Обновляем heartbeat
-            self.mqtt_service.last_heartbeats[device_id] = datetime.now()
             
             # Парсим и валидируем данные
             telemetry = TelemetryData(
@@ -362,9 +359,6 @@ class WeatherBackgroundWorker:
                 uptime=data.get('uptime'),
                 timestamp=self._get_izhevsk_time()
             )
-            
-            # Логируем структурированно
-            logger.info(telemetry.to_dict())
             
             # Сохраняем в кэш
             self.current_telemetry = telemetry

@@ -17,6 +17,8 @@ services:
 
   mqtt-broker:
     image: eclipse-mosquitto:latest
+    env_file:
+      - ./mosquitto/config/.env 
     container_name: mosquitto
     restart: unless-stopped
     networks:
@@ -28,6 +30,8 @@ services:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
+      - ./mosquitto/config/init-mosquitto.sh:/init-mosquitto.sh:ro
+    command: ["/init-mosquitto.sh"]
 
   esp_loki:
     image: grafana/loki:3.0.0
@@ -59,7 +63,7 @@ services:
     ports:
       - "8005:8005"
     mem_limit: 300m
-    cpus: "0.2"
+    cpus: "0.5"
 
   esp_tg_bot: 
     build: ./esp_tg_bot
@@ -73,7 +77,7 @@ services:
     networks:
       - internal
     mem_limit: 200m
-    cpus: "0.2"
+    cpus: "0.5"
     command: python main.py
 
   esp_grafana:
@@ -130,3 +134,4 @@ networks:
   internal:
     name: internal
     driver: bridge
+  # 

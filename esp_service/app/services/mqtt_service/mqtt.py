@@ -1,12 +1,13 @@
 # services/mqtt_service/mqtt.py
 import asyncio
 import json
-from typing import Dict, Optional, Callable, Any, Union
-import aiomqtt
+from typing import Dict, Optional, Callable, Any
+from aiomqtt import Client, Message
 from app.schemas.weather_data import BoardData
 from datetime import datetime
 from logger import logger
 from app.schemas.settings import SettingsData
+from config import MQTT_USERNAME, MQTT_PASSWORD
 
 class MQTTService:
     """
@@ -22,7 +23,7 @@ class MQTTService:
         self.broker_host = broker_host
         self.broker_port = int(broker_port) if isinstance(broker_port, str) else broker_port
         self.client_id = client_id
-        self.client: Optional[aiomqtt.Client] = None
+        self.client: Optional[Client] = None
         self.is_connected = False
         self._listening_task: Optional[asyncio.Task] = None
         self.device_id = "greenhouse_01"
@@ -61,9 +62,11 @@ class MQTTService:
             if not isinstance(self.broker_port, int):
                 raise ValueError(f"Port должен быть int, получен {type(self.broker_port)}")
             
-            self.client = aiomqtt.Client(
+            self.client = Client(
                 hostname=self.broker_host,
                 port=self.broker_port,
+                username=MQTT_USERNAME,
+                password=MQTT_PASSWORD,
                 identifier=self.client_id,
                 clean_session=True,
                 keepalive=60
@@ -100,7 +103,7 @@ class MQTTService:
             logger.debug(f"📡 Подписались на топик: {topic} (qos={qos})")
 
 
-    async def _handle_message(self, message: aiomqtt.Message):
+    async def _handle_message(self, message: Message):
         """Обработка входящих сообщений"""
         try:
             payload_str = message.payload.decode()
