@@ -92,8 +92,9 @@ Settings settings;
 const char* ssid = "TP-Link_297F";
 const char* password = "23598126";
 
-// MQTT брокер
-const char* mqtt_server = "192.168.1.100";
+// MQTT брокер dotnetdon.ru
+const char* mqtt_server = "dotnetdon.ru";
+//const char* mqtt_server = "192.168.1.100";
 
 // Глобальные объекты
 WiFiClient wifiClient;
