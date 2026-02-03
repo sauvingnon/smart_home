@@ -1,0 +1,137 @@
+services:
+
+  mqtt-broker:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto
+    restart: unless-stopped
+    networks:
+      - internal
+    ports:
+      - "1883:1883"  # Основной порт для MQTT-клиентов (ESP, бот)
+      - "9001:9001"  # Веб-сокет порт (опционально, для веб-интерфейсов)
+    volumes:
+      - ./mosquitto/config:/mosquitto/config  # Конфигурация брокера
+      - ./mosquitto/data:/mosquitto/data      # Сохранение данных (например, сохранённые сообщения)
+      - ./mosquitto/log:/mosquitto/log        # Логи
+    
+  esp_service:
+    build: ./esp_service
+    container_name: esp_service
+    restart: unless-stopped
+    env_file:
+      - ./esp_service/.env
+    depends_on:  # УКАЖИ ЗАВИСИМОСТЬ ОТ HEALTHCHECK
+      redis:
+        condition: service_healthy  # Ждем пока Redis станет healthy
+      mqtt-broker:
+        condition: service_started  # MQTT достаточно started
+    networks:
+      - internal
+    ports:
+      - "8005:8005"
+    mem_limit: 160m
+    cpus: "0.2"
+
+  esp_tg_bot: 
+    build: ./esp_tg_bot
+    container_name: esp_tg_bot
+    restart: unless-stopped
+    depends_on:
+      - mqtt-broker
+    env_file:
+      - ./esp_tg_bot/.env
+    networks:
+      - internal
+    mem_limit: 128m
+    cpus: "0.2"
+    command: python main.py
+
+  redis:
+    image: redis:alpine
+    container_name: esp_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - internal
+
+  esp_loki:
+    image: grafana/loki:3.0.0
+    container_name: esp_loki
+    ports:
+      - "3100:3100"  # Оставляем порт наружу
+    command: 
+      - -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+      - ./loki-local-config.yaml:/etc/loki/local-config.yaml
+    restart: unless-stopped
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  esp_promtail:
+    image: grafana/promtail:3.0.0
+    container_name: esp_promtail
+    command: 
+      - -config.file=/etc/promtail/config.yaml
+    volumes:
+      # Важно: монтируем Docker socket для автоматического обнаружения контейнеров
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # И папку с логами Docker контейнеров
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # Конфиг промтейла
+      - ./promtail-config.yaml:/etc/promtail/config.yaml
+    restart: unless-stopped
+    depends_on:
+      - esp_loki
+    networks:
+      - internal
+
+  # Обновляем сервис grafana в docker-compose.yml:
+  esp_grafana:
+    image: grafana/grafana:latest
+    container_name: esp_grafana
+    ports: 
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # УБИРАЕМ плагин - он уже встроен в последних версиях!
+      # - GF_INSTALL_PLUGINS=grafana-loki-datasource
+      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
+      # Добавляем для отладки
+      - GF_LOG_LEVEL=debug
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      esp_loki:
+        condition: service_started
+    networks:
+      - internal
+
+volumes:
+  redis_data:
+    driver: local
+  loki_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  internal:
+    name: internal
+    driver: bridge
+

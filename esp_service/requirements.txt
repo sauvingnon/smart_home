@@ -1,0 +1,9 @@
+python-dotenv
+fastapi
+uvicorn[standard]
+groq
+openai
+redis
+requests
+aiomqtt
+pytz
