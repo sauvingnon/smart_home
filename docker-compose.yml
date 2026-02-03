@@ -28,12 +28,6 @@ services:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 1 bash -c 'echo > /dev/tcp/localhost/1883' || exit 0"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
 
   esp_loki:
     image: grafana/loki:3.0.0
@@ -59,7 +53,7 @@ services:
       redis:
         condition: service_healthy
       mqtt-broker:
-        condition: service_healthy
+        condition: service_started
     networks:
       - internal
     ports:
