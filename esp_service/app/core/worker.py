@@ -1,7 +1,7 @@
 from typing import Dict, Optional
 import uuid
 
-from app.services.redis.cache_manager import WeatherCacheManager
+from app.services.redis.cache_manager import CacheManager
 from app.services.weather_service.yandex_weather import WeatherService
 import asyncio
 from datetime import datetime, timedelta
@@ -10,6 +10,7 @@ from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.schemas.telemetry import TelemetryData
 from app.schemas.weather_data import WeatherData
 from app.schemas.settings import SettingsData
+from app.schemas.device_status import DeviceStatus
 import pytz
 
 IZHEVSK_TZ = pytz.timezone('Europe/Samara')
@@ -23,7 +24,7 @@ class WeatherBackgroundWorker:
     
     def __init__(
             self, 
-            cache_manager: WeatherCacheManager, 
+            cache_manager: CacheManager, 
             weather_service: WeatherService,
             mqtt_service: MQTTService
             ):
@@ -39,11 +40,12 @@ class WeatherBackgroundWorker:
         self.heartbeat_interval = 60
         self.device_id = "greenhouse_01"
         self.current_telemetry: Optional[TelemetryData] = None
+        self.device_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
         
     @classmethod
     def get_instance(
         cls,
-        cache_manager: Optional[WeatherCacheManager] = None,
+        cache_manager: Optional[CacheManager] = None,
         weather_service: Optional[WeatherService] = None,
         mqtt_service: Optional[MQTTService] = None
     ) -> 'WeatherBackgroundWorker':
@@ -58,7 +60,7 @@ class WeatherBackgroundWorker:
     @classmethod
     async def get_instance_async(
         cls,
-        cache_manager: Optional[WeatherCacheManager] = None,
+        cache_manager: Optional[CacheManager] = None,
         weather_service: Optional[WeatherService] = None,
         mqtt_service: Optional[MQTTService] = None
     ) -> 'WeatherBackgroundWorker':
@@ -85,6 +87,27 @@ class WeatherBackgroundWorker:
             self._check_time_update_loop()
         )
 
+    def _update_device_status(self) -> DeviceStatus:
+        """Обновление статуса устройства на основе телеметрии"""
+        if self.current_telemetry is None:
+            new_status = DeviceStatus.NEVER_CONNECTED
+        else:
+            seconds_ago = (self._get_izhevsk_time() - self.current_telemetry.timestamp).total_seconds()
+            
+            if seconds_ago < 120:  # < 2 минут
+                new_status = DeviceStatus.ONLINE
+            elif seconds_ago < 300:  # 2-5 минут
+                new_status = DeviceStatus.OFFLINE
+            else:  # > 5 минут
+                new_status = DeviceStatus.DEAD
+        
+        # Логируем изменение статуса
+        if new_status != self.device_status:
+            logger.info(f"📱 Статус устройства изменился: {self.device_status.value} → {new_status.value}")
+            self.device_status = new_status
+        
+        return self.device_status
+
     async def _check_time_update_loop(self, timeout: float = 30.0):
         """
         Цикл синхронизации времени. Проверяет раз в сутки.
@@ -92,6 +115,11 @@ class WeatherBackgroundWorker:
         while self.is_running:
             try:
                 logger.info(f"⏰ Проверка синхронизации времени для {self.device_id}")
+
+                if not self.can_send_to_device():
+                    logger.warning(f"⚠️ Пропускаем синхронизацию времени: устройство {self.device_status.value}")
+                    await asyncio.sleep(self.update_time_interval)
+                    continue
                 
                 # 1. Проверяем, нужна ли синхронизация (прошло ли 7+ дней)
                 need_sync = await self.cache.should_sync_time(device_id=self.device_id)
@@ -170,44 +198,31 @@ class WeatherBackgroundWorker:
             logger.info(f"⏳ Жду {self.update_time_interval} сек до следующей проверки")
             await asyncio.sleep(self.update_time_interval)
 
+    def can_send_to_device(self) -> bool:
+        """Можно ли отправлять команды на устройство?"""
+        return self.device_status == DeviceStatus.ONLINE
+
     async def _check_heartbeat_esp_loop(self):
-        """Периодическая проверка работы устройства."""
-        logger.info("👁️ Начинаем мониторинг устройства greenhouse_01")
+        """Периодическая проверка статуса устройства"""
+        logger.info("👁️ Начинаем мониторинг устройства")
         
         while self.is_running:
             try:
+                old_status = self.device_status
+                new_status = self._update_device_status()
                 
-                # Получаем статус
-                status = self.mqtt_service.get_device_status(self.device_id)
+                # Логируем критические состояния
+                if new_status == DeviceStatus.DEAD and self.current_telemetry:
+                    seconds_ago = (self._get_izhevsk_time() - self.current_telemetry.timestamp).total_seconds()
+                    minutes_ago = int(seconds_ago / 60)
+                    logger.error(f"🚨 Устройство МЕРТВО {minutes_ago} минут!")
+                elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
+                    # Только что подключился
+                    logger.info(f"✅ Устройство ОНЛАЙН")
                 
-                if not status.get('online', False):
-                    # Устройство оффлайн
-                    seconds_ago = status.get('seconds_ago')
-                    last_seen = status.get('last_seen')
-                    
-                    if seconds_ago is not None:
-                        minutes_ago = int(seconds_ago / 60)
-                        if seconds_ago > 300:  # 5 минут
-                            logger.error(f"🚨 {self.device_id} ОФФЛАЙН {minutes_ago} минут!")
-                        else:
-                            logger.warning(f"⚠️ {self.device_id} оффлайн {seconds_ago:.0f} сек")
-                    else:
-                        if last_seen:
-                            logger.warning(f"⚠️ {self.device_id} оффлайн (последний раз: {last_seen})")
-                        else:
-                            logger.warning(f"⚠️ {self.device_id} никогда не подключался")
-                else:
-                    # Устройство онлайн - логируем реже
-                    seconds_ago = status.get('seconds_ago', 0)
-                    if seconds_ago and seconds_ago < 10:  # Только что подключился
-                        logger.info(f"✅ {self.device_id} подключился")
-                    elif int(asyncio.get_event_loop().time()) % 300 < 1:  # Каждые 5 минут
-                        logger.debug(f"✅ {self.device_id} онлайн ({seconds_ago:.0f} сек назад)")
-                        
             except Exception as e:
                 logger.exception(f"❌ Ошибка в проверке heartbeat: {e}")
-                # Не ломаем цикл при ошибке
-
+            
             await asyncio.sleep(self.heartbeat_interval)
 
     async def _update_weather_loop(self):
@@ -271,6 +286,11 @@ class WeatherBackgroundWorker:
     async def send_to_board_weather_from_cache(self):
         """Отправка данных на аппаратную плату"""
         try:
+
+            if not self.can_send_to_device():
+                logger.warning(f"⚠️ Пропускаем отправку погоды: устройство {self.device_status.value}")
+                return
+
             weather = await self.cache.get_cached_weather()
 
             if weather:
@@ -300,6 +320,11 @@ class WeatherBackgroundWorker:
     async def send_to_board_settings(self, settings: SettingsData):
         """Отправка настроек на аппаратную плату"""
         try:
+
+            if not self.can_send_to_device():
+                logger.warning(f"⚠️ Пропускаем отправку настроек: устройство {self.device_status.value}")
+                return
+
             if settings:
                 # Отправляем на плату 
                 await self.mqtt_service.send_config(
@@ -316,6 +341,11 @@ class WeatherBackgroundWorker:
     async def get_current_config(self, timeout: float = 5.0) -> Optional[SettingsData]:
         """Получить текущие настройки (синхронный запрос-ответ)"""
         try:
+            
+            if not self.can_send_to_device():
+                logger.warning(f"⚠️ Пропускаем получение настроек: устройство {self.device_status.value}")
+                return None
+
             # Подписываемся на ответ ПЕРЕД отправкой запроса
             response_future = asyncio.Future()
 

@@ -94,11 +94,11 @@ const char* password = "23598126";
 
 // MQTT брокер dotnetdon.ru
 const char* mqtt_server = "dotnetdon.ru";
-//const char* mqtt_server = "192.168.1.100";
+// const char* mqtt_server = "192.168.1.102";
 
 // Глобальные объекты
 WiFiClient wifiClient;
-SimpleMQTTManager mqtt(&wifiClient, mqtt_server, 1883);
+SimpleMQTTManager mqtt(&wifiClient, mqtt_server, 1883, "mqtt_user", "tWl9w9FwMskvpv7");
 
 // Топики на прием:
 // Бекенд прислал погоду
@@ -257,363 +257,9 @@ void setup() {
   loadSettingsInMemory();
   setupNetwork();
   showSplashScreen();
+  updateTime();
   needRedraw = true;
   Serial.println("Система успешно загружена.");
-}
-
-// Подключение к бекенду
-void setupNetwork(){
-
-  if (isOfflineModeActive) {
-    return;
-  }
-
-  lcd.clear();
-  
-  // Подключение к WiFi
-  if (!connectToWiFi()) {
-    // Если не удалось - работаем оффлайн
-    displayOfflineMode();
-    return;
-  }
-
-  // Подключение к MQTT
-  if (!connectToMQTT()) {
-    // Если MQTT не доступен - всё равно продолжаем
-    displayOnlineWithoutMQTT();
-  } else {
-    displayConnected();
-    setupMQTTHandlers();
-  }
-
-}
-
-// Подключение к WiFi (5 попыток)
-bool connectToWiFi() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("WiFi: ");
-  lcd.print(ssid);
-  
-  WiFi.begin(ssid, password);
-  delay(500);
-  
-  int attempts = 0;
-  const int maxAttempts = 5;
-  
-  while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
-    attempts++;
-    
-    lcd.createChar(7, bukva_P);
-    lcd.setCursor(0, 1);
-    lcd.print("\7O\7b|TKA ");
-    lcd.print(attempts);
-    lcd.print("/");
-    lcd.print(maxAttempts);
-    lcd.print("   ");
-    
-    // Простая анимация из 3 точек
-    for (int i = 0; i < 3; i++) {
-      lcd.setCursor(15, 1);
-      switch (i % 3) {
-        case 0: lcd.print(".  "); break;
-        case 1: lcd.print(".. "); break;
-        case 2: lcd.print("..."); break;
-      }
-      delay(500);
-    }
-  }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi: OK        ");
-    lcd.setCursor(0, 1);
-    lcd.print("IP: ");
-    lcd.print(WiFi.localIP());
-    delay(1500);
-    return true;
-  } else {
-    return false;
-  }
-}
-
-// Подключение к MQTT (5 попыток)
-bool connectToMQTT() {
-  lcd.clear();
-  lcd.createChar(7, bukva_B);
-  lcd.createChar(6, bukva_P);
-  lcd.createChar(5, bukva_D);
-  lcd.createChar(4, bukva_Y);
-  lcd.setCursor(0, 0);
-  lcd.print("MQTT \7POKEP");
-  
-  mqtt.setDeviceId("greenhouse_01");
-  
-  int attempts = 0;
-  const int maxAttempts = 5;
-  
-  while (attempts < maxAttempts) {
-    attempts++;
-    
-    lcd.setCursor(0, 1);
-    lcd.print("\6O\6b|TKA ");
-    lcd.print(attempts);
-    lcd.print("/5   ");
-    
-    if (mqtt.begin()) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("MQTT: OK       ");
-      lcd.setCursor(0, 1);
-      lcd.print("\7POKEP \5OCT\4\6EH");
-      delay(1500);
-      mqtt.loop();
-      return true;
-    }
-    
-    // Ждём 1 секунду перед следующей попыткой
-    if (attempts < maxAttempts) {
-      delay(1000);
-    }
-  }
-  
-  return false;
-}
-
-// Получить состояние bluetooth
-bool isBluetoothConnected() {
-  int stateValue = analogRead(A0);
-  float voltage = stateValue * (3.3 / 1024.0);
-  return (voltage > 2.5);
-}
-
-// Запросить погоду
-void requestForecast() {
-  // Если руками включен оффлайн режим или бекенд неактивен
-  if (isOfflineModeActive || mqtt.connected() == false) {
-    return;
-  }
-
-  mqtt.publish("weather/request", "{}");
-}
-
-// Режим офлайн (без WiFi)
-void displayOfflineMode() {
-  lcd.createChar(7, bukva_I);
-  lcd.createChar(6, bukva_D);
-  lcd.createChar(5, bukva_Y);
-  lcd.createChar(4, bukva_P);
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("HET CET\7");
-  lcd.setCursor(0, 1);
-  lcd.print("WiFi HE \6OCT\5\4EH");
-  delay(2000);
-}
-
-// Онлайн без MQTT
-void displayOnlineWithoutMQTT() {
-  lcd.createChar(7, bukva_I);
-  lcd.createChar(6, bukva_D);
-  lcd.createChar(5, bukva_Y);
-  lcd.createChar(4, bukva_P);
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("HET CET\7");
-  lcd.setCursor(0, 1);
-  lcd.print("MQTT HE \6OCT\5\4EH");
-  delay(1500);
-}
-
-// Успешное подключение ко всему
-void displayConnected() {
-  lcd.createChar(7, bukva_I);
-  lcd.createChar(6, bukva_G);
-  lcd.createChar(5, bukva_B);
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("BCE C\7CTEMb|: OK");
-  lcd.setCursor(0, 1);
-  lcd.print("\6OTOB K PA\5OTE");
-  delay(1500);
-}
-
-void setupMQTTHandlers() {
-
-  // Обработчик погоды на ESP32
-  mqtt.addHandler(weather_topic, [](const String& topic, const String& msg) {
-      
-      StaticJsonDocument<512> doc;
-      DeserializationError error = deserializeJson(doc, msg);
-      
-      if (error) {
-          return;
-      }
-      
-      current_weather.temp = doc["temp"];
-      current_weather.feels_like = doc["feels_like"];
-      current_weather.condition = doc["condition"].as<String>();
-      current_weather.humidity = doc["humidity"];
-      current_weather.wind_speed = doc["wind_speed"];
-      
-      // Прогноз
-      current_weather.morning_temp = doc["morning_temp"];
-      current_weather.day_temp = doc["day_temp"];
-      current_weather.evening_temp = doc["evening_temp"];
-      current_weather.night_temp = doc["night_temp"];
-      
-      // Время получения (сама плата ставит)
-      current_weather.received_at = millis();
-      current_weather.update_at = doc["update_at"].as<String>();
-  });
-  
-  // Установка настройек с бекенда
-  mqtt.addHandler(set_config_topic, [](const String& topic, const String& msg) {
-    settings.fromJSON(msg);
-    
-    loadSettingsInMemory();
-  });
-
-  // Бекенд просит актуальные настройки
-  mqtt.addHandler(get_config_topic, [](const String& topic, const String& msg) {
-
-    sendSettings();
-
-  });
-
-  // Бекенд высылает время
-  mqtt.addHandler(set_time_topic, [](const String& topic, const String& msg) {
-
-    StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, msg);
-    
-    if (error) {
-        return;
-    }
-
-    int year = doc["year"];      // 2024
-    int month = doc["month"];    // 3
-    int day = doc["day"];        // 25
-    int hour = doc["hour"];      // 18
-    int minute = doc["minute"];  // 45
-    int second = doc["second"];  // 30 (или 0)
-
-    rtc.adjust(DateTime(year, month, day, hour, minute, second));
-
-    mqtt.publish("time/ready", "{}");
-
-  });
-}
-
-void sendSettings() {
-
-  // Если руками включен оффлайн режим или бекенд неактивен
-  if (isOfflineModeActive || mqtt.connected() == false) {
-    return;
-  }
-
-  String json = settings.toJSON(false);
-  
-  mqtt.publish("config/update", json);
-
-}
-
-void sendTelemetry() {
-
-  // Если руками включен оффлайн режим или бекенд неактивен
-  if (isOfflineModeActive || mqtt.connected() == false) {
-    return;
-  }
-
-  StaticJsonDocument<512> doc;
-  
-  doc["temperature"] = tf;
-  doc["humidity"] = hf;
-  
-  // Системная информация
-  doc["uptime"] = millis() / 1000;
-  doc["free_memory"] = ESP.getFreeHeap();
-  
-  mqtt.publish("telemetry", doc);
-}
-
-// Показать стартовый экран
-void showSplashScreen() {
-  lcd.clear();
-  lcd.createChar(3, bukva_Ya);
-  lcd.createChar(4, bukva_I);
-  lcd.createChar(5, bukva_D);
-  lcd.createChar(6, bukva_IY);
-  lcd.createChar(7, bukva_Y);
-  lcd.setCursor(0, 0);
-  lcd.print("|------------------|");
-  lcd.setCursor(0, 1);
-  lcd.print("|    \7MHb|\6 \5OM    |");
-  lcd.setCursor(0, 2);
-  lcd.print("|    BEPC\4\3 2.0    |");
-  lcd.setCursor(0, 3);
-  lcd.print("|------------------|");
-  delay(2000);
-  lcd.clear();
-}
-
-// Инициализация кнопок
-void initButtons() {
-  pinMode(YELLOW_BUTTON_PIN, INPUT);  // LOW при нажатии
-  pinMode(GREEN_BUTTON_PIN, INPUT);          // HIGH при нажатии
-  
-  yellowBtn.lastState = digitalRead(YELLOW_BUTTON_PIN);
-  greenBtn.lastState = digitalRead(GREEN_BUTTON_PIN);
-}
-
-// Обновление состояния кнопок (без дебаунса)
-void updateButtons() {
-  // === ЖЕЛТАЯ КНОПКА (INPUT_PULLUP) ===
-  // LOW = нажата, HIGH = отпущена
-  bool yellowCurrent = digitalRead(YELLOW_BUTTON_PIN);
-  
-  // Если состояние изменилось
-  if (yellowCurrent != yellowBtn.lastState) {
-    // Если нажали (HIGH -> LOW)
-    if (yellowCurrent == HIGH && yellowBtn.lastState == LOW) {
-      yellowBtn.waitingRelease = true;
-    }
-    
-    // Если отпустили (LOW -> HIGH) И ждали отпускания
-    if (yellowCurrent == LOW && yellowBtn.lastState == HIGH && yellowBtn.waitingRelease) {
-      yellowPressed = true;
-      yellowBtn.waitingRelease = false;
-    }
-    
-    yellowBtn.lastState = yellowCurrent;
-  }
-  
-  // === ЗЕЛЕНАЯ КНОПКА (INPUT) ===
-  // HIGH = нажата, LOW = отпущена
-  bool greenCurrent = digitalRead(GREEN_BUTTON_PIN);
-  
-  // Если состояние изменилось
-  if (greenCurrent != greenBtn.lastState) {
-    // Если нажали (LOW -> HIGH)
-    if (greenCurrent == HIGH && greenBtn.lastState == LOW) {
-      greenBtn.waitingRelease = true;
-    }
-    
-    // Если отпустили (HIGH -> LOW) И ждали отпускания
-    if (greenCurrent == LOW && greenBtn.lastState == HIGH && greenBtn.waitingRelease) {
-      greenPressed = true;
-      greenBtn.waitingRelease = false;
-    }
-    
-    greenBtn.lastState = greenCurrent;
-  }
-}
-
-// Сброс флагов (вызывай после обработки)
-void resetButtonFlags() {
-  yellowPressed = false;
-  greenPressed = false;
 }
 
 // ===== ОСНОВНОЙ ЦИКЛ =====
@@ -636,6 +282,13 @@ void loop() {
     lcd.backlight();
     mainMenuFirst();
     return; // После вызова меню выходим из loop
+  }
+
+  static unsigned long lastTimeUpdate = 0;
+  // Обновляем время раз в секунду
+  if (millis() - lastTimeUpdate >= 1000) {
+    lastTimeUpdate = millis();
+    updateTime();  // Читаем из RTC
   }
   
   // 2. АВТОМАТИЧЕСКАЯ СМЕНА РЕЖИМОВ (раз в 10 секунд)
@@ -711,53 +364,180 @@ void loop() {
   }
 }
 
-// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+// ===== ФУНКЦИИ ОТОБРАЖЕНИЯ ============================================
 
-// Сброс таймера бездействия
-void resetInactivityTimer() {
-  timer = 0;
+// Режим офлайн (без WiFi)
+void displayOfflineMode() {
+  lcd.createChar(7, bukva_I);
+  lcd.createChar(6, bukva_D);
+  lcd.createChar(5, bukva_Y);
+  lcd.createChar(4, bukva_P);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("HET CET\7");
+  lcd.setCursor(0, 1);
+  lcd.print("WiFi HE \6OCT\5\4EH");
+  delay(2000);
 }
 
-// Обновление таймера бездействия
-void updateTimer() {
-  static unsigned long lastTimerUpdate = 0;
+// Онлайн без MQTT
+void displayOnlineWithoutMQTT() {
+  lcd.createChar(7, bukva_I);
+  lcd.createChar(6, bukva_D);
+  lcd.createChar(5, bukva_Y);
+  lcd.createChar(4, bukva_P);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("HET CET\7");
+  lcd.setCursor(0, 1);
+  lcd.print("MQTT HE \6OCT\5\4EH");
+  delay(1500);
+}
+
+// Успешное подключение ко всему
+void displayConnected() {
+  lcd.createChar(7, bukva_I);
+  lcd.createChar(6, bukva_G);
+  lcd.createChar(5, bukva_B);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("BCE C\7CTEMb|: OK");
+  lcd.setCursor(0, 1);
+  lcd.print("\6OTOB K PA\5OTE");
+  delay(1500);
+}
+
+// Показать стартовый экран
+void showSplashScreen() {
+  lcd.clear();
+  lcd.createChar(3, bukva_Ya);
+  lcd.createChar(4, bukva_I);
+  lcd.createChar(5, bukva_D);
+  lcd.createChar(6, bukva_IY);
+  lcd.createChar(7, bukva_Y);
+  lcd.setCursor(0, 0);
+  lcd.print("|------------------|");
+  lcd.setCursor(0, 1);
+  lcd.print("|    \7MHb|\6 \5OM    |");
+  lcd.setCursor(0, 2);
+  lcd.print("|    BEPC\4\3 2.0    |");
+  lcd.setCursor(0, 3);
+  lcd.print("|------------------|");
+  delay(2000);
+  lcd.clear();
+}
+
+// Отображение даты
+void printDate() {
+  String result = "";
   
-  if (millis() - lastTimerUpdate >= 1000) {
-    lastTimerUpdate = millis();
-    timer++;
+  // Добавляем день
+  if (Date < 10) result += " "; // Для выравнивания однозначных чисел
+  result += String(Date);
+  result += " ";
+  
+  // Месяц (будем создавать символы по частям)
+  switch(Month) {
+    case 1:  // январь
+      lcd.createChar(4, bukva_Ya);
+      result += "\4HBAP\4";     // Пример: символы 0,1,2 = "янв"
+      break;
+    case 2:  // февраль
+      lcd.createChar(4, bukva_F);
+      lcd.createChar(5, bukva_L);
+      lcd.createChar(6, bukva_Ya);
+      result += "\4EBPA\5\6";     // "фев"
+      break;
+    case 3:  // март
+      result += "MAPTA";   // "март"
+      break;
+    case 4:  // апрель
+      lcd.createChar(4, bukva_P);
+      lcd.createChar(5, bukva_Ya);
+      lcd.createChar(6, bukva_L);
+      result += "A\4PE\6\5"; // "апрел"
+      break;
+    case 5:  // май
+      lcd.createChar(4, bukva_Ya);
+      result += "MA\4";       // "ма"
+      break;
+    case 6:  // июнь bukva_I
+      lcd.createChar(4, bukva_I);
+      lcd.createChar(5, bukva_Ya);
+      result += "\4b|H\5";     // "июн"
+      break;
+    case 7:  // июль
+      lcd.createChar(4, bukva_I);
+      lcd.createChar(5, bukva_Ya);
+      lcd.createChar(6, bukva_L);
+      result += "\4b|\6\5";     // "июл"
+      break;
+    case 8:  // август
+      lcd.createChar(4, bukva_G);
+      lcd.createChar(5, bukva_Y);
+      result += "AB\4\5CTA"; // "авгус"
+      break;
+    case 9:  // сентябрь
+      lcd.createChar(4, bukva_Ya);
+      lcd.createChar(5, bukva_B);
+      result += "CEHT\4\5P\4";          // стандартный символ
+      break;
+    case 10: // октябрь
+      lcd.createChar(4, bukva_Ya);
+      lcd.createChar(5, bukva_B);
+      result += "OKT\4\5P\4";   // "октя"
+      break;
+    case 11: // ноябрь
+      lcd.createChar(4, bukva_Ya);
+      lcd.createChar(5, bukva_B);
+      result += "HO\4\5P\4";     // "ноя"
+      break;
+    case 12: // декабрь
+      lcd.createChar(4, bukva_Ya);
+      lcd.createChar(5, bukva_B);
+      lcd.createChar(6, bukva_D);
+      result += "\6EKA\5P\4";          // стандартный символ
+      break;
   }
-}
-
-// Чтение данных с датчиков
-void updateSensorData() {
-  sensors_event_t humidity, temp;
-  if (myAHT10.getEvent(&humidity, &temp)) {
-    h = hf = humidity.relative_humidity;
-    t = tf = temp.temperature;
-    needRedraw = true; // Помечаем для перерисовки при новых данных
+  
+  // Добавляем запятую
+  result += ", ";
+  
+  // День недели (тоже через кастомные символы)
+  switch(DayOf) {
+    case 0: // воскресенье
+      result += "BC";     // "вск"
+      break;
+    case 1: // понедельник
+      lcd.createChar(6, bukva_P);
+      result += "\6H";     // "пнд"
+      break;
+    case 2: // вторник
+      result += "BT";     // "втр"
+      break;
+    case 3: // среда
+      result += "CP";     // "срд"
+      break;
+    case 4: // четверг
+      lcd.createChar(6, bukva_CH);
+      result += "\6T";     // "чтв"
+      break;
+    case 5: // пятница
+      lcd.createChar(6, bukva_P);
+      result += "\6T";     // "птн"
+      break;
+    case 6: // суббота
+      lcd.createChar(6, bukva_B);
+      result += "C\6";     // "сбт"
+      break;
   }
+  
+  lcd.setCursor(2, 3);
+  lcd.print(result);
 }
-
-// Получение текущего времени
-void updateTime() {
-  DateTime now = rtc.now();
-
-  Hour = now.hour();
-  Minute = now.minute();
-  Second = now.second();
-
-  Date = now.day();          // День месяца (1-31)
-  Month = now.month();       // Месяц (1-12)
-  DayOf = now.dayOfTheWeek(); // День недели (0-6, где 0 = воскресенье)
-  Year = now.year();         // Год (например, 2023)
-}
-
-// ===== ФУНКЦИИ ОТОБРАЖЕНИЯ =====
 
 // Режим отображения времени
 void displayTimeMode() {
-  updateTime();
-  
   // Большие цифры времени
   bigNumbersLcd.printNumber(Hour/10, 2);
   bigNumbersLcd.printNumber(Hour%10, 6);
@@ -885,7 +665,7 @@ void displayForecastMode() {
 
 }
 
-
+// Отображение описание погоды
 void printTranslateWeather(String englishCondition) {
   englishCondition.toUpperCase();
 
@@ -1013,61 +793,7 @@ void printTranslateWeather(String englishCondition) {
   }
 }
 
-// Проверка условий на режимы экрана
-void displayLoop() {
-  
-  if (displayMode == 0) {
-    timer = 0;  
-    lcd.backlight();
-  }
-
-  if (displayMode  == 1) {                // Если "авто-режим" работы экрана включен
-      if (timer > displayTimeoutSeconds)                   // Если прошло ~10 секунд
-        lcd.noBacklight();              // Выключение подсветки дисплея
-  }
-
-  if (displayMode  == 2) {                     // Если включен "умный режим" дисплея, осуществим переключение между под режимами согласно времени суток
-    if (!(Hour >= dayRelay.startHour && (Hour != dayRelay.startHour || Minute >= dayRelay.startMinute) && Hour <= dayRelay.stopHour && (Hour != dayRelay.stopHour || Minute < dayRelay.stopMinute))) {  // Если ночь, то:
-      if(timer > displayTimeoutSeconds) lcd.noBacklight();                 // Если прошло ~10 секунд -  выключение подсветки дисплея   
-    } else {  
-      timer = 0;  
-      lcd.backlight();
-    }
-  }
-
-}
-
-// Проверка условий на включение\отключение реле ночь\день
-void relayLoop() {
-
-  if (isManualModeRelayEnabled) {                                     // Если активирован ручной режим
-    if (isNightRelayForcedOn) 
-      digitalWrite(RelayNightPin, LOW);    // Ночное реле замыкается
-    else 
-      digitalWrite(RelayNightPin, HIGH);      // Ночное реле размыкается
-    if (isDayRelayForcedOn) 
-      digitalWrite(RelayDayPin, LOW);    // Дневное реле замыкается
-    else 
-      digitalWrite(RelayDayPin, HIGH);            // Дневное реле размыкается
-  } else {                                        // Если работает автоматика
-    if (Hour >= dayRelay.startHour && (Hour != dayRelay.startHour || Minute >= dayRelay.startMinute) && Hour <= dayRelay.stopHour && (Hour != dayRelay.stopHour || Minute < dayRelay.stopMinute)) 
-      digitalWrite(RelayDayPin, LOW);   // Включаем дневной датчик
-    else 
-      digitalWrite(RelayDayPin, HIGH);   // Вылючаем дневной датчик
-    if (nightRelay.stopHour < Hour && Hour <= 23) {    // Если не вышли за границу дня
-      if (Hour >= nightRelay.startHour && (Hour != nightRelay.startHour || Minute >= nightRelay.startMinute)) 
-        digitalWrite(RelayNightPin, LOW);    // Включаем ночной датчик
-      else 
-        digitalWrite(RelayNightPin, HIGH);   // Выключаем ночной датчик
-    } else {
-      if(Hour <= nightRelay.stopHour && (Hour != nightRelay.stopHour || Minute < nightRelay.stopMinute)) 
-        digitalWrite(RelayNightPin, LOW);    // Включаем ночной датчик
-      else 
-        digitalWrite(RelayNightPin, HIGH);   // Выключаем ночной датчик
-    }      
-  } 
-
-}
+// ============ МЕНЮ =================================================
 
 // Меню. Мы сразу используем методы из settings для записи в энерогонезависимую память.
 // После вызываем settings.save() и loadSettingsInMemory() для синхронизации
@@ -1517,6 +1243,7 @@ void mainMenuSecond() {
 
 }
 
+// Отображение текущих параметров блока в уборной
 void bluetoothSettings() {
   
   lcd.clear();
@@ -1630,6 +1357,7 @@ void bluetoothSettings() {
 
 }
 
+// Меню настройки блока в уборной
 void setBluetoothTime() { 
 
   lcd.clear();
@@ -2085,8 +1813,314 @@ void settingsForAutoRelay() {
   }
 }
 
-// ---- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ------ //
+// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===========================================
 
+
+// Подключение к бекенду
+void setupNetwork(){
+
+  if (isOfflineModeActive) {
+    displayOfflineMode();
+    return;
+  }
+
+  lcd.clear();
+  
+  // Подключение к WiFi
+  if (!connectToWiFi()) {
+    // Если не удалось - работаем оффлайн
+    displayOfflineMode();
+    return;
+  }
+
+  // Подключение к MQTT
+  if (!connectToMQTT()) {
+    // Если MQTT не доступен - всё равно продолжаем
+    displayOnlineWithoutMQTT();
+  } else {
+    displayConnected();
+    setupMQTTHandlers();
+  }
+
+}
+
+// Подключение к WiFi (5 попыток)
+bool connectToWiFi() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi: ");
+  lcd.print(ssid);
+  
+  WiFi.begin(ssid, password);
+  delay(500);
+  
+  int attempts = 0;
+  const int maxAttempts = 5;
+  
+  while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
+    attempts++;
+    
+    lcd.createChar(7, bukva_P);
+    lcd.setCursor(0, 1);
+    lcd.print("\7O\7b|TKA ");
+    lcd.print(attempts);
+    lcd.print("/");
+    lcd.print(maxAttempts);
+    lcd.print("   ");
+    
+    // Простая анимация из 3 точек
+    for (int i = 0; i < 3; i++) {
+      lcd.setCursor(15, 1);
+      switch (i % 3) {
+        case 0: lcd.print(".  "); break;
+        case 1: lcd.print(".. "); break;
+        case 2: lcd.print("..."); break;
+      }
+      delay(500);
+    }
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("WiFi: OK        ");
+    lcd.setCursor(0, 1);
+    lcd.print("IP: ");
+    lcd.print(WiFi.localIP());
+    delay(1500);
+    return true;
+  } else {
+    return false;
+  }
+}
+
+// Подключение к MQTT (5 попыток)
+bool connectToMQTT() {
+  lcd.clear();
+  lcd.createChar(7, bukva_B);
+  lcd.createChar(6, bukva_P);
+  lcd.createChar(5, bukva_D);
+  lcd.createChar(4, bukva_Y);
+  lcd.setCursor(0, 0);
+  lcd.print("MQTT \7POKEP");
+  
+  mqtt.setDeviceId("greenhouse_01");
+  mqtt.begin();  // ← ОДИН РАЗ в начале!
+  
+  int attempts = 0;
+  const int maxAttempts = 5;
+  
+  while (attempts < maxAttempts) {
+    attempts++;
+    
+    lcd.setCursor(0, 1);
+    lcd.print("\6O\6b|TKA ");
+    lcd.print(attempts);
+    lcd.print("/5   ");
+    
+    // Даем 3 секунды на подключение, вызывая loop() много раз
+    unsigned long start = millis();
+    while (millis() - start < 3000) {
+      mqtt.loop();  // ← ВЫЗЫВАЕМ МНОГО РАЗ!
+      if (mqtt.connected()) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("MQTT: OK       ");
+        lcd.setCursor(0, 1);
+        lcd.print("\7POKEP \5OCT\4\6EH");
+        delay(1500);
+        return true;  // ← БЕЗ ДОПОЛНИТЕЛЬНОГО loop()
+      }
+      delay(10);
+    }
+    
+    // Не удалось за 3 секунды
+    if (attempts < maxAttempts) {
+      delay(1000);
+    }
+  }
+  
+  return false;
+}
+
+// Получить состояние bluetooth
+bool isBluetoothConnected() {
+  int stateValue = analogRead(A0);
+  float voltage = stateValue * (3.3 / 1024.0);
+  return (voltage > 2.5);
+}
+
+// Запросить погоду
+void requestForecast() {
+  // Если руками включен оффлайн режим или бекенд неактивен
+  if (isOfflineModeActive || mqtt.connected() == false) {
+    return;
+  }
+
+  mqtt.publish("weather/request", "{}");
+}
+
+// Установка обработчиков MQTT
+void setupMQTTHandlers() {
+
+  // Обработчик погоды на ESP32
+  mqtt.addHandler(weather_topic, [](const String& topic, const String& msg) {
+      
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, msg);
+      
+      if (error) {
+          return;
+      }
+      
+      current_weather.temp = doc["temp"];
+      current_weather.feels_like = doc["feels_like"];
+      current_weather.condition = doc["condition"].as<String>();
+      current_weather.humidity = doc["humidity"];
+      current_weather.wind_speed = doc["wind_speed"];
+      
+      // Прогноз
+      current_weather.morning_temp = doc["morning_temp"];
+      current_weather.day_temp = doc["day_temp"];
+      current_weather.evening_temp = doc["evening_temp"];
+      current_weather.night_temp = doc["night_temp"];
+      
+      // Время получения (сама плата ставит)
+      current_weather.received_at = millis();
+      current_weather.update_at = doc["update_at"].as<String>();
+  });
+  
+  // Установка настройек с бекенда
+  mqtt.addHandler(set_config_topic, [](const String& topic, const String& msg) {
+    settings.fromJSON(msg);
+    
+    loadSettingsInMemory();
+  });
+
+  // Бекенд просит актуальные настройки
+  mqtt.addHandler(get_config_topic, [](const String& topic, const String& msg) {
+
+    sendSettings();
+
+  });
+
+  // Бекенд высылает время
+  mqtt.addHandler(set_time_topic, [](const String& topic, const String& msg) {
+
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, msg);
+    
+    if (error) {
+        return;
+    }
+
+    int year = doc["year"];      // 2024
+    int month = doc["month"];    // 3
+    int day = doc["day"];        // 25
+    int hour = doc["hour"];      // 18
+    int minute = doc["minute"];  // 45
+    int second = doc["second"];  // 30 (или 0)
+
+    rtc.adjust(DateTime(year, month, day, hour, minute, second));
+
+    mqtt.publish("time/ready", "{}");
+
+  });
+}
+
+// Отправка настроек
+void sendSettings() {
+
+  // Если руками включен оффлайн режим или бекенд неактивен
+  if (isOfflineModeActive || mqtt.connected() == false) {
+    return;
+  }
+
+  String json = settings.toJSON(false);
+  
+  mqtt.publish("config/update", json);
+
+}
+
+// Отправка телеметрии
+void sendTelemetry() {
+
+  // Если руками включен оффлайн режим или бекенд неактивен
+  if (isOfflineModeActive || mqtt.connected() == false) {
+    return;
+  }
+
+  StaticJsonDocument<512> doc;
+  
+  doc["temperature"] = tf;
+  doc["humidity"] = hf;
+  
+  // Системная информация
+  doc["uptime"] = millis() / 1000;
+  doc["free_memory"] = ESP.getFreeHeap();
+  
+  mqtt.publish("telemetry", doc);
+}
+
+// Инициализация кнопок
+void initButtons() {
+  pinMode(YELLOW_BUTTON_PIN, INPUT);  // LOW при нажатии
+  pinMode(GREEN_BUTTON_PIN, INPUT);          // HIGH при нажатии
+  
+  yellowBtn.lastState = digitalRead(YELLOW_BUTTON_PIN);
+  greenBtn.lastState = digitalRead(GREEN_BUTTON_PIN);
+}
+
+// Обновление состояния кнопок (без дебаунса)
+void updateButtons() {
+  // === ЖЕЛТАЯ КНОПКА (INPUT_PULLUP) ===
+  // LOW = нажата, HIGH = отпущена
+  bool yellowCurrent = digitalRead(YELLOW_BUTTON_PIN);
+  
+  // Если состояние изменилось
+  if (yellowCurrent != yellowBtn.lastState) {
+    // Если нажали (HIGH -> LOW)
+    if (yellowCurrent == HIGH && yellowBtn.lastState == LOW) {
+      yellowBtn.waitingRelease = true;
+    }
+    
+    // Если отпустили (LOW -> HIGH) И ждали отпускания
+    if (yellowCurrent == LOW && yellowBtn.lastState == HIGH && yellowBtn.waitingRelease) {
+      yellowPressed = true;
+      yellowBtn.waitingRelease = false;
+    }
+    
+    yellowBtn.lastState = yellowCurrent;
+  }
+  
+  // === ЗЕЛЕНАЯ КНОПКА (INPUT) ===
+  // HIGH = нажата, LOW = отпущена
+  bool greenCurrent = digitalRead(GREEN_BUTTON_PIN);
+  
+  // Если состояние изменилось
+  if (greenCurrent != greenBtn.lastState) {
+    // Если нажали (LOW -> HIGH)
+    if (greenCurrent == HIGH && greenBtn.lastState == LOW) {
+      greenBtn.waitingRelease = true;
+    }
+    
+    // Если отпустили (HIGH -> LOW) И ждали отпускания
+    if (greenCurrent == LOW && greenBtn.lastState == HIGH && greenBtn.waitingRelease) {
+      greenPressed = true;
+      greenBtn.waitingRelease = false;
+    }
+    
+    greenBtn.lastState = greenCurrent;
+  }
+}
+
+// Сброс флагов (вызывай после обработки)
+void resetButtonFlags() {
+  yellowPressed = false;
+  greenPressed = false;
+}
+
+// Загрузка данных из json в оперативную память.
 void loadSettingsInMemory() {
 
   // Режим работы дисплея:
@@ -2137,6 +2171,108 @@ void loadSettingsInMemory() {
 
 }
 
+// Проверка условий на включение\отключение реле ночь\день
+void relayLoop() {
+  if (isManualModeRelayEnabled) {
+    digitalWrite(RelayNightPin, isNightRelayForcedOn ? LOW : HIGH);
+    digitalWrite(RelayDayPin, isDayRelayForcedOn ? LOW : HIGH);
+  } else {
+    // Дневное реле
+    bool dayOn = false;
+    if (Hour > dayRelay.startHour || (Hour == dayRelay.startHour && Minute >= dayRelay.startMinute)) {
+      if (Hour < dayRelay.stopHour || (Hour == dayRelay.stopHour && Minute < dayRelay.stopMinute)) {
+        dayOn = true;
+      }
+    }
+    digitalWrite(RelayDayPin, dayOn ? LOW : HIGH);
+    
+    // Ночное реле (с поддержкой перехода через полночь)
+    bool nightOn = false;
+    
+    // Если ночное время не переходит через полночь
+    if (nightRelay.startHour < nightRelay.stopHour) {
+      if (Hour > nightRelay.startHour || (Hour == nightRelay.startHour && Minute >= nightRelay.startMinute)) {
+        if (Hour < nightRelay.stopHour || (Hour == nightRelay.stopHour && Minute < nightRelay.stopMinute)) {
+          nightOn = true;
+        }
+      }
+    } 
+    // Если ночное время переходит через полночь (например 22:00-06:00)
+    else {
+      if (Hour > nightRelay.startHour || (Hour == nightRelay.startHour && Minute >= nightRelay.startMinute) ||
+          Hour < nightRelay.stopHour || (Hour == nightRelay.stopHour && Minute < nightRelay.stopMinute)) {
+        nightOn = true;
+      }
+    }
+    
+    digitalWrite(RelayNightPin, nightOn ? LOW : HIGH);
+  }
+}
+
+// Сброс таймера бездействия
+void resetInactivityTimer() {
+  timer = 0;
+}
+
+// Проверка условий на режимы экрана
+void displayLoop() {
+  
+  if (displayMode == 0) {
+    timer = 0;  
+    lcd.backlight();
+  }
+
+  if (displayMode  == 1) {                // Если "авто-режим" работы экрана включен
+      if (timer > displayTimeoutSeconds)                   // Если прошло ~10 секунд
+        lcd.noBacklight();              // Выключение подсветки дисплея
+  }
+
+  if (displayMode  == 2) {                     // Если включен "умный режим" дисплея, осуществим переключение между под режимами согласно времени суток
+    if (!(Hour >= dayRelay.startHour && (Hour != dayRelay.startHour || Minute >= dayRelay.startMinute) && Hour <= dayRelay.stopHour && (Hour != dayRelay.stopHour || Minute < dayRelay.stopMinute))) {  // Если ночь, то:
+      if(timer > displayTimeoutSeconds) lcd.noBacklight();                 // Если прошло ~10 секунд -  выключение подсветки дисплея   
+    } else {  
+      timer = 0;  
+      lcd.backlight();
+    }
+  }
+
+}
+
+// Обновление таймера бездействия
+void updateTimer() {
+  static unsigned long lastTimerUpdate = 0;
+  
+  if (millis() - lastTimerUpdate >= 1000) {
+    lastTimerUpdate = millis();
+    timer++;
+  }
+}
+
+// Чтение данных с датчиков
+void updateSensorData() {
+  sensors_event_t humidity, temp;
+  if (myAHT10.getEvent(&humidity, &temp)) {
+    h = hf = humidity.relative_humidity;
+    t = tf = temp.temperature;
+    needRedraw = true; // Помечаем для перерисовки при новых данных
+  }
+}
+
+// Получение текущего времени
+void updateTime() {
+  DateTime now = rtc.now();
+
+  Hour = now.hour();
+  Minute = now.minute();
+  Second = now.second();
+
+  Date = now.day();          // День месяца (1-31)
+  Month = now.month();       // Месяц (1-12)
+  DayOf = now.dayOfTheWeek(); // День недели (0-6, где 0 = воскресенье)
+  Year = now.year();         // Год (например, 2023)
+}
+
+// Отправить данные по bluetooth
 void sendToBluetooth() {
   Serial.print("S(");
   Serial.print(fanDelay);
@@ -2161,114 +2297,7 @@ void sendToBluetooth() {
   Serial.print(")");
 }
 
-void printDate() {
-  String result = "";
-  
-  // Добавляем день
-  if (Date < 10) result += " "; // Для выравнивания однозначных чисел
-  result += String(Date);
-  result += " ";
-  
-  // Месяц (будем создавать символы по частям)
-  switch(Month) {
-    case 1:  // январь
-      lcd.createChar(4, bukva_Ya);
-      result += "\4HBAP\4";     // Пример: символы 0,1,2 = "янв"
-      break;
-    case 2:  // февраль
-      lcd.createChar(4, bukva_F);
-      lcd.createChar(5, bukva_L);
-      lcd.createChar(6, bukva_Ya);
-      result += "\4EBPA\5\6";     // "фев"
-      break;
-    case 3:  // март
-      result += "MAPTA";   // "март"
-      break;
-    case 4:  // апрель
-      lcd.createChar(4, bukva_P);
-      lcd.createChar(5, bukva_Ya);
-      lcd.createChar(6, bukva_L);
-      result += "A\4PE\6\5"; // "апрел"
-      break;
-    case 5:  // май
-      lcd.createChar(4, bukva_Ya);
-      result += "MA\4";       // "ма"
-      break;
-    case 6:  // июнь bukva_I
-      lcd.createChar(4, bukva_I);
-      lcd.createChar(5, bukva_Ya);
-      result += "\4b|H\5";     // "июн"
-      break;
-    case 7:  // июль
-      lcd.createChar(4, bukva_I);
-      lcd.createChar(5, bukva_Ya);
-      lcd.createChar(6, bukva_L);
-      result += "\4b|\6\5";     // "июл"
-      break;
-    case 8:  // август
-      lcd.createChar(4, bukva_G);
-      lcd.createChar(5, bukva_Y);
-      result += "AB\4\5CTA"; // "авгус"
-      break;
-    case 9:  // сентябрь
-      lcd.createChar(4, bukva_Ya);
-      lcd.createChar(5, bukva_B);
-      result += "CEHT\4\5P\4";          // стандартный символ
-      break;
-    case 10: // октябрь
-      lcd.createChar(4, bukva_Ya);
-      lcd.createChar(5, bukva_B);
-      result += "OKT\4\5P\4";   // "октя"
-      break;
-    case 11: // ноябрь
-      lcd.createChar(4, bukva_Ya);
-      lcd.createChar(5, bukva_B);
-      result += "HO\4\5P\4";     // "ноя"
-      break;
-    case 12: // декабрь
-      lcd.createChar(4, bukva_Ya);
-      lcd.createChar(5, bukva_B);
-      lcd.createChar(6, bukva_D);
-      result += "\6EKA\5P\4";          // стандартный символ
-      break;
-  }
-  
-  // Добавляем запятую
-  result += ", ";
-  
-  // День недели (тоже через кастомные символы)
-  switch(DayOf) {
-    case 0: // воскресенье
-      result += "BC";     // "вск"
-      break;
-    case 1: // понедельник
-      lcd.createChar(6, bukva_P);
-      result += "\6H";     // "пнд"
-      break;
-    case 2: // вторник
-      result += "BT";     // "втр"
-      break;
-    case 3: // среда
-      result += "CP";     // "срд"
-      break;
-    case 4: // четверг
-      lcd.createChar(6, bukva_CH);
-      result += "\6T";     // "чтв"
-      break;
-    case 5: // пятница
-      lcd.createChar(6, bukva_P);
-      result += "\6T";     // "птн"
-      break;
-    case 6: // суббота
-      lcd.createChar(6, bukva_B);
-      result += "C\6";     // "сбт"
-      break;
-  }
-  
-  lcd.setCursor(2, 3);
-  lcd.print(result);
-}
-
+// Установить время для реле
 void relaySetTime(int hour, int minute, int minLimit, int highLimit, byte paramIndex) {  
   
   boolean x = true;
@@ -2571,6 +2600,7 @@ void setTime() {
   timer = 0;
 }
 
+// Установить таймаут экрана
 byte functionSet(int Param, int limit, byte interval) {
 
   needRedraw = true; 

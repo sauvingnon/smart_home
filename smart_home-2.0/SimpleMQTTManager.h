@@ -25,6 +25,8 @@ private:
   String deviceId;
   String mqttServer;
   int mqttPort;
+  String mqttUser;
+  String mqttPassword;
   
   TopicHandler handlers[MAX_HANDLERS];
   int handlerCount = 0;
@@ -37,7 +39,11 @@ private:
   void resubscribeAll();
   
 public:
-  SimpleMQTTManager(WiFiClient* wifi, const String& server, int port = 1883);
+  SimpleMQTTManager(WiFiClient* wifi, 
+                    const String& server, 
+                    int port = 1883,
+                    const String& user = "",
+                    const String& password = "");
   ~SimpleMQTTManager();
   
   void setDeviceId(const String& id);

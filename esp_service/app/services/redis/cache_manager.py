@@ -7,7 +7,7 @@ from logger import logger
 import asyncio
 
 # =================== КЭШ МЕНЕДЖЕР ===================
-class WeatherCacheManager:
+class CacheManager:
     """Управление кэшированием погодных данных"""
     
     def __init__(self, redis_url: str):
@@ -42,9 +42,53 @@ class WeatherCacheManager:
         
         return False
     
+    async def disconnect(self):
+        """Корректное отключение от Redis"""
+        if self.redis_client:
+            try:
+                await self.redis_client.close()
+                await self.redis_client.wait_closed()
+                logger.info("✅ Redis соединение закрыто")
+            except Exception as e:
+                logger.error(f"Ошибка при отключении от Redis: {e}")
+            finally:
+                self.redis_client = None
+    
+    async def __aenter__(self):
+        """Для использования с async context manager"""
+        await self.connect()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Автоматическое закрытие при выходе из контекста"""
+        await self.disconnect()
+
+    async def is_connected(self) -> bool:
+        """Проверка что соединение с Redis активно"""
+        if not self.redis_client:
+            return False
+        try:
+            return await self.redis_client.ping()
+        except:
+            return False
+        
+    async def _ensure_connection(self) -> bool:
+        """Проверка и восстановление соединения при необходимости"""
+        if not await self.is_connected():
+            logger.warning("Соединение с Redis потеряно, переподключаемся...")
+            success = await self.connect(max_retries=3, retry_delay=1)
+            if not success:
+                logger.error("Не удалось восстановить соединение с Redis")
+                return False
+        
+        return self.redis_client is not None
+    
     async def get_cached_weather(self) -> Optional[WeatherData]:
         """Получение данных из кэша"""
         if not self.redis_client:
+            return None
+        
+        if not await self._ensure_connection():
             return None
         
         try:
@@ -65,6 +109,9 @@ class WeatherCacheManager:
         """Сохранение данных в кэш"""
         if not self.redis_client:
             return
+        
+        if not await self._ensure_connection():
+            return
             
         try:
             # Сохраняем на 10 минут
@@ -84,6 +131,9 @@ class WeatherCacheManager:
         """Получение количества вызовов API за сегодня"""
         if not self.redis_client:
             return 0
+        
+        if not await self._ensure_connection():
+            return 0
             
         today = datetime.now().strftime("%Y-%m-%d")
         calls = await self.redis_client.get(f"api_calls:{today}")
@@ -95,6 +145,10 @@ class WeatherCacheManager:
         Проверяет, нужно ли синхронизировать время устройства.
         """
         if not self.redis_client:
+            logger.warning("Redis не подключен, считаем что синхронизация нужна")
+            return True
+        
+        if not await self._ensure_connection():
             logger.warning("Redis не подключен, считаем что синхронизация нужна")
             return True
         
@@ -133,6 +187,10 @@ class WeatherCacheManager:
         Отмечает успешную синхронизацию времени устройства.
         """
         if not self.redis_client:
+            logger.warning("Redis не подключен, не могу сохранить время синхронизации")
+            return
+        
+        if not await self._ensure_connection():
             logger.warning("Redis не подключен, не могу сохранить время синхронизации")
             return
         

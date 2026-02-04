@@ -8,6 +8,7 @@ from datetime import datetime
 from logger import logger
 from app.schemas.settings import SettingsData
 from config import MQTT_USERNAME, MQTT_PASSWORD
+from aiomqtt import Client, Message, MqttError
 
 class MQTTService:
     """
@@ -121,10 +122,6 @@ class MQTTService:
                 
             device_id = parts[0]  # "esp"
             topic_type = "/".join(parts[1:])  # "telemetry", "config/update" и т.д.
-            
-            # Обновляем время последнего heartbeat
-            if topic_type == "telemetry":
-                self.last_heartbeats[device_id] = datetime.now()
             
             # Вызываем соответствующий callback с device_id
             if topic_type == "telemetry" and self.callbacks["telemetry"]:
@@ -246,34 +243,6 @@ class MQTTService:
         if "{device_id}" in topic_template:
             return topic_template.format(device_id=device_id)
         return topic_template
-            
-   # ========== МЕТОДЫ ДЛЯ МОНИТОРИНГА ==========
-
-    def get_device_status(self, device_id: str = None) -> Dict:
-        """Получить статус устройства"""
-        if device_id is None:
-            device_id = self.device_id
-        
-        if device_id not in self.last_heartbeats:
-            return {
-                "online": False, 
-                "last_seen": None, 
-                "seconds_ago": 0,  # Большое число вместо None
-                "device_id": device_id,
-                "status": "never_connected"
-            }
-        
-        last_seen = self.last_heartbeats[device_id]
-        now = datetime.now()
-        seconds_ago = (now - last_seen).total_seconds()
-        
-        return {
-            "online": seconds_ago < 120, # 2 минуты
-            "last_seen": last_seen.isoformat(),
-            "seconds_ago": seconds_ago,  # Всегда число
-            "device_id": device_id,
-            "status": "online" if seconds_ago < 120 else "offline"
-        }
     
     # ========== CALLBACK УСТАНОВКА ==========
 
@@ -294,7 +263,7 @@ class MQTTService:
 
     def remove_settings_callback(self):
         """Удалить обработчик настроек от платы."""
-        self.callbacks["telemetry"] = None
+        self.callbacks["config_update"] = None
         logger.info("✅ Удален обработчик настроек")
     
     def set_telemetry_callback(self, callback: Callable):
@@ -340,7 +309,7 @@ class MQTTService:
         except asyncio.CancelledError:
             logger.info("📭 Прослушивание MQTT остановлено")
             
-        except aiomqtt.MqttError as e:
+        except MqttError as e:
             logger.exception(f"❌ Ошибка MQTT соединения: {e}")
             self.is_connected = False
             

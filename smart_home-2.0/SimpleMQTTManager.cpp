@@ -2,8 +2,11 @@
 
 SimpleMQTTManager::SimpleMQTTManager(WiFiClient* wifi, 
                                      const String& server, 
-                                     int port) 
-  : wifiClient(wifi), mqttServer(server), mqttPort(port) {
+                                     int port,
+                                     const String& user,
+                                     const String& password) 
+  : wifiClient(wifi), mqttServer(server), mqttPort(port),
+    mqttUser(user), mqttPassword(password) {
   mqttClient = new PubSubClient(*wifiClient);
 }
 
@@ -47,21 +50,36 @@ bool SimpleMQTTManager::begin() {
 }
 
 bool SimpleMQTTManager::tryConnect() {
-  if (deviceId.isEmpty()) {
-    deviceId = "ESP_" + String(ESP.getChipId(), HEX);
-  }
   
-  String clientId = deviceId + "_" + String(random(0xffff), HEX);
+  String clientId = deviceId;
   
   unsigned long start = millis();
   bool connected = false;
   
-  // БЫСТРАЯ попытка подключения с таймаутом
   while (millis() - start < CONNECT_TIMEOUT) {
-    connected = mqttClient->connect(clientId.c_str());
+    // +++ ДОБАВЬ ЭТОТ БЛОК +++
+    if (mqttUser.length() > 0 && mqttPassword.length() > 0) {
+      // Подключение с аутентификацией
+      connected = mqttClient->connect(
+        clientId.c_str(), 
+        mqttUser.c_str(), 
+        mqttPassword.c_str()
+      );
+      Serial.print("[MQTT] Connecting as: ");
+      Serial.print(clientId);
+      Serial.print(" with user: ");
+      Serial.print(mqttUser);
+      Serial.print(" password: ");
+      Serial.println(mqttPassword.length() > 0 ? "***" : "(empty)");
+    } else {
+      // Подключение без аутентификации (старый код)
+      connected = mqttClient->connect(clientId.c_str());
+    }
+    // +++ КОНЕЦ БЛОКА +++
+    
     if (connected) break;
     
-    yield(); // ОБЯЗАТЕЛЬНО!
+    yield();
     delay(10);
   }
   
@@ -89,44 +107,18 @@ void SimpleMQTTManager::resubscribeAll() {
 }
 
 bool SimpleMQTTManager::loop() {
-  unsigned long now = millis();
+  // ВСЕГДА вызываем loop() клиента - он сам разберется
+  bool clientOk = mqttClient->loop();
   
-  // ===== 1. ТОЛЬКО СТАТУС, БЕЗ ПОДКЛЮЧЕНИЯ =====
+  // Обновляем статус ПОСЛЕ вызова loop()
   isConnected = mqttClient->connected();
   
-  // ===== 2. ЕСЛИ ПОДКЛЮЧЕНЫ - обрабатываем сообщения =====
-  if (isConnected) {
-    // Быстрая обработка с yield
-    unsigned long start = millis();
-    while (millis() - start < 20 && mqttClient->loop()) {
-      yield();
-      delay(1);
-    }
-  }
-  
-  // ===== 3. ПОДКЛЮЧЕНИЕ ТОЛЬКО РАЗ В 15 СЕКУНД =====
+  // ТОЛЬКО если отключены, пробуем переподключиться
   static unsigned long lastConnectTry = 0;
-  if (!isConnected && now - lastConnectTry > 15000) { // Раз в 15 секунд!
-    lastConnectTry = now;
-    
-    // Быстрая попытка с yield
-    Serial.println("[MQTT] Attempting connection...");
-    if (deviceId.isEmpty()) {
-      deviceId = "ESP_" + String(ESP.getChipId(), HEX);
-    }
-    
-    String clientId = deviceId + "_" + String(random(0xffff), HEX);
-    
-    // Пытаемся быстро
-    bool success = mqttClient->connect(clientId.c_str());
-    
-    if (success) {
-      Serial.println("[MQTT] Connected!");
-      isConnected = true;
-      resubscribeAll();
-    } else {
-      Serial.println("[MQTT] Failed (will retry in 15s)");
-    }
+  if (!isConnected && millis() - lastConnectTry > 15000) {
+    lastConnectTry = millis();
+    Serial.println("[MQTT] Reconnecting...");
+    tryConnect();
   }
   
   yield();
@@ -213,22 +205,6 @@ bool SimpleMQTTManager::publish(const String& topic, const String& message) {
   Serial.println("=== END DEBUG ===\n");
   return result;
 }
-
-// bool SimpleMQTTManager::publish(const String& topic, const String& message) {
-//   if (!isConnected) return false;
-  
-//   String fullTopic = deviceId + "/" + topic;
-//   bool result = mqttClient->publish(fullTopic.c_str(), message.c_str(), true); // retain=true
-  
-//   if (result) {
-//     Serial.print("[MQTT] TX: ");
-//     Serial.print(fullTopic);
-//     Serial.print(" -> ");
-//     Serial.println(message);
-//   }
-  
-//   return result;
-// }
 
 bool SimpleMQTTManager::publish(const String& topic, const JsonDocument& doc) {
   String json;

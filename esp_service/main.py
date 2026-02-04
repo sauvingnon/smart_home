@@ -2,8 +2,10 @@
 from fastapi import FastAPI
 from logger import logger
 import asyncio
+import signal
+import sys
 from contextlib import asynccontextmanager
-from app.services.redis.cache_manager import WeatherCacheManager
+from app.services.redis.cache_manager import CacheManager
 from app.services.weather_service.yandex_weather import WeatherService
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.core.worker import WeatherBackgroundWorker
@@ -20,7 +22,7 @@ async def lifespan(app: FastAPI):
     
     try:
         # 1. Redis
-        cache_manager = WeatherCacheManager(REDIS_URL)
+        cache_manager = CacheManager(REDIS_URL)
         await cache_manager.connect()
         app.state.cache_manager = cache_manager
         logger.info("✅ Redis подключен")
@@ -61,32 +63,55 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Оркестратор стартовал.")
         
         logger.info("🚀 Все сервисы запущены")
+
+        yield
+
+    finally:
+        # Остановка
+        logger.info("🛑 Останавливаем сервис...")
         
-    except Exception as e:
-        logger.error(f"❌ Ошибка запуска: {e}")
-        raise
-    
-    yield
-    
-    # Остановка
-    logger.info("🛑 Останавливаем сервис...")
-    
-    for task in tasks:
-        task.cancel()
+        # 1. Останавливаем все задачи
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    logger.warning(f"Задача {task.get_name()} не завершилась корректно")
+                except Exception as e:
+                    logger.error(f"Ошибка при остановке задачи: {e}")
+        
+        # 2. Останавливаем сервисы в правильном порядке (обратном запуску)
+        stop_errors = []
+        
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
-    
-    if hasattr(app.state, 'worker'):
-        await app.state.worker.stop()
-    
-    if hasattr(app.state, 'mqtt_service'):
-        await app.state.mqtt_service.disconnect()
-    
-    logger.info("✅ Сервис остановлен")
+            if hasattr(app.state, 'worker'):
+                await app.state.worker.stop()
+        except Exception as e:
+            stop_errors.append(f"worker: {e}")
+        
+        try:
+            if hasattr(app.state, 'mqtt_service'):
+                await app.state.mqtt_service.disconnect()
+        except Exception as e:
+            stop_errors.append(f"mqtt_service: {e}")
+        
+        try:
+            if hasattr(app.state, 'cache_manager'):
+                await app.state.cache_manager.disconnect()
+        except Exception as e:
+            stop_errors.append(f"cache_manager: {e}")
+        
+        if stop_errors:
+            logger.error(f"Ошибки при остановке: {stop_errors}")
+        else:
+            logger.info("✅ Сервис остановлен корректно")
 
 app = FastAPI(lifespan=lifespan, title="ESP Ядро")
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 app.include_router(telemetry.router)
 app.include_router(settings.router)

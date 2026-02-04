@@ -2,10 +2,15 @@ services:
   redis:
     image: redis:alpine
     container_name: esp_redis
-    ports:
-      - "6379:6379"
+    # он нужен только в контейнерной сети. наружу не пробрасывать!
+    # ports:
+    #   - "6379:6379"
     volumes:
       - redis_data:/data
+    restart: unless-stopped
+    mem_limit: 100m
+    mem_reservation: 50m
+    cpus: "0.5"
     healthcheck:
       test: ["CMD", "redis-cli", "--no-auth-warning", "ping"]
       interval: 5s
@@ -14,6 +19,11 @@ services:
       start_period: 10s
     networks:
       - internal
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   mqtt-broker:
     image: eclipse-mosquitto:latest
@@ -21,31 +31,58 @@ services:
       - ./mosquitto/config/.env 
     container_name: mosquitto
     restart: unless-stopped
+    mem_limit: 100m
+    mem_reservation: 50m
+    cpus: "0.5"
     networks:
       - internal
     ports:
+    # Порт нужен наружу для ESP, и стоит авторизация по паролю
+    # Переменные авторизации в .env и ставяться через скрипт
       - "1883:1883"
-      - "9001:9001"
+    # Мы не используем WebSocket. У нас TCP
+      # - "9001:9001"
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
       - ./mosquitto/config/init-mosquitto.sh:/init-mosquitto.sh:ro
     command: ["/init-mosquitto.sh"]
+    healthcheck:
+      test: timeout 5 mosquitto_sub -t '$$SYS/broker/uptime' -u $${MQTT_USERNAME} -P $${MQTT_PASSWORD} -C 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+      
 
   esp_loki:
     image: grafana/loki:3.0.0
     container_name: esp_loki
-    ports:
-      - "3100:3100"
+    # ports:
+      # Не нужен извне, графана и так с ним в контейнерной сети
+      # - "3100:3100"
+    mem_limit: 200m
+    mem_reservation: 100m
+    cpus: "0.5"
     command: 
       - -config.file=/etc/loki/local-config.yaml
     volumes:
       - loki_data:/loki
-      - ./loki-local-config.yaml:/etc/loki/local-config.yaml
+      - ./loki-local-config.yaml:/etc/loki/local-config.yaml:ro
     restart: unless-stopped
     networks:
       - internal
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"      # логи могут быть больше
+        max-file: "3"
 
   esp_service:
     build: ./esp_service
@@ -60,10 +97,17 @@ services:
         condition: service_started
     networks:
       - internal
-    ports:
-      - "8005:8005"
-    mem_limit: 300m
+    # ports:
+    # Мы не даем Web API, все через бота, а бот тоже в контейнерной сети
+      # - "8005:8005"
+    mem_limit: 200m
     cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   esp_tg_bot: 
     build: ./esp_tg_bot
@@ -79,11 +123,19 @@ services:
     mem_limit: 200m
     cpus: "0.5"
     command: python main.py
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep 'python.*main.py' | grep -v grep | wc -l | grep -q '^1$'"]
+      interval: 60s  # боту можно реже проверять
+      timeout: 10s
+      retries: 2
+      start_period: 30s  # боту нужно больше времени на старт
 
   esp_grafana:
     image: grafana/grafana:latest
     container_name: esp_grafana
     ports: 
+    # Даем ей выход, порт 3000 занят remnawave, поэтому даем 3001 для просмотра логов,
+    # У графаны есть авторизация, включил. Но она по http, нужен переход на https
       - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -91,6 +143,9 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     restart: unless-stopped
+    mem_limit: 150m          # ← ДОБАВИТЬ
+    mem_reservation: 75m
+    cpus: "0.5"
     depends_on:
       esp_loki:
         condition: service_started 
@@ -105,13 +160,16 @@ services:
   esp_promtail:
     image: grafana/promtail:3.0.0
     container_name: esp_promtail
+    restart: unless-stopped
+    mem_limit: 100m
+    mem_reservation: 50m
+    cpus: "0.5"
     command: 
       - -config.file=/etc/promtail/config.yaml
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - ./promtail-config.yaml:/etc/promtail/config.yaml
-    restart: unless-stopped
+      - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
     depends_on:
       esp_service:
         condition: service_started
@@ -132,6 +190,5 @@ volumes:
 
 networks:
   internal:
-    name: internal
+    name: esp_internal_network
     driver: bridge
-  # 
