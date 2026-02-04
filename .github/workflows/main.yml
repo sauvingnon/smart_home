@@ -63,7 +63,7 @@ jobs:
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
               echo '${{ secrets.ESP_TG_BOT_ENV_FILE }}' > /srv/esp_system/esp_tg_bot/.env &&
               echo '${{ secrets.ESP_SERVICE_ENV_FILE }}' > /srv/esp_system/esp_service/.env &&
-              echo '${{ secrets.MQTT_BROKER_ENV_FILE }}' > /src/esp_system/mosquitto/config/.env
+              echo '${{ secrets.MQTT_BROKER_ENV_FILE }}' > /srv/esp_system/mosquitto/config/.env
             "
       - name: Deploy over SSH
         run: |
