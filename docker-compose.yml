@@ -46,8 +46,8 @@ services:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
-      # - ./mosquitto/config/init-mosquitto.sh:/init-mosquitto.sh:ro
-    # command: ["/init-mosquitto.sh"]
+      - ./mosquitto/config/init-mosquitto.sh:/init-mosquitto.sh:ro
+    command: ["sh", "-c", "chmod +x /init-mosquitto.sh && /init-mosquitto.sh"]
     healthcheck:
       test: timeout 5 mosquitto_sub -t '$$SYS/broker/uptime' -u $${MQTT_USERNAME} -P $${MQTT_PASSWORD} -C 1
       interval: 30s
