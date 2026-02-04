@@ -3,6 +3,9 @@ set -e
 
 echo "🚀 Initializing Mosquitto MQTT broker..."
 
+# СОЗДАЕМ ПАПКУ если нет
+mkdir -p /mosquitto/config
+
 # Проверяем переменные окружения
 if [ -z "$MQTT_USERNAME" ] || [ -z "$MQTT_PASSWORD" ]; then
     echo "❌ ERROR: MQTT_USERNAME or MQTT_PASSWORD not set!"
