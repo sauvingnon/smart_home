@@ -2,6 +2,9 @@
 import asyncio
 import json
 from typing import Dict, Optional, Callable, Any
+from pydantic import ValidationError
+from app.schemas.telemetry import TelemetryData
+from app.schemas.settings import SettingsData
 from aiomqtt import Client, Message
 from app.schemas.weather_data import BoardData
 from datetime import datetime
@@ -111,7 +114,7 @@ class MQTTService:
             payload = json.loads(payload_str)
             topic = str(message.topic)
             
-            logger.info(f"📨 Получено сообщение: {topic} -> {payload}")
+            logger.debug(f"📨 Received message: {topic} -> payload")
             
             # Извлекаем device_id из топика
             # Формат: esp/telemetry, esp/config/update и т.д.
@@ -123,21 +126,33 @@ class MQTTService:
             device_id = parts[0]  # "esp"
             topic_type = "/".join(parts[1:])  # "telemetry", "config/update" и т.д.
             
-            # Вызываем соответствующий callback с device_id
+            # Валидация и нормализация полезной нагрузки перед передачей в колбэки
             if topic_type == "telemetry" and self.callbacks["telemetry"]:
-                await self.callbacks["telemetry"](device_id, payload)
+                try:
+                    # Дополняем обязательные поля и валидируем
+                    telemetry = TelemetryData(**{**payload, "device_id": device_id, "timestamp": datetime.now()})
+                    await self.callbacks["telemetry"](device_id, telemetry.model_dump())
+                except ValidationError as ve:
+                    logger.warning(f"⚠️ Невалидная телеметрия от {device_id}: {ve}")
+                return
 
-            elif topic_type == "config/update" and self.callbacks["config_update"]:
-                await self.callbacks["config_update"](device_id, payload)
-                
-            elif topic_type == "weather/request" and self.callbacks["weather_request"]:
+            if topic_type == "config/update" and self.callbacks["config_update"]:
+                try:
+                    settings = SettingsData(**payload)
+                    await self.callbacks["config_update"](device_id, settings.model_dump())
+                except ValidationError as ve:
+                    logger.warning(f"⚠️ Невалидные настройки от {device_id}: {ve}")
+                return
+
+            if topic_type == "weather/request" and self.callbacks["weather_request"]:
                 await self.callbacks["weather_request"](device_id, payload)
-            
-            elif topic_type == "time/ready" and self.callbacks["time_ready"]:
-                await self.callbacks["time_ready"](device_id, payload)
+                return
 
-            else:
-                logger.debug(f"📨 Необработанный топик: {topic_type}")
+            if topic_type == "time/ready" and self.callbacks["time_ready"]:
+                await self.callbacks["time_ready"](device_id, payload)
+                return
+
+            logger.debug(f"📨 Необработанный топик: {topic_type}")
                     
         except json.JSONDecodeError:
             logger.warning(f"⚠️ Невалидный JSON: {message.payload}")
@@ -149,92 +164,36 @@ class MQTTService:
 
     async def send_time_to_device(self, device_id: str, payload: dict):
         """Отправка времени на плату."""
-        if not self.is_connected and not await self.connect():
-            return False
-        
-        try:
-            topic = self._format_topic("time_set", device_id)
-
-            logger.info(f"Топик {topic}")
-            
-            await self.client.publish(
-                topic=topic,
-                payload=json.dumps(payload),
-                qos=1
-            )
-            
-            logger.info(f"📡 Отправлено время на плату {device_id}.")
-            return True
-            
-        except Exception as e:
-            logger.exception(f"❌ Ошибка отправки времени на плату {device_id}: {e}")
-            return False
+        return await self._send_to_device("time_set", device_id, payload, "Отправлено время")
 
     async def send_settings_request_to_device(self, device_id: str):
         """Отправка запроса о текущих настройках на плату."""
-        if not self.is_connected and not await self.connect():
-            return False
-        
-        try:
-            topic = self._format_topic("config_get", device_id)
-
-            logger.info(f"Топик {topic}")
-            
-            await self.client.publish(
-                topic=topic,
-                payload="{}",
-                qos=1
-            )
-            
-            logger.info(f"📡 Отправлен запрос настроек на плату {device_id}.")
-            return True
-            
-        except Exception as e:
-            logger.exception(f"❌ Ошибка отправки запроса настроек на {device_id}: {e}")
-            return False
+        return await self._send_to_device("config_get", device_id, {}, "Отправлен запрос настроек")
 
     async def send_weather_to_device(self, device_id: str, weather_data: BoardData):
         """Отправка погоды на конкретную плату"""
-        if not self.is_connected and not await self.connect():
-            return False
-        
-        try:
-            payload = weather_data.model_dump()
-            topic = self._format_topic("weather_send", device_id)
-            
-            await self.client.publish(
-                topic=topic,
-                payload=json.dumps(payload),
-                qos=1
-            )
-            
-            logger.info(f"📡 Отправили погоду на {device_id}: {weather_data.temp}°C")
-            return True
-            
-        except Exception as e:
-            logger.exception(f"❌ Ошибка отправки погоды на {device_id}: {e}")
-            return False
+        return await self._send_to_device("weather_send", device_id, weather_data.model_dump(), f"Отправили погоду: {weather_data.temp}°C")
 
     async def send_config(self, device_id: str, config: SettingsData):
         """Отправка конфигурации на плату"""
+        return await self._send_to_device("config_set", device_id, config.model_dump(), "Отправлен конфиг")
+
+    async def _send_to_device(self, topic_key: str, device_id: str, payload: dict, log_msg: str) -> bool:
+        """Унифицированная отправка сообщения на устройство"""
         if not self.is_connected and not await self.connect():
             return False
-        
         try:
-            payload = config.model_dump()
-            topic = self._format_topic("config_set", device_id)
-            
+            topic = self._format_topic(topic_key, device_id)
+            logger.debug(f"MQTT topic: {topic}")
             await self.client.publish(
                 topic=topic,
                 payload=json.dumps(payload),
                 qos=1
             )
-            
-            logger.info(f"⚙️ Отправлен конфиг на {device_id}")
+            logger.info(f"📡 {log_msg} — device={device_id}")
             return True
-            
         except Exception as e:
-            logger.exception(f"❌ Ошибка отправки конфига на {device_id}: {e}")
+            logger.exception(f"❌ Ошибка отправки сообщения на {device_id}: {e}")
             return False
 
     def _format_topic(self, topic_key: str, device_id: str) -> str:
@@ -249,32 +208,32 @@ class MQTTService:
     def set_time_callback(self, callback: Callable):
         """Установить обработчик пинга о установке времени."""
         self.callbacks["time_ready"] = callback
-        logger.info("✅ Установлен обработчик времени.")
+        logger.debug("✅ Установлен обработчик времени.")
 
     def remove_time_callback(self):
         """Удалить обработчик времени.."""
         self.callbacks["time_ready"] = None
-        logger.info("✅ Удален обработчик времени")
+        logger.debug("✅ Удален обработчик времени")
 
     def set_settings_callback(self, callback: Callable):
         """Установить обработчик настроек от платы."""
         self.callbacks["config_update"] = callback
-        logger.info("✅ Установлен обработчик настроек")
+        logger.debug("✅ Установлен обработчик настроек")
 
     def remove_settings_callback(self):
         """Удалить обработчик настроек от платы."""
         self.callbacks["config_update"] = None
-        logger.info("✅ Удален обработчик настроек")
+        logger.debug("✅ Удален обработчик настроек")
     
     def set_telemetry_callback(self, callback: Callable):
         """Установить обработчик телеметрии"""
         self.callbacks["telemetry"] = callback
-        logger.info("✅ Установлен обработчик телеметрии")
+        logger.debug("✅ Установлен обработчик телеметрии")
     
     def set_weather_request_callback(self, callback: Callable):
         """Установить обработчик запроса погоды"""
         self.callbacks["weather_request"] = callback
-        logger.info("✅ Установлен обработчик запроса погоды")
+        logger.debug("✅ Установлен обработчик запроса погоды")
 
     # ========== УПРАВЛЕНИЕ ЖИЗНЕННЫМ ЦИКЛОМ ==========
 
@@ -287,7 +246,7 @@ class MQTTService:
             
             # Запускаем прослушивание в фоне
             self._listening_task = asyncio.create_task(self.start_listening())
-            logger.info("✅ MQTT сервис запущен")
+            logger.debug("MQTT listening task started")
             return True
             
         except Exception as e:

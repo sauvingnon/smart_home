@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Запуск FastAPI через uvicorn
+# Запуск FastAPI через uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]
 
-ENV LOG_LEVEL=DEBUG
-# ENV LOG_LEVEL=INFO
+# LOG_LEVEL контролируется через переменную окружения .env (по умолчанию INFO)
