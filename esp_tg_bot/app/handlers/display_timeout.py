@@ -15,6 +15,11 @@ async def ask_timeout(callback: CallbackQuery, state: FSMContext):
 
     settings = await get_settings()
     
+    if settings is None:
+        await callback.message.answer("❌ Не удалось получить настройки.")
+        await callback.answer()
+        return
+    
     await callback.message.answer(
         f"Текущее значение таймаута дисплея: {settings.displayTimeout}",
         reply_markup=display_timeout_keyboard
@@ -35,7 +40,8 @@ async def handle_display_timeout(callback: CallbackQuery):
         settings = await get_settings()
 
         if settings is None:
-            await callback.message.answer("Не удалось получить настройки.")
+            await callback.message.answer("❌ Не удалось получить настройки.")
+            await callback.answer("Ошибка получения настроек", show_alert=True)
             return
 
         timeout = int(timeout_str)

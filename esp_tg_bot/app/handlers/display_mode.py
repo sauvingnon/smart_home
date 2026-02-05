@@ -20,11 +20,12 @@ async def cmd_display_mode_callback(callback: CallbackQuery, state: FSMContext):
 
     settings = await get_settings()
 
-    mode_name = mode_names.get(settings.displayMode, "Неизвестный")
-
     if settings is None:
-        await callback.message.answer("Не удалось получить настройки.")
+        await callback.message.answer("❌ Не удалось получить настройки.")
+        await callback.answer()
         return
+
+    mode_name = mode_names.get(settings.displayMode, "Неизвестный")
     
     await callback.message.answer(f"Настройка режима экрана. Текущий {mode_name}", reply_markup=display_mode_keyboard)
 
@@ -43,7 +44,8 @@ async def handle_display_mode(callback: CallbackQuery):
         settings = await get_settings()
 
         if settings is None:
-            await callback.message.answer("Не удалось получить настройки.")
+            await callback.message.answer("❌ Не удалось получить настройки.")
+            await callback.answer("Ошибка получения настроек", show_alert=True)
             return
 
         mode = int(mode_str)

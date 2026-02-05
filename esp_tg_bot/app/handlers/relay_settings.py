@@ -82,6 +82,11 @@ async def handle_relay_mode(callback: CallbackQuery):
     """Обработка смены режима работы реле."""
     
     settings = await get_settings()
+    
+    if settings is None:
+        await callback.message.answer("❌ Не удалось получить настройки.")
+        await callback.answer()
+        return
 
     # Определяем режим с иконкой
     if settings.relayMode:
@@ -112,6 +117,11 @@ async def handle_display_timeout(callback: CallbackQuery):
     state_name = ""
     
     settings = await get_settings()
+    
+    if settings is None:
+        await callback.message.answer("❌ Не удалось получить настройки.")
+        await callback.answer()
+        return
 
     # Определяем реле с которым работаем
     if relay_str == "day":
