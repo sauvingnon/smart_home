@@ -47,7 +47,13 @@ class CacheManager:
         if self.redis_client:
             try:
                 await self.redis_client.close()
-                await self.redis_client.wait_closed()
+                # Некоторые реализации redis-клиента могут не иметь wait_closed
+                if hasattr(self.redis_client, "wait_closed"):
+                    try:
+                        await self.redis_client.wait_closed()
+                    except Exception:
+                        # Игнорируем ошибки ожидания закрытия
+                        pass
                 logger.info("✅ Redis соединение закрыто")
             except Exception as e:
                 logger.error(f"Ошибка при отключении от Redis: {e}")
@@ -96,13 +102,11 @@ class CacheManager:
             if data:
                 # ПРОВЕРЬ, ЧТО ХРАНИШЬ В REDIS
                 parsed = json.loads(data)
-                logger.info(f"DEBUG: Данные из Redis: {parsed}")  # ← ДОБАВЬ ДЛЯ ОТЛАДКИ
                 # Если уже WeatherData в JSON
                 return WeatherData(**parsed)
         except Exception as e:
             logger.error(f"Ошибка чтения из кэша: {e}")
-            import traceback
-            traceback.print_exc()  # ← ДОБАВЬ ДЛЯ ДЕТАЛЕЙ
+            # traceback removed for cleaner logs
         return None
     
     async def save_weather(self, weather: WeatherData):

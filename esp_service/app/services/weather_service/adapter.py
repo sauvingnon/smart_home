@@ -30,7 +30,7 @@ class WeatherAdapter(BaseModel):
     timestamp: datetime
     
     @classmethod
-    def from_yandex(self, data: YandexResponse) -> "WeatherAdapter":
+    def from_yandex(cls, data: YandexResponse) -> "WeatherAdapter":
         """Фабричный метод для создания адаптера из данных Яндекса"""
         
         # Текущая погода
@@ -47,7 +47,7 @@ class WeatherAdapter(BaseModel):
             tomorrow_day = ForecastPart(**data.forecasts[1].parts['day']) if 'day' in data.forecasts[1].parts else None
             tomorrow = tomorrow_day
         
-        return self(
+        return cls(
             # Сейчас
             current_temp=fact.temp,
             current_feels_like=fact.feels_like,

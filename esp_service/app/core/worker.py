@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Optional
 import uuid
 
 from app.services.redis.cache_manager import CacheManager
@@ -14,6 +14,12 @@ from app.schemas.device_status import DeviceStatus
 import pytz
 
 IZHEVSK_TZ = pytz.timezone('Europe/Samara')
+
+# Константы и тайминги по умолчанию
+DEFAULT_WEATHER_UPDATE_INTERVAL = 300  # 5 минут (в секундах)
+DEFAULT_TIME_UPDATE_INTERVAL = 86400  # 1 сутки
+DEFAULT_HEARTBEAT_INTERVAL = 60
+DEFAULT_DEVICE_ID = "greenhouse_01"
 
 # =================== ФОНОВЫЙ ВОРКЕР ===================
 class WeatherBackgroundWorker:
@@ -35,10 +41,10 @@ class WeatherBackgroundWorker:
         self.mqtt_service = mqtt_service
         self.service = weather_service
         self.is_running = False
-        self.update_board_weather_interval = 300  # 5 минут (в секундах)
-        self.update_time_interval = 86400 # Сутки
-        self.heartbeat_interval = 60
-        self.device_id = "greenhouse_01"
+        self.update_board_weather_interval = DEFAULT_WEATHER_UPDATE_INTERVAL
+        self.update_time_interval = DEFAULT_TIME_UPDATE_INTERVAL
+        self.heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL
+        self.device_id = DEFAULT_DEVICE_ID
         self.current_telemetry: Optional[TelemetryData] = None
         self.device_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
         
@@ -364,7 +370,11 @@ class WeatherBackgroundWorker:
              # Ждём ответа с таймаутом
             try:
                 response = await asyncio.wait_for(response_future, timeout=timeout)
-                return SettingsData(**response)
+                try:
+                    return SettingsData(**response)
+                except Exception as e:
+                    logger.warning(f"⚠️ Невалидные данные настроек от {self.device_id}: {e}")
+                    return None
             except asyncio.TimeoutError:
                 logger.warning(f"⏳ Таймаут ожидания настроек от {self.device_id}")
                 return None
@@ -404,7 +414,7 @@ class WeatherBackgroundWorker:
         except Exception as e:
             logger.exception(f"❌ Неожиданная ошибка при обработке телеметрии: {e}")
     
-    async def handle_weather_request(self, device_id: str, data: Dict):
+    async def handle_weather_request(self, device_id: str, data: dict):
         """Обработчик запроса погоды от платы"""
         logger.info(f"🌤️ Плата {device_id} запросила погоду")
         

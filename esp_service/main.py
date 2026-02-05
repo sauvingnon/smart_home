@@ -43,9 +43,9 @@ async def lifespan(app: FastAPI):
         mqtt_started = await mqtt_service.start()
         if not mqtt_started:
             logger.warning("⚠️ MQTT не удалось запустить, продолжаем без него")
-        
+        else:
+            logger.info("✅ MQTT сервис запущен")
         app.state.mqtt_service = mqtt_service
-        logger.info("✅ MQTT сервис запущен")
         
         # 4. Worker
         worker = WeatherBackgroundWorker.get_instance(
