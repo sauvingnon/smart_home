@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 from app.state.model_fsm import ModelFSM
-from app.keyboards.inline import relay_handle_keyboard, get_cancel_keyboard, get_back_to_relay_keyboard
+from app.keyboards.inline import get_relay_handle_keyboard, get_cancel_keyboard, get_back_to_relay_keyboard
 from app.services.esp_service import get_settings, set_settings
 from logger import logger
 import re
@@ -72,7 +72,7 @@ async def cmd_rele_settings_callback(callback: CallbackQuery, state: FSMContext)
         f"☀️ Дневное: <code>{format_time(settings.dayOnHour, settings.dayOnMinute)}</code> – "
         f"<code>{format_time(settings.dayOffHour, settings.dayOffMinute)}</code>\n\n",
         parse_mode="HTML",
-        reply_markup=relay_handle_keyboard
+        reply_markup=get_relay_handle_keyboard(settings)
     )
 
     await callback.answer()

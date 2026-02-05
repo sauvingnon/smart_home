@@ -2,7 +2,7 @@ from aiogram import Router, types, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from app.state.model_fsm import ModelFSM
-from app.keyboards.inline import display_mode_keyboard
+from app.keyboards.inline import get_display_mode_keyboard
 from app.services.esp_service import get_settings, set_settings
 from logger import logger
 
@@ -27,7 +27,9 @@ async def cmd_display_mode_callback(callback: CallbackQuery, state: FSMContext):
 
     mode_name = mode_names.get(settings.displayMode, "Неизвестный")
     
-    await callback.message.answer(f"Настройка режима экрана. Текущий {mode_name}", reply_markup=display_mode_keyboard)
+    display_mode_kb = get_display_mode_keyboard(settings)
+    
+    await callback.message.answer(f"Настройка режима экрана. Текущий {mode_name}", reply_markup=display_mode_kb)
 
     await callback.answer()
 
