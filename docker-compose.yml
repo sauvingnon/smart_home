@@ -25,9 +25,22 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/config/init-mosquitto.sh:/init-mosquitto.sh:ro
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
+    entrypoint: ["/bin/sh", "/init-mosquitto.sh"]
+    healthcheck:
+      test: timeout 5 mosquitto_sub -t '$$SYS/broker/uptime' -u $${MQTT_USERNAME} -P $${MQTT_PASSWORD} -C 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   esp_loki:
     image: grafana/loki:3.0.0
