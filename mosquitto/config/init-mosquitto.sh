@@ -20,10 +20,10 @@ fi
 
 # Создаем/обновляем файл паролей
 echo "🔑 Creating password file for user: $MQTT_USERNAME"
-mosquitto_passwd -b /mosquitto/config/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD"
-
-# Устанавливаем правильные права (без этого Mosquitto ругается)
+# Убеждаемся что файл существует перед созданием пароля
+touch /mosquitto/config/passwd
 chmod 0700 /mosquitto/config/passwd
+mosquitto_passwd -b /mosquitto/config/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD"
 
 echo "✅ Password file created at /mosquitto/config/passwd"
 echo "📋 Config file: /mosquitto/config/mosquitto.conf"

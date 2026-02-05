@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 from app.state.model_fsm import ModelFSM
-from app.keyboards.inline import relay_handle_keyboard, get_cancel_keyboard, get_back_to_relay_keyboard
+from app.keyboards.inline import get_relay_handle_keyboard, get_cancel_keyboard, get_back_to_relay_keyboard
 from app.services.esp_service import get_settings, set_settings
 from logger import logger
 import re
@@ -72,7 +72,7 @@ async def cmd_rele_settings_callback(callback: CallbackQuery, state: FSMContext)
         f"☀️ Дневное: <code>{format_time(settings.dayOnHour, settings.dayOnMinute)}</code> – "
         f"<code>{format_time(settings.dayOffHour, settings.dayOffMinute)}</code>\n\n",
         parse_mode="HTML",
-        reply_markup=relay_handle_keyboard
+        reply_markup=get_relay_handle_keyboard(settings)
     )
 
     await callback.answer()
@@ -82,6 +82,11 @@ async def handle_relay_mode(callback: CallbackQuery):
     """Обработка смены режима работы реле."""
     
     settings = await get_settings()
+    
+    if settings is None:
+        await callback.message.answer("❌ Не удалось получить настройки.")
+        await callback.answer()
+        return
 
     # Определяем режим с иконкой
     if settings.relayMode:
@@ -112,6 +117,11 @@ async def handle_display_timeout(callback: CallbackQuery):
     state_name = ""
     
     settings = await get_settings()
+    
+    if settings is None:
+        await callback.message.answer("❌ Не удалось получить настройки.")
+        await callback.answer()
+        return
 
     # Определяем реле с которым работаем
     if relay_str == "day":

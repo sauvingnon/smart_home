@@ -2,7 +2,7 @@ from aiogram import Router, types, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from app.state.model_fsm import ModelFSM
-from app.keyboards.inline import display_timeout_keyboard
+from app.keyboards.inline import get_display_timeout_keyboard
 from logger import logger
 from aiogram.filters import StateFilter
 from app.services.esp_service import get_settings, set_settings
@@ -15,9 +15,16 @@ async def ask_timeout(callback: CallbackQuery, state: FSMContext):
 
     settings = await get_settings()
     
+    if settings is None:
+        await callback.message.answer("❌ Не удалось получить настройки.")
+        await callback.answer()
+        return
+    
+    display_timeout_kb = get_display_timeout_keyboard(settings)
+    
     await callback.message.answer(
         f"Текущее значение таймаута дисплея: {settings.displayTimeout}",
-        reply_markup=display_timeout_keyboard
+        reply_markup=display_timeout_kb
     )
     
     await callback.answer()
@@ -35,7 +42,8 @@ async def handle_display_timeout(callback: CallbackQuery):
         settings = await get_settings()
 
         if settings is None:
-            await callback.message.answer("Не удалось получить настройки.")
+            await callback.message.answer("❌ Не удалось получить настройки.")
+            await callback.answer("Ошибка получения настроек", show_alert=True)
             return
 
         timeout = int(timeout_str)

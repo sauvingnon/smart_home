@@ -2,7 +2,7 @@ from aiogram import Router, types, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from app.state.model_fsm import ModelFSM
-from app.keyboards.inline import display_mode_keyboard
+from app.keyboards.inline import get_display_mode_keyboard
 from app.services.esp_service import get_settings, set_settings
 from logger import logger
 
@@ -20,13 +20,16 @@ async def cmd_display_mode_callback(callback: CallbackQuery, state: FSMContext):
 
     settings = await get_settings()
 
-    mode_name = mode_names.get(settings.displayMode, "Неизвестный")
-
     if settings is None:
-        await callback.message.answer("Не удалось получить настройки.")
+        await callback.message.answer("❌ Не удалось получить настройки.")
+        await callback.answer()
         return
+
+    mode_name = mode_names.get(settings.displayMode, "Неизвестный")
     
-    await callback.message.answer(f"Настройка режима экрана. Текущий {mode_name}", reply_markup=display_mode_keyboard)
+    display_mode_kb = get_display_mode_keyboard(settings)
+    
+    await callback.message.answer(f"Настройка режима экрана. Текущий {mode_name}", reply_markup=display_mode_kb)
 
     await callback.answer()
 
@@ -43,7 +46,8 @@ async def handle_display_mode(callback: CallbackQuery):
         settings = await get_settings()
 
         if settings is None:
-            await callback.message.answer("Не удалось получить настройки.")
+            await callback.message.answer("❌ Не удалось получить настройки.")
+            await callback.answer("Ошибка получения настроек", show_alert=True)
             return
 
         mode = int(mode_str)
