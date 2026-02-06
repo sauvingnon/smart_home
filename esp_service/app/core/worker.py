@@ -46,6 +46,7 @@ class WeatherBackgroundWorker:
         self.heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL
         self.device_id = DEFAULT_DEVICE_ID
         self.current_telemetry: Optional[TelemetryData] = None
+        self.last_activity_timestamp: Optional[datetime] = None  # Любое сообщение от платы
         self.device_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
         
     @classmethod
@@ -94,11 +95,11 @@ class WeatherBackgroundWorker:
         )
 
     def _update_device_status(self) -> DeviceStatus:
-        """Обновление статуса устройства на основе телеметрии"""
-        if self.current_telemetry is None:
+        """Обновление статуса устройства на основе активности (любые сообщения от платы)"""
+        if self.last_activity_timestamp is None:
             new_status = DeviceStatus.NEVER_CONNECTED
         else:
-            seconds_ago = (self._get_izhevsk_time() - self.current_telemetry.timestamp).total_seconds()
+            seconds_ago = (self._get_izhevsk_time() - self.last_activity_timestamp).total_seconds()
             
             if seconds_ago < 120:  # < 2 минут
                 new_status = DeviceStatus.ONLINE
@@ -144,6 +145,8 @@ class WeatherBackgroundWorker:
                     """Обработчик подтверждения синхронизации от ESP"""
                     
                     if device_id == self.device_id:
+                        # Записываем активность устройства
+                        self._record_device_activity("time_sync_response")
                         logger.info(f"✅ Устройство {device_id} подтвердило синхронизацию")
                         
                         # Помечаем синхронизацию как завершенную
@@ -207,6 +210,12 @@ class WeatherBackgroundWorker:
     def can_send_to_device(self) -> bool:
         """Можно ли отправлять команды на устройство?"""
         return self.device_status == DeviceStatus.ONLINE
+
+    def _record_device_activity(self, activity_name: str = ""):
+        """Запимать активность устройства (любое сообщение)"""
+        self.last_activity_timestamp = self._get_izhevsk_time()
+        if activity_name:
+            logger.debug(f"📍 Активность: {activity_name}")
 
     async def _check_heartbeat_esp_loop(self):
         """Периодическая проверка статуса устройства"""
@@ -358,6 +367,8 @@ class WeatherBackgroundWorker:
             async def on_config_response(device_id: str, data: dict):
                 # ПРОСТО ПРИНИМАЕМ ВСЁ ОТ НАШЕГО УСТРОЙСТВА
                 if device_id == self.device_id:
+                    # Записываем активность устройства
+                    self._record_device_activity("config_response")
                     logger.info(f"✅ Получили настройки от {device_id}")
                     if not response_future.done():
                         response_future.set_result(data)
@@ -389,6 +400,8 @@ class WeatherBackgroundWorker:
     async def handle_telemetry(self, device_id: str, data: dict):
         """Обработчик телеметрии от платы"""
         try:
+            # Записываем активность устройства
+            self._record_device_activity("telemetry")
             
             # Парсим и валидируем данные
             telemetry = TelemetryData(
@@ -397,7 +410,8 @@ class WeatherBackgroundWorker:
                 humidity=data.get('humidity'),
                 free_memory=data.get('free_memory'),
                 uptime=data.get('uptime'),
-                timestamp=self._get_izhevsk_time()
+                timestamp=self._get_izhevsk_time(),
+                bluetooth_is_active=data.get('bluetooth_is_active')
             )
             
             # Сохраняем в кэш
@@ -416,6 +430,8 @@ class WeatherBackgroundWorker:
     
     async def handle_weather_request(self, device_id: str, data: dict):
         """Обработчик запроса погоды от платы"""
+        # Записываем активность устройства
+        self._record_device_activity("weather_request")
         logger.info(f"🌤️ Плата {device_id} запросила погоду")
         
         await self.send_to_board_weather_from_cache()

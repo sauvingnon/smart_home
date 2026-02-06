@@ -2058,6 +2058,7 @@ void sendTelemetry() {
   // Системная информация
   doc["uptime"] = millis() / 1000;
   doc["free_memory"] = ESP.getFreeHeap();
+  doc["bluetooth_is_active"] = isBluetoothConnected();
   
   mqtt.publish("telemetry", doc);
 }
@@ -2580,13 +2581,6 @@ void setTime() {
   
   // Все параметры настроены - устанавливаем время
   rtc.adjust(DateTime(A[5], A[4], A[3], A[2], A[1], 0));
-
-  // Логирование в Serial
-  Serial.print("T(");
-  Serial.print(String(A[2]));
-  Serial.print(":");
-  Serial.print(String(A[1]));
-  Serial.print(")");
   
   // Выводим сообщение о завершении
   lcd.createChar(4, bukva_P);
