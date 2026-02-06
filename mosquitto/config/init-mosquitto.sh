@@ -1,4 +1,4 @@
-﻿#!/bin/sh
+#!/bin/sh
 set -e
 
 echo "Initializing Mosquitto MQTT broker..."
@@ -30,8 +30,11 @@ chmod 0755 /mosquitto/log
 # Создаем файл паролей
 echo "Creating password file for user: $MQTT_USERNAME"
 touch /mosquitto/config/passwd
-chmod 0600 /mosquitto/config/passwd
 mosquitto_passwd -b /mosquitto/config/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD" 2>&1
+
+# Устанавливаем права для mosquitto пользователя
+chown mosquitto:mosquitto /mosquitto/config/passwd 2>/dev/null || true
+chmod 0600 /mosquitto/config/passwd
 
 # Проверяем права доступа
 echo "Checking permissions..."
