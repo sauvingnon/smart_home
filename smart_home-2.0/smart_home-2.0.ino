@@ -510,7 +510,7 @@ void printDate() {
       break;
     case 1: // понедельник
       lcd.createChar(7, bukva_P);
-      result += "\6H";     // "пнд"
+      result += "\7H";     // "пнд"
       break;
     case 2: // вторник
       result += "BT";     // "втр"
@@ -520,15 +520,15 @@ void printDate() {
       break;
     case 4: // четверг
       lcd.createChar(7, bukva_CH);
-      result += "\6T";     // "чтв"
+      result += "\7T";     // "чтв"
       break;
     case 5: // пятница
       lcd.createChar(7, bukva_P);
-      result += "\6T";     // "птн"
+      result += "\7T";     // "птн"
       break;
     case 6: // суббота
       lcd.createChar(7, bukva_B);
-      result += "C\6";     // "сбт"
+      result += "C\7";     // "сбт"
       break;
   }
   
@@ -1305,9 +1305,8 @@ void bluetoothSettings() {
       if (enc.isLeft() || enc.isLeftH()) {     // Был поворов вправо
         k++;
 
-        if(k>=4){      // Переход на меню 2
-          k = 0;   
-          lcd.clear();                     // Отчистка дисплея          
+        if(k>=3){      // Переход на меню 2
+          k = 0;           
           needRedraw = true;                   // Для еденичной отрисовки
         }
 
@@ -1316,10 +1315,8 @@ void bluetoothSettings() {
         k--;
         
         if (k <= -1) {           // Переход на меню 1
-            k = 3;
-            lcd.clear();                     // Отчистка дисплея          
+            k = 2;   
             needRedraw = true;                   // Для еденичной отрисовки
-            return;
           }
           
       } 
@@ -2021,7 +2018,11 @@ void setupMQTTHandlers() {
     int minute = doc["minute"];  // 45
     int second = doc["second"];  // 30 (или 0)
 
+    // Установить время на ESP
     rtc.adjust(DateTime(year, month, day, hour, minute, second));
+
+    // Дослать время (только часы и минуты) на Arduino
+    sendTimeToBluetooth(hour, minute);
 
     mqtt.publish("time/ready", "{}");
 
@@ -2168,7 +2169,7 @@ void loadSettingsInMemory() {
   // ВНИМАНИЕ! Функция вызывается после изменений настроек для загрузки их
   // в оперативную память. Это центральное место для примененя настроек.
   
-  sendToBluetooth();
+  sendSettingsToBluetooth();
 
 }
 
@@ -2273,8 +2274,8 @@ void updateTime() {
   Year = now.year();         // Год (например, 2023)
 }
 
-// Отправить данные по bluetooth
-void sendToBluetooth() {
+// Отправить данные настроек по bluetooth
+void sendSettingsToBluetooth() {
   Serial.print("S(");
   Serial.print(fanDelay);
   Serial.print("-");
@@ -2295,6 +2296,15 @@ void sendToBluetooth() {
   Serial.print(isManualModeRelayEnabled ? 0 : 1);
   Serial.print("-");
   Serial.print(isDayRelayForcedOn ? 1 : 0);
+  Serial.print(")");
+}
+
+// Синхронизировать время по bluetooth (только часы и минуты)
+void sendTimeToBluetooth(int hour, int minute) {
+  Serial.print("T(");
+  Serial.print(String(hour));
+  Serial.print(":");
+  Serial.print(String(minute));
   Serial.print(")");
 }
 
@@ -2581,6 +2591,9 @@ void setTime() {
   
   // Все параметры настроены - устанавливаем время
   rtc.adjust(DateTime(A[5], A[4], A[3], A[2], A[1], 0));
+
+  // Отправить минуты и часы на плату в уборной
+  sendTimeToBluetooth(A[2], A[1]);
   
   // Выводим сообщение о завершении
   lcd.createChar(4, bukva_P);
