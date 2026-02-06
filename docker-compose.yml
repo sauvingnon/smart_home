@@ -143,8 +143,8 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     restart: unless-stopped
-    mem_limit: 150m          # ← ДОБАВИТЬ
-    mem_reservation: 75m
+    mem_limit: 300m          # ← ДОБАВИТЬ
+    mem_reservation: 150m
     cpus: "0.5"
     depends_on:
       esp_loki:
