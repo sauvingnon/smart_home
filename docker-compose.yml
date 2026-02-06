@@ -43,12 +43,11 @@ services:
     # Мы не используем WebSocket. У нас TCP
       # - "9001:9001"
     volumes:
-      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto/config/init-mosquitto.sh:/init-mosquitto.sh:ro
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
       - ./mosquitto/config/init-mosquitto.sh:/init-mosquitto.sh
-    command: ["sh", "-c", "chmod +x /init-mosquitto.sh && /init-mosquitto.sh"]
+    command: ["sh", "-c", "chmod +x /init-mosquitto.sh && sh /init-mosquitto.sh"]
     healthcheck:
       test: timeout 5 mosquitto_sub -t '$$SYS/broker/uptime' -u $${MQTT_USERNAME} -P $${MQTT_PASSWORD} -C 1
       interval: 30s
