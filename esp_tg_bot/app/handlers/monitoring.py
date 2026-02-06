@@ -117,6 +117,10 @@ async def monitoring_func(message: Message):
                 response += f"💾 *Память:* `{memory_mb:.1f} MB`\n"
             else:
                 response += f"💾 *Память:* `{memory_kb:.0f} KB`\n"
+
+        if telemetry.bluetooth_is_active is not None:
+            bt_status = "✅ Активен" if telemetry.bluetooth_is_active else "❌ Неактивен"
+            response += f"🔵 *Bluetooth:* `{bt_status}`\n"
         
         response += f"\n━━━━━━━━━━━━━━━━━━\n"
         response += f"📡 *Статус:* {freshness}\n"

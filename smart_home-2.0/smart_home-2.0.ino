@@ -509,7 +509,7 @@ void printDate() {
       result += "BC";     // "вск"
       break;
     case 1: // понедельник
-      lcd.createChar(6, bukva_P);
+      lcd.createChar(7, bukva_P);
       result += "\6H";     // "пнд"
       break;
     case 2: // вторник
@@ -519,15 +519,15 @@ void printDate() {
       result += "CP";     // "срд"
       break;
     case 4: // четверг
-      lcd.createChar(6, bukva_CH);
+      lcd.createChar(7, bukva_CH);
       result += "\6T";     // "чтв"
       break;
     case 5: // пятница
-      lcd.createChar(6, bukva_P);
+      lcd.createChar(7, bukva_P);
       result += "\6T";     // "птн"
       break;
     case 6: // суббота
-      lcd.createChar(6, bukva_B);
+      lcd.createChar(7, bukva_B);
       result += "C\6";     // "сбт"
       break;
   }
