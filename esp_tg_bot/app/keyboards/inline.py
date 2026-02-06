@@ -80,14 +80,13 @@ def get_relay_handle_keyboard(settings: SettingsData) -> InlineKeyboardMarkup:
     # Определяем текущий режим и состояние
     if settings.relayMode:  # Ручной режим
         relay_mode_text = "🔄 Ручной режим (переключить на Авто)"
-        day_state_icon = "🟢" if settings.manualDayState else "🔴"
-        night_state_icon = "🟢" if settings.manualNightState else "🔴"
-        day_button_text = f"{day_state_icon} ВКЛ/ОТКЛ ДНЕВНОЙ (сейчас {'ВКЛ' if settings.manualDayState else 'ОТКЛ'})"
-        night_button_text = f"{night_state_icon} ВКЛ/ОТКЛ НОЧНОЙ (сейчас {'ВКЛ' if settings.manualNightState else 'ОТКЛ'})"
     else:  # Автоматический режим
         relay_mode_text = "⏰ Автоматический режим (переключить на Ручной)"
-        day_button_text = "⏰ НАСТРОИТЬ ДНЕВНОЙ"
-        night_button_text = "⏰ НАСТРОИТЬ НОЧНОЙ"
+        
+    day_state_icon = "🟢" if settings.manualDayState else "🔴"
+    night_state_icon = "🟢" if settings.manualNightState else "🔴"
+    day_button_text = f"{day_state_icon} ВКЛ/ОТКЛ ДНЕВНОЙ (сейчас {'ВКЛ' if settings.manualDayState else 'ОТКЛ'})"
+    night_button_text = f"{night_state_icon} ВКЛ/ОТКЛ НОЧНОЙ (сейчас {'ВКЛ' if settings.manualNightState else 'ОТКЛ'})"
     
     return InlineKeyboardMarkup(
         inline_keyboard=[

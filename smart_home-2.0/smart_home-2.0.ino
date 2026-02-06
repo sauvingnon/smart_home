@@ -89,8 +89,11 @@ Settings settings;
 #include "SimpleMQTTManager.h" 
 
 // WiFi настройки
-const char* ssid = "TP-Link_297F";
-const char* password = "23598126";
+// const char* ssid = "TP-Link_297F";
+// const char* password = "23598126";
+
+const char* ssid = "TP-Link_8343";
+const char* password = "64826424";
 
 // MQTT брокер
 const char* mqtt_server = "dotnetdon.ru";
@@ -255,6 +258,9 @@ void setup() {
   settings.load();
 
   loadSettingsInMemory();
+  // Инициализируем MQTT один раз перед попыткой подключения
+  mqtt.begin();
+
   setupNetwork();
   showSplashScreen();
   updateTime();
@@ -853,7 +859,7 @@ void mainMenuFirst() {
       lcd.setCursor(0, k);
       lcd.print(" ");
       
-      if (enc.isLeft() || enc.isLeftH()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         k++;
 
         if(k>=4){      // Переход на меню 2
@@ -864,7 +870,7 @@ void mainMenuFirst() {
         }
 
       } 
-      if (enc.isRight() || enc.isRightH()) {      // Был поворот влево
+      if (checkEncIsRightRotate()) {      // Был поворот влево
         k--;
         
         if (k <= -1) {           // Переход на меню 2
@@ -907,6 +913,16 @@ void mainMenuFirst() {
 
   }
 
+}
+
+// Проверка ЛЮБОГО поворота налево
+bool checkEncIsLeftRotate() {
+  return enc.isLeft() || enc.isLeftH() || enc.isFastL();
+}
+
+// Проверка ЛЮБОГО поворта направо
+bool checkEncIsRightRotate() {
+  return enc.isRight() || enc.isRightH() || enc.isFastR();
 }
 
 // Настройка режима работы реле
@@ -959,13 +975,13 @@ void relayModeSettings() {
       lcd.setCursor(0, k);
       lcd.print(" ");
       
-      if (enc.isLeft() || enc.isLeftH()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         k++;
         if(k>=3){      // Переход на меню 2
           k = 1;   
         }
       } 
-      if (enc.isRight() || enc.isRightH()) {      // Был поворот влево
+      if (checkEncIsRightRotate()) {      // Был поворот влево
         k--;
         if (k <= 0) {           // Переход на меню 2
             k = 2;
@@ -1030,13 +1046,13 @@ void screenTimeSettings() {
 
     if (enc.isTurn()){     // Если был поворот в любую сторону
 
-      if (enc.isLeft() || enc.isLeftH()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         counter += 5;
         if(counter>=251){      // Переход на меню 2
           counter = 5;   
         }
       } 
-      if (enc.isRight() || enc.isRightH()) {      // Был поворот влево
+      if (checkEncIsRightRotate()) {      // Был поворот влево
         counter -= 5;
         if (counter <= 4) {           // Переход на меню 2
             counter = 250;
@@ -1113,13 +1129,13 @@ void screenModeSettings() {
       lcd.setCursor(0, k);
       lcd.print(" ");
       
-      if (enc.isLeft() || enc.isLeftH()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         k++;
         if(k>=4){      // Переход на меню 2
           k = 1;   
         }
       } 
-      if (enc.isRight() || enc.isRightH()) {      // Был поворот влево
+      if (checkEncIsRightRotate()) {      // Был поворот влево
         k--;
         if (k <= -0) {           // Переход на меню 2
             k = 3;
@@ -1191,7 +1207,7 @@ void mainMenuSecond() {
       lcd.setCursor(0, k);
       lcd.print(" ");
       
-      if (enc.isLeft() || enc.isLeftH()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         k++;
 
         if(k>=4){      // Переход на меню 2
@@ -1201,7 +1217,7 @@ void mainMenuSecond() {
         }
 
       } 
-      if (enc.isRight() || enc.isRightH()) {      // Был поворот влево
+      if (checkEncIsRightRotate()) {      // Был поворот влево
         k--;
         
         if (k <= -1) {           // Переход на меню 1
@@ -1302,7 +1318,7 @@ void bluetoothSettings() {
       lcd.setCursor(0, k);
       lcd.print(" ");
       
-      if (enc.isLeft() || enc.isLeftH()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         k++;
 
         if(k>=3){      // Переход на меню 2
@@ -1311,7 +1327,7 @@ void bluetoothSettings() {
         }
 
       } 
-      if (enc.isRight() || enc.isRightH()) {      // Был поворот влево
+      if (checkEncIsRightRotate()) {      // Был поворот влево
         k--;
         
         if (k <= -1) {           // Переход на меню 1
@@ -1414,7 +1430,7 @@ void setBluetoothTime() {
       lcd.setCursor(0, k);
       lcd.print(" ");
 
-      if (enc.isRight()) {     
+      if (checkEncIsRightRotate()) {     
         k++;
         if (k>=2) 
           k = 0; 
@@ -1534,7 +1550,7 @@ void settingsForInternet() {
       lcd.setCursor(0, k);
       lcd.print(" ");
       
-      if (enc.isLeft() || enc.isLeftH()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         k++;
 
         if(k>=4){      // Переход на меню 2
@@ -1544,7 +1560,7 @@ void settingsForInternet() {
         }
 
       } 
-      if (enc.isRight() || enc.isRightH()) {      // Был поворот влево
+      if (checkEncIsRightRotate()) {      // Был поворот влево
         k--;
         
         if (k <= -1) {           // Переход на меню 1
@@ -1643,13 +1659,13 @@ void settingsForManualRelay() {
       lcd.setCursor(0, k);
       lcd.print(" ");
        
-      if (enc.isRight()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         ++k;
         if (k>=2) 
           k = 0;
       }
        
-      if (enc.isLeft()) {     // Был поворот влево
+      if (checkEncIsRightRotate()) {     // Был поворот влево
         --k;
         if (k<=-1) 
           k = 1;
@@ -1663,20 +1679,20 @@ void settingsForManualRelay() {
         case 0:  
           if (isDayRelayForcedOn) {
             isDayRelayForcedOn = false;
-            digitalWrite(RelayDayPin, HIGH);
+            digitalWrite(RelayDayPin, LOW);
           } else {
             isDayRelayForcedOn = true;
-            digitalWrite(RelayDayPin, LOW);
+            digitalWrite(RelayDayPin, HIGH);
           }
           settings.setManualStates(isDayRelayForcedOn, isNightRelayForcedOn);
           break;
         case 1: 
           if (isNightRelayForcedOn) {
             isNightRelayForcedOn = false;
-            digitalWrite(RelayNightPin, HIGH);
+            digitalWrite(RelayNightPin, LOW);
           } else { 
             isNightRelayForcedOn = true;
-            digitalWrite(RelayNightPin, LOW);
+            digitalWrite(RelayNightPin, HIGH);
           }
           settings.setManualStates(isDayRelayForcedOn, isNightRelayForcedOn);
           break;
@@ -1761,13 +1777,13 @@ void settingsForAutoRelay() {
       lcd.setCursor(0, k);
       lcd.print(" ");
       
-      if (enc.isRight()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         ++k;
         if (k==4)
           k = 0;
       }
       
-      if (enc.isLeft()) {     // Был поворот влево
+      if (checkEncIsRightRotate()) {     // Был поворот влево
         --k;
         if (k==-1) 
           k = 3;
@@ -1847,16 +1863,14 @@ bool connectToWiFi() {
   lcd.setCursor(0, 0);
   lcd.print("WiFi: ");
   lcd.print(ssid);
-  
   WiFi.begin(ssid, password);
-  delay(500);
-  
+
   int attempts = 0;
   const int maxAttempts = 5;
-  
+
   while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
     attempts++;
-    
+
     lcd.createChar(7, bukva_P);
     lcd.setCursor(0, 1);
     lcd.print("\7O\7b|TKA ");
@@ -1864,19 +1878,27 @@ bool connectToWiFi() {
     lcd.print("/");
     lcd.print(maxAttempts);
     lcd.print("   ");
-    
-    // Простая анимация из 3 точек
-    for (int i = 0; i < 3; i++) {
-      lcd.setCursor(15, 1);
-      switch (i % 3) {
-        case 0: lcd.print(".  "); break;
-        case 1: lcd.print(".. "); break;
-        case 2: lcd.print("..."); break;
+
+    // Неблокирующая анимация и ожидание (до 3 секунд)
+    unsigned long animationStart = millis();
+    unsigned long lastDotUpdate = 0;
+    int dotAnimation = 0;
+
+    while (millis() - animationStart < 3000 && WiFi.status() != WL_CONNECTED) {
+      if (millis() - lastDotUpdate > 500) {
+        lastDotUpdate = millis();
+        lcd.setCursor(15, 1);
+        switch (dotAnimation % 3) {
+          case 0: lcd.print(".  "); break;
+          case 1: lcd.print(".. "); break;
+          case 2: lcd.print("..."); break;
+        }
+        dotAnimation++;
       }
-      delay(500);
+      yield();
     }
   }
-  
+
   if (WiFi.status() == WL_CONNECTED) {
     lcd.clear();
     lcd.setCursor(0, 0);
@@ -1884,11 +1906,11 @@ bool connectToWiFi() {
     lcd.setCursor(0, 1);
     lcd.print("IP: ");
     lcd.print(WiFi.localIP());
-    delay(1500);
+    delay(800);
     return true;
-  } else {
-    return false;
   }
+
+  return false;
 }
 
 // Подключение к MQTT (5 попыток)
@@ -1900,40 +1922,61 @@ bool connectToMQTT() {
   lcd.createChar(4, bukva_Y);
   lcd.setCursor(0, 0);
   lcd.print("MQTT \7POKEP");
-  
   mqtt.setDeviceId("greenhouse_01");
-  mqtt.begin();  // ← ОДИН РАЗ в начале!
-  
+
   int attempts = 0;
   const int maxAttempts = 5;
-  
+
   while (attempts < maxAttempts) {
     attempts++;
-    
+
     lcd.setCursor(0, 1);
     lcd.print("\6O\6b|TKA ");
     lcd.print(attempts);
-    lcd.print("/5   ");
-    
-    // Даем 3 секунды на подключение, вызывая loop() много раз
-    unsigned long start = millis();
-    while (millis() - start < 3000) {
-      mqtt.loop();  // ← ВЫЗЫВАЕМ МНОГО РАЗ!
+    lcd.print("/");
+    lcd.print(maxAttempts);
+    lcd.print("   ");
+
+    // Неблокирующая анимация и ожидание (до 3 секунд)
+    int dotAnimation = 0;
+    unsigned long animationStart = millis();
+    unsigned long lastDotUpdate = 0;
+
+    while (millis() - animationStart < 3000) {
+      mqtt.loop();  // Проверяем подключение постоянно
+
+      // Анимация точек каждые 500ms
+      if (millis() - lastDotUpdate > 500) {
+        lastDotUpdate = millis();
+
+        lcd.setCursor(15, 1);
+        switch (dotAnimation % 3) {
+          case 0: lcd.print(".  "); break;
+          case 1: lcd.print(".. "); break;
+          case 2: lcd.print("..."); break;
+        }
+        dotAnimation++;
+      }
+
       if (mqtt.connected()) {
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("MQTT: OK       ");
         lcd.setCursor(0, 1);
         lcd.print("\7POKEP \5OCT\4\6EH");
-        delay(1500);
-        return true;  // ← БЕЗ ДОПОЛНИТЕЛЬНОГО loop()
+        delay(800);
+        return true;
       }
-      delay(10);
+      yield();
     }
-    
-    // Не удалось за 3 секунды
+
+    // Если не удалось за 3 секунды, подождём небольшую паузу и повторим
     if (attempts < maxAttempts) {
-      delay(1000);
+      unsigned long waitStart = millis();
+      while (millis() - waitStart < 800) {
+        mqtt.loop();
+        yield();
+      }
     }
   }
   
@@ -2176,8 +2219,8 @@ void loadSettingsInMemory() {
 // Проверка условий на включение\отключение реле ночь\день
 void relayLoop() {
   if (isManualModeRelayEnabled) {
-    digitalWrite(RelayNightPin, isNightRelayForcedOn ? LOW : HIGH);
-    digitalWrite(RelayDayPin, isDayRelayForcedOn ? LOW : HIGH);
+    digitalWrite(RelayNightPin, isNightRelayForcedOn ? HIGH : LOW);
+    digitalWrite(RelayDayPin, isDayRelayForcedOn ? HIGH : LOW);
   } else {
     // Дневное реле
     bool dayOn = false;
@@ -2186,7 +2229,7 @@ void relayLoop() {
         dayOn = true;
       }
     }
-    digitalWrite(RelayDayPin, dayOn ? LOW : HIGH);
+    digitalWrite(RelayDayPin, dayOn ? HIGH : LOW);
     
     // Ночное реле (с поддержкой перехода через полночь)
     bool nightOn = false;
@@ -2207,7 +2250,7 @@ void relayLoop() {
       }
     }
     
-    digitalWrite(RelayNightPin, nightOn ? LOW : HIGH);
+    digitalWrite(RelayNightPin, nightOn ? HIGH : LOW);
   }
 }
 
@@ -2328,13 +2371,13 @@ void relaySetTime(int hour, int minute, int minLimit, int highLimit, byte paramI
 
     if (enc.isTurn()) {               // Если был поворот в любую сторону
               
-      if (enc.isRight()) {     // Был поворов вправо
+      if (checkEncIsRightRotate()) {     // Был поворов вправо
         ++hour;
         if (hour>highLimit) 
           hour = minLimit;
       }
               
-      if (enc.isLeft()) {     // Был поворот влево
+      if (checkEncIsRightRotate()) {     // Был поворот влево
         --hour;
         if (hour<minLimit) 
           hour = highLimit;
@@ -2365,13 +2408,13 @@ void relaySetTime(int hour, int minute, int minLimit, int highLimit, byte paramI
 
     if (enc.isTurn()) {               // Если был поворот в любую сторону
       
-      if (enc.isRight()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         minute += 5;
         if (minute > 55) 
           minute = 0;
       }
                           
-      if (enc.isLeft()) {     // Был поворот влево
+      if (checkEncIsRightRotate()) {     // Был поворот влево
         minute -= 5;
         if (minute < 0) 
           minute = 55;
@@ -2444,8 +2487,6 @@ bool setTimeParam(TimeParam &param, int* A, bool isLast = false) {
     
     if(needRedraw) {
 
-      Serial.println(param.currentValue);
-
       // Очищаем область отображения
       lcd.clear();
       // Отображаем значение
@@ -2475,7 +2516,6 @@ bool setTimeParam(TimeParam &param, int* A, bool isLast = false) {
             result = "SUBBOTA";  // Т
             break;
         }
-        Serial.println(result);
         lcd.print(result);
       } else if(param.isYear) {
         lcd.print(param.currentValue);
@@ -2492,13 +2532,13 @@ bool setTimeParam(TimeParam &param, int* A, bool isLast = false) {
     
     // Обработка энкодера
     if(enc.isTurn()) {
-      if(enc.isRight()) {
+      if(checkEncIsLeftRotate()) {
         param.currentValue++;
         if(param.currentValue > param.maxValue) {
           param.currentValue = param.minValue;
         }
       }
-      if(enc.isLeft()) {
+      if(checkEncIsRightRotate()) {
         param.currentValue--;
         if(param.currentValue < param.minValue) {
           param.currentValue = param.maxValue;
@@ -2626,12 +2666,12 @@ byte functionSet(int Param, int limit, byte interval) {
     
     if (enc.isTurn()) {               // Если был поворот в любую сторону
       
-      if (enc.isRight()) {     // Был поворов вправо
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
         Param += interval;
         if (Param>limit) Param = 0;
       }
              
-      if (enc.isLeft()) {     // Был поворот влево
+      if (checkEncIsRightRotate()) {     // Был поворот влево
         Param -= interval;
         if (Param<=-1) Param = limit;
       }
