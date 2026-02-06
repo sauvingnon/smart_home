@@ -134,18 +134,16 @@ services:
     image: grafana/grafana:latest
     container_name: esp_grafana
     ports: 
-    # HTTPS с самоподписанным сертификатом (365 дней)
+    # Даем ей выход, порт 3000 занят remnawave, поэтому даем 3001 для просмотра логов,
+    # У графаны есть авторизация, включил. Но она по http, нужен переход на https
       - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_LOG_LEVEL=debug
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./certs/grafana.crt:/etc/grafana/certs/grafana.crt:ro
-      - ./certs/grafana.key:/etc/grafana/certs/grafana.key:ro
-      - ./certs/.grafana.ini:/etc/grafana/grafana.ini:ro
     restart: unless-stopped
-    mem_limit: 150m
+    mem_limit: 150m          # ← ДОБАВИТЬ
     mem_reservation: 75m
     cpus: "0.5"
     depends_on:
@@ -154,7 +152,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "--silent", "https://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "--silent", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
