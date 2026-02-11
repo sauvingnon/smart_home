@@ -79,9 +79,9 @@ def get_relay_handle_keyboard(settings: SettingsData) -> InlineKeyboardMarkup:
     
     # Определяем текущий режим и состояние
     if settings.relayMode:  # Ручной режим
-        relay_mode_text = "🔄 Ручной режим (переключить на Авто)"
+        relay_mode_text = "🔄 Переключить на Авто"
     else:  # Автоматический режим
-        relay_mode_text = "⏰ Автоматический режим (переключить на Ручной)"
+        relay_mode_text = "⏰ Переключить на Ручной"
         
     day_state_icon = "🟢" if settings.manualDayState else "🔴"
     night_state_icon = "🟢" if settings.manualNightState else "🔴"
@@ -92,42 +92,12 @@ def get_relay_handle_keyboard(settings: SettingsData) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text=day_button_text, callback_data="change_relay_handle_day")],
             [InlineKeyboardButton(text=night_button_text, callback_data="change_relay_handle_night")],
-            [InlineKeyboardButton(text="📝 НАСТРОИТЬ РАСПИСАНИЕ", callback_data="set_relay_auto_day")],
+            [InlineKeyboardButton(text="📝 Расписание дневного", callback_data="set_relay_auto_day")],
+            [InlineKeyboardButton(text="📝 Расписание ночного", callback_data="set_relay_auto_night")],
             [InlineKeyboardButton(text=relay_mode_text, callback_data="change_relay_mode")],
             [InlineKeyboardButton(text="Назад", callback_data="settings")]
         ]
     )
-
-
-# Старые статичные клавиатуры оставляем для совместимости (но больше не используются)
-display_timeout_keyboard = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="• 10 секунд", callback_data="set_display_timeout_10")],
-        [InlineKeyboardButton(text="• 30 секунд", callback_data="set_display_timeout_30")],
-        [InlineKeyboardButton(text="• 60 секунд", callback_data="set_display_timeout_60")],
-        [InlineKeyboardButton(text="Назад", callback_data="settings")]
-    ]
-)
-
-display_mode_keyboard = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="Постоянный", callback_data="set_display_mode_0")],
-        [InlineKeyboardButton(text="Автоматический", callback_data="set_display_mode_1")],
-        [InlineKeyboardButton(text="Умный", callback_data="set_display_mode_2")],
-        [InlineKeyboardButton(text="Назад", callback_data="settings")]
-    ]
-)
-
-relay_handle_keyboard = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="ВКЛ\ОТКЛ ДНЕВНОЙ", callback_data="change_relay_handle_day")],
-        [InlineKeyboardButton(text="ВКЛ\ОТКЛ НОЧНОЙ", callback_data="change_relay_handle_night")],
-        [InlineKeyboardButton(text="НАСТРОИТЬ ДНЕВНОЙ", callback_data="set_relay_auto_day")],
-        [InlineKeyboardButton(text="НАСТРОИТЬ НОЧНОЙ", callback_data="set_relay_auto_night")],
-        [InlineKeyboardButton(text="Переключить режим реле", callback_data="change_relay_mode")],
-        [InlineKeyboardButton(text="Назад", callback_data="settings")]
-    ]
-)
 
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура с кнопкой отмены"""
