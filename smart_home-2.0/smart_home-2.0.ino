@@ -184,6 +184,12 @@ RelaySchedule dayRelay;
 RelaySchedule nightRelay;
 RelaySchedule toiletRelay;
 
+// Показывать текущее состояние
+boolean showTempScreen;
+// Показывать прогноз
+boolean showForecastScreen;
+// Время между экранами
+byte displayChangeModeTimeout;
 // Режим работы платы онлайн\оффлайн
 boolean isOfflineModeActive;
 // Для режима работы экрана
@@ -216,8 +222,6 @@ boolean exitFlag;
 #define DISPLAY_MODE_TEMP 1
 // Отображение прогноза погоды
 #define DISPLAY_MODE_FORECAST 2
-// Таймаут для отображения каждого режима - 10 сек.
-#define TIME_INTERVAL 10000
 // Таймаут для опроса внутреннего датчика - 20 сек.
 #define SENSOR_UPDATE_INTERVAL 20000
 // Таймаут обновления дисплея - 1 сек.
@@ -298,18 +302,29 @@ void loop() {
   }
   
   // 2. АВТОМАТИЧЕСКАЯ СМЕНА РЕЖИМОВ (раз в 10 секунд)
-  if (millis() - lastModeSwitch >= TIME_INTERVAL) {
+  if (millis() - lastModeSwitch >= displayChangeModeTimeout*1000) {
     lastModeSwitch = millis();
 
     bool weatherIsFresh = (current_weather.received_at > 0 && 
                           current_weather.isFresh());
 
-    if (currentDisplayMode == DISPLAY_MODE_TIME) 
-      currentDisplayMode = DISPLAY_MODE_TEMP;
-    else if (currentDisplayMode == DISPLAY_MODE_TEMP && weatherIsFresh)
-      currentDisplayMode = DISPLAY_MODE_FORECAST;
-    else 
-      currentDisplayMode = DISPLAY_MODE_TIME;
+    switch (currentDisplayMode) {
+      case DISPLAY_MODE_TIME:
+        if (showTempScreen) {
+          currentDisplayMode = DISPLAY_MODE_TEMP;
+          break;
+        }
+      case DISPLAY_MODE_TEMP:
+        if (weatherIsFresh && showForecastScreen) {
+          currentDisplayMode = DISPLAY_MODE_FORECAST;
+          break;
+        }
+      case DISPLAY_MODE_FORECAST:
+        currentDisplayMode = DISPLAY_MODE_TIME;
+        break;
+      default:
+        currentDisplayMode = DISPLAY_MODE_TIME;
+    }
 
     needRedraw = true; // Принудительная перерисовка при смене режима
     colonVisible = true; // Сбрасываем состояние двоеточия
@@ -840,16 +855,16 @@ void mainMenuFirst() {
       lcd.createChar(4, bukva_EE);
       lcd.createChar(5, bukva_ZH);
       lcd.createChar(6, bukva_I);
-      lcd.createChar(7, bukva_I);
+      lcd.createChar(7, bukva_CH);
 
       lcd.setCursor (1, 0);
-      lcd.print("PE\5\6M \4KPAHA");
+      lcd.print("HACTPO\3KA \4KPAHA");
       lcd.setCursor (1, 1);
-      lcd.print("TA\3MA\1T \4KPAHA");
+      lcd.print("HACTP PE\5\6MA PE\2E");
       lcd.setCursor (1, 2);
-      lcd.print("PE\5\6M PE\2E");
+      lcd.print("P\1\7HO\3 PE\5\6M");
       lcd.setCursor (1, 3);
-      lcd.print("HACTPO\3KA PE\2E");
+      lcd.print("ABTOMAT\6\7. PE\5\6M");
       lcd.setCursor(0, k);
       lcd.print(">");
       needRedraw = false;         // Изменений нет - отрисовка завершена
@@ -886,25 +901,149 @@ void mainMenuFirst() {
           
     if (enc.isPress()) {      // Если было нажатие кнопки энкодера
       switch (k) {
-        // Режим экрана
+        // Настройка экрана
         case 0:
-          screenModeSettings();      
+          screenSettings();      
           break;
-        // Время подсветки экрана
+        // Настройка режима реле
         case 1:  
-          screenTimeSettings();
-          break;
-        // Режим реле
-        case 2:
           relayModeSettings();
           break;
-        case 3:
-        // Настройки реле
-          if(isManualModeRelayEnabled) 
-            settingsForManualRelay();
-          else 
-            settingsForAutoRelay();
+        // Настройка ручного режима
+        case 2:
+          settingsForManualRelay();
           break;
+        // Настройка автоматического режима
+        case 3:
+          settingsForAutoRelay();
+      }
+
+      needRedraw = true;
+    
+    }
+
+  }
+
+}
+
+// Все настройки экрана
+void screenSettings() {
+
+  lcd.clear();
+  k = 0;                            // Курсор в исходном положении
+  needRedraw = true;                   // Для еденичной отрисовки
+
+  // Бесокнечный цикл
+  while (true) {
+
+    enc.tick();
+    updateButtons();
+
+    if (yellowPressed) {
+      resetButtonFlags();
+      lcd.clear();
+      needRedraw = true;
+      return;
+    }
+
+    yield();
+
+    // Требуется отрисовка
+    if (needRedraw) {
+
+      lcd.createChar(1, bukva_Y);
+      lcd.createChar(2, bukva_L);
+      lcd.createChar(3, bukva_IY);
+      lcd.createChar(4, bukva_EE);
+      lcd.createChar(5, bukva_D);
+      lcd.createChar(6, bukva_G);
+      lcd.createChar(7, bukva_P);
+
+      lcd.setCursor (1, 0);
+      lcd.print("TA\3MA\1T \4KPAHA");
+      lcd.setCursor (16, 0);
+      lcd.print(displayTimeoutSeconds);
+      lcd.setCursor (1, 1);
+      lcd.print("CMEHA \4KPAHA");
+      lcd.setCursor (16, 1);
+      lcd.print(displayChangeModeTimeout);
+      lcd.setCursor (1, 2);
+      lcd.print("\4KPAH \7PO\6HO3A");
+      lcd.setCursor (16, 2);
+      if (showForecastScreen) {
+        lcd.print("\5A ");
+      } else {
+        lcd.print("HET");
+      }
+      lcd.setCursor (1, 3);
+      lcd.print("\4KPAH TEM\7EPAT");
+      lcd.setCursor (16, 3);
+      if (showTempScreen) {
+        lcd.print("\5A ");
+      } else {
+        lcd.print("HET");
+      }
+      lcd.setCursor(0, k);
+      lcd.print(">");
+      needRedraw = false;         // Изменений нет - отрисовка завершена
+    }
+
+    if (enc.isTurn()){     // Если был поворот в любую сторону
+      lcd.setCursor(0, k);
+      lcd.print(" ");
+      
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
+        k++;
+
+        if(k>=4){      // Переход на меню 2
+          k = 0;   
+          lcd.clear();                     // Отчистка дисплея          
+          needRedraw = true;                   // Для еденичной отрисовки
+        }
+
+      } 
+      if (checkEncIsRightRotate()) {      // Был поворот влево
+        k--;
+        
+        if (k <= -1) {           // Переход на меню 2
+            k = 3;
+            lcd.clear();                     // Отчистка дисплея          
+            needRedraw = true;                   // Для еденичной отрисовки
+          }
+          
+      } 
+          
+      needRedraw = true;   // Есть изменения - необходимо отрисовать
+    } 
+          
+    if (enc.isPress()) {      // Если было нажатие кнопки энкодера
+      byte result;
+      switch (k) {
+        // Настройка таймаута
+        case 0:
+          result = functionSet(displayTimeoutSeconds, 250, 5);
+          settings.setDisplayTimeout(result);
+          settings.save();
+          displayTimeoutSeconds = result;   
+          break;
+        // Настройка смены режимов
+        case 1:  
+          result = functionSet(displayChangeModeTimeout, 250, 1);
+          settings.setDisplayChangeModeTimeout(result);
+          settings.save();
+          displayChangeModeTimeout = result;  
+          break;
+        // Настройка показа экрана прогноза
+        case 2:
+          showForecastScreen = !showForecastScreen;
+          settings.setShowForecastScreen(showForecastScreen);
+          settings.save();
+          break;
+        // Настройка показа экрана температуры
+        case 3:
+          showTempScreen = !showTempScreen;
+          settings.setShowTempScreen(showTempScreen);
+          settings.save();
       }
 
       needRedraw = true;
@@ -940,7 +1079,7 @@ void relayModeSettings() {
     if (yellowPressed) {
       resetButtonFlags();
       lcd.clear();
-      k = 2;
+      k = 1;
       needRedraw = true;
       return;
     }
@@ -996,78 +1135,6 @@ void relayModeSettings() {
       settings.setRelayMode(isManualModeRelayEnabled);
       settings.save();
       needRedraw = true;
-    }
-
-  }
-
-}
-
-// Настройка времени работы экрана
-void screenTimeSettings() {
-
-  lcd.clear();
-  needRedraw = true;                   // Для еденичной отрисовки
-
-  byte counter = displayTimeoutSeconds;
-
-  // Бесокнечный цикл
-  while (true) {
-
-    updateButtons();
-
-    if (yellowPressed) {
-      resetButtonFlags();
-      lcd.clear();
-      needRedraw = true;
-      return;
-    }
-
-    yield();
-
-    // Требуется отрисовка
-    if (needRedraw) {
-
-      lcd.createChar(4, bukva_EE);
-      lcd.createChar(5, bukva_D);
-      lcd.createChar(6, bukva_Y);
-      lcd.createChar(7, bukva_Ya);
-      lcd.setCursor (0, 0);
-      lcd.print("----BPEM\7 \4KPAHA----");
-      lcd.setCursor (0, 2);
-      lcd.print("           ");
-      lcd.setCursor (7, 2);
-      lcd.print(counter);
-      lcd.setCursor (11, 2);
-      lcd.print("CEK\6H\5");
-      needRedraw = false;         // Изменений нет - отрисовка завершена
-    }
-
-    enc.tick();
-
-    if (enc.isTurn()){     // Если был поворот в любую сторону
-
-      if (checkEncIsLeftRotate()) {     // Был поворов вправо
-        counter += 5;
-        if(counter>=251){      // Переход на меню 2
-          counter = 5;   
-        }
-      } 
-      if (checkEncIsRightRotate()) {      // Был поворот влево
-        counter -= 5;
-        if (counter <= 4) {           // Переход на меню 2
-            counter = 250;
-          }  
-      }
-
-      needRedraw = true;
-    } 
-          
-    if (enc.isPress()) {      // Если было нажатие кнопки энкодера
-      settings.setDisplayTimeout(counter);
-      settings.save();
-      displayTimeoutSeconds = counter;
-      needRedraw = true;
-      return;
     }
 
   }
@@ -1186,12 +1253,12 @@ void mainMenuSecond() {
       lcd.createChar(4, bukva_EE);
       lcd.createChar(5, bukva_Y);
       lcd.createChar(6, bukva_I);
-      lcd.createChar(7, bukva_B);
+      lcd.createChar(7, bukva_ZH);
 
       lcd.setCursor (1, 0);
       lcd.print("HACTPO\3KA CET\6");
       lcd.setCursor (1, 1);
-      lcd.print("C\7POC HACTPOEK");
+      lcd.print("PE\7\6M \4KPAHA");
       lcd.setCursor (1, 2);
       lcd.print("HACTPO\3KA Bluetooth");
       lcd.setCursor (1, 3);
@@ -1231,6 +1298,10 @@ void mainMenuSecond() {
           
       needRedraw = true;   // Есть изменения - необходимо отрисовать
     } 
+
+    if (enc.isHolded()) {
+      setDefaultSettings();
+    }
           
     if (enc.isPress()) {      // Если было нажатие кнопки энкодера
       switch(k){
@@ -1240,7 +1311,7 @@ void mainMenuSecond() {
           break;
         // Сброс настроек
         case 1:
-          setDefaultSettings();
+          screenModeSettings();
           break;
         // Настройка блютуза
         case 2:
@@ -1709,7 +1780,7 @@ void settingsForManualRelay() {
       resetButtonFlags();
       lcd.clear();
       needRedraw = true;
-      k = 3;
+      k = 2;
       return;                 
     }
   }
@@ -2208,7 +2279,12 @@ void loadSettingsInMemory() {
   fanDuration = settings.getFanDuration();
   // Статус оффлайн режима
   isOfflineModeActive = settings.getOfflineMode();
-
+  // Показывать экран температуры
+  showTempScreen = settings.getShowTempScreen();
+  // Показыать экран прогноза
+  showForecastScreen = settings.getShowForecastScreen();
+  // Таймаут смены экранов
+  displayChangeModeTimeout = settings.getDisplayChangeModeTimeout();
   // ВНИМАНИЕ! Функция вызывается после изменений настроек для загрузки их
   // в оперативную память. Это центральное место для примененя настроек.
   
@@ -2335,10 +2411,6 @@ void sendSettingsToBluetooth() {
   Serial.print(toiletRelay.stopHour);
   Serial.print("-");
   Serial.print(toiletRelay.stopMinute);
-  Serial.print("-");
-  Serial.print(isManualModeRelayEnabled ? 0 : 1);
-  Serial.print("-");
-  Serial.print(isDayRelayForcedOn ? 1 : 0);
   Serial.print(")");
 }
 

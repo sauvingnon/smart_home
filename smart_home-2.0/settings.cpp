@@ -125,6 +125,12 @@ String Settings::toJSON(bool pretty) {
   doc["fanDuration"] = data.fanDuration;
 
   doc["offlineModeActive"] = data.offlineModeActive;
+
+  doc["displayChangeModeTimeout"] = data.displayChangeModeTimeout;
+
+  doc["showForecastScreen"] = data.showForecastScreen;
+
+  doc["showTempScreen"] = data.showTempScreen;
   
   // Сериализуем в строку
   String output;
@@ -185,6 +191,9 @@ bool Settings::fromJSON(String json) {
   if (doc.containsKey("fanDuration")) newData.fanDuration = doc["fanDuration"];
 
   if (doc.containsKey("offlineModeActive")) newData.offlineModeActive = doc["offlineModeActive"];
+  if (doc.containsKey("displayChangeModeTimeout")) newData.displayChangeModeTimeout = doc["displayChangeModeTimeout"];
+  if (doc.containsKey("showForecastScreen")) newData.showForecastScreen = doc["showForecastScreen"];
+  if (doc.containsKey("showTempScreen")) newData.showTempScreen = doc["showTempScreen"];
   
   // Валидируем данные
   data = newData;
@@ -252,11 +261,16 @@ void Settings::setDefaultValues() {
   data.manualDayState = false;
   data.manualNightState = false;
   
+  data.displayChangeModeTimeout = 20;
   data.displayTimeout = 30;
   data.fanDelay = 60;
   data.fanDuration = 5;
 
   data.offlineModeActive = false;
+
+  data.showForecastScreen = true;
+
+  data.showTempScreen = true;
 }
 
 bool Settings::validateData() {
@@ -270,6 +284,7 @@ bool Settings::validateData() {
   if (!validateTime(data.toiletOnHour, data.toiletOnMinute)) return false;
   if (!validateTime(data.toiletOffHour, data.toiletOffMinute)) return false;
   
+  if (data.displayChangeModeTimeout > 255) return false;
   if (data.displayTimeout > 255) return false; // byte ограничение
   if (data.fanDelay > 255) return false;
   if (data.fanDuration > 255) return false;
@@ -379,6 +394,18 @@ void Settings::setFanSettings(byte delaySec, byte durationMin) {
 
 void Settings::setOfflineMode(bool offlineModeActive) {
   data.offlineModeActive = offlineModeActive;
+}
+
+void Settings::setDisplayChangeModeTimeout(byte displayChangeModeTimeout) {
+  data.displayChangeModeTimeout = displayChangeModeTimeout;
+}
+
+void Settings::setShowForecastScreen(bool showForecastScreen) {
+  data.showForecastScreen = showForecastScreen;
+}
+
+void Settings::setShowTempScreen(bool showTempScreen) {
+  data.showTempScreen = showTempScreen;
 }
 
 // === СЛУЖЕБНЫЕ МЕТОДЫ ===

@@ -31,12 +31,23 @@ struct SettingsData {
   // Время горения дисплея (секунды)
   byte displayTimeout = 30;
   
+  // Время смены режима дисплея
+  byte displayChangeModeTimeout = 20;
+
+  // Показывать экран с прогнозом
+  bool showForecastScreen = true;
+
+  // Показывать экран с температурой
+  bool showTempScreen = true;
+  
   // Вентилятор
   byte fanDelay = 60;     // секунд до включения
   byte fanDuration = 5;   // минут работы после выхода
 
   // Интернет
   bool offlineModeActive = false;
+
+
 };
 
 class Settings {
@@ -85,6 +96,12 @@ public:
   byte getFanDuration() const { return data.fanDuration; }
 
   bool getOfflineMode() const { return data.offlineModeActive; }
+
+  bool getShowTempScreen() const { return data.showTempScreen; }
+
+  bool getShowForecastScreen() const { return data.showForecastScreen; }
+
+  byte getDisplayChangeModeTimeout() const { return data.displayChangeModeTimeout; }
   
   // === СЕТТЕРЫ ===
   void setData(const SettingsData& newData);
@@ -102,6 +119,12 @@ public:
   void setFanSettings(byte delaySec, byte durationMin);
 
   void setOfflineMode(bool offlineModeActive);
+
+  void setShowForecastScreen(bool showForecastScreen);
+
+  void setShowTempScreen(bool showTempScreen);
+
+  void setDisplayChangeModeTimeout(byte displayChangeModeTimeout);
   
   // === СЛУЖЕБНЫЕ МЕТОДЫ ===
   void printToSerial();                    // Вывод в Serial
