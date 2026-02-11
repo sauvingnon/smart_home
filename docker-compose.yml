@@ -97,7 +97,7 @@ services:
         condition: service_started
     networks:
       - internal
-    # ports:
+    ports:
     # Мы не даем Web API, все через бота, а бот тоже в контейнерной сети
       - "8005:8005"
     mem_limit: 200m
