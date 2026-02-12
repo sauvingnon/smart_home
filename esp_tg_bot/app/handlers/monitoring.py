@@ -52,9 +52,13 @@ async def monitoring_func(message: Message):
         
         # Форматируем время
         last_update = timestamp_utc.strftime("%H:%M:%S")
+
+        # Флаг того, что данные актуальны
+        no_info = True
         
         # Определяем свежесть данных
         if time_ago < 60:
+            no_info = False
             freshness = "🟢 Только что"
         elif time_ago < 300:  # 5 минут
             freshness = f"🟡 {int(time_ago//60)} мин назад"

@@ -130,6 +130,18 @@ services:
       retries: 2
       start_period: 30s  # боту нужно больше времени на старт
 
+  esp_tg_app:
+    build: ./esp_tg_app
+    container_name: esp_tg_app
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://esp_service:8005  # Внутренняя сеть!
+    mem_limit: 300m
+    cpus: '0.5'
+
   esp_grafana:
     image: grafana/grafana:latest
     container_name: esp_grafana

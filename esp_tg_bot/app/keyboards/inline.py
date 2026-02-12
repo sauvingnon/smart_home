@@ -5,6 +5,7 @@ from app.schemas.settings import SettingsData
 
 # 📌 Команды, отображаемые в меню Telegram
 commands = [
+    BotCommand(command="panel", description="🎛 Управление ESP"),
     BotCommand(command="start", description="🏠 Перезапуск"),
     BotCommand(command="monitor", description="📊 Мониторинг"),
     BotCommand(command="settings", description="⚙️ Настройки")

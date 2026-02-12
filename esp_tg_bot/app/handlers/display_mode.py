@@ -67,12 +67,6 @@ async def handle_display_mode(callback: CallbackQuery):
             parse_mode="Markdown"
         )
         
-        # Здесь отправляем команду на устройство через MQTT
-        # await send_display_mode_to_device(
-        #     device_id="greenhouse_01",
-        #     mode=mode
-        # )
-        
         await callback.answer(f"Режим {mode_name} установлен")
         
     except ValueError:
