@@ -2,12 +2,11 @@ import { NextRequest } from 'next/server';
 
 const BACKEND_URL = 'http://esp_service:8005';
 
-// Правильная типизация для Next.js 15+
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> }
+  { params }: any  
 ) {
-  const { path } = await params;  // 👈 Ждём Promise
+  const { path } = await params;
   const pathString = path.join('/');
   const url = `${BACKEND_URL}/${pathString}`;
   
@@ -24,9 +23,9 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> }
+  { params }: any 
 ) {
-  const { path } = await params;  // 👈 И здесь тоже
+  const { path } = await params;
   const pathString = path.join('/');
   const url = `${BACKEND_URL}/${pathString}`;
   
