@@ -30,8 +30,7 @@ export default function Dashboard() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8005';
-      const response = await fetch(`${API_URL}/esp_service/telemetry`);
+      const response = await fetch('/api/proxy/esp_service/telemetry');
       const result = await response.json();
       
       setData(result);
