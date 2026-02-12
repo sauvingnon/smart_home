@@ -2,8 +2,7 @@
 from fastapi import FastAPI
 from logger import logger
 import asyncio
-import signal
-import sys
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.services.redis.cache_manager import CacheManager
 from app.services.weather_service.yandex_weather import WeatherService
@@ -108,6 +107,14 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Сервис остановлен корректно")
 
 app = FastAPI(lifespan=lifespan, title="ESP Ядро")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"],  # для разработки
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 async def health():
