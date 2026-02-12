@@ -118,12 +118,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid grid-cols-4 mb-6">
-            <TabsTrigger value="schedule">Расписание</TabsTrigger>
-            <TabsTrigger value="relay">Реле</TabsTrigger>
-            <TabsTrigger value="display">Экран</TabsTrigger>
-            <TabsTrigger value="fan">Вентилятор</TabsTrigger>
-          </TabsList>
+          <TabsList className="grid grid-cols-4 mb-6 bg-slate-200 dark:bg-slate-800 p-1">
+            <TabsTrigger 
+                value="schedule" 
+                className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm">
+                Расписание
+            </TabsTrigger>
+            <TabsTrigger 
+                value="relay"
+                className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm">
+                Реле
+            </TabsTrigger>
+            <TabsTrigger 
+                value="display"
+                className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm">
+                Экран
+            </TabsTrigger>
+            <TabsTrigger 
+                value="fan"
+                className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm">
+                Вентилятор
+            </TabsTrigger>
+            </TabsList>
 
           {/* ВКЛАДКА: РАСПИСАНИЕ */}
           <TabsContent value="schedule" className="space-y-6">
