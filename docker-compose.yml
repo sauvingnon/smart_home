@@ -141,7 +141,6 @@ services:
       - "127.0.0.1:3008:3008" 
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://esp_service:8005  # Внутренняя сеть!
     mem_limit: 300m
     cpus: '0.5'
 

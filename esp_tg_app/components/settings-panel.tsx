@@ -33,8 +33,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const fetchSettings = async () => {
     try {
       setLoading(true);
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8005';
-      const response = await fetch(`${API_URL}/esp_service/telemetry`);
+      const response = await fetch('/api/proxy/esp_service/settings');
       const data = await response.json();
       setSettings(data);
     } catch (error) {
@@ -50,13 +49,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     
     try {
       setSaving(true);
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8005';
-      const response = await fetch(`${API_URL}/esp_service/settings`, {
+      const response = await fetch('/api/proxy/esp_service/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
       });
-      
+            
       if (response.ok) {
         // Показать уведомление об успехе
       }
