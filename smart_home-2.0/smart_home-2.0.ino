@@ -289,6 +289,10 @@ void loop() {
   if (enc.isHolded()) {
     activateSilentMode();
   }
+
+  if (enc.isRightH() || enc.isLeftH()) {
+    activateForcedVentilation();
+  }
   
   // Обработка зелёной кнопки
   if (greenPressed) {
@@ -399,10 +403,10 @@ void displayOfflineMode() {
   lcd.createChar(5, bukva_Y);
   lcd.createChar(4, bukva_P);
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("HET CET\7");
   lcd.setCursor(0, 1);
-  lcd.print("WiFi HE \6OCT\5\4EH");
+  lcd.print("      HET CET\7");
+  lcd.setCursor(0, 2);
+  lcd.print("  WiFi HE \6OCT\5\4EH");
   delay(2000);
 }
 
@@ -413,10 +417,10 @@ void displayOnlineWithoutMQTT() {
   lcd.createChar(5, bukva_Y);
   lcd.createChar(4, bukva_P);
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("HET CET\7");
   lcd.setCursor(0, 1);
-  lcd.print("MQTT HE \6OCT\5\4EH");
+  lcd.print("      HET CET\7");
+  lcd.setCursor(0, 2);
+  lcd.print("  MQTT HE \6OCT\5\4EH");
   delay(1500);
 }
 
@@ -426,10 +430,10 @@ void displayConnected() {
   lcd.createChar(6, bukva_G);
   lcd.createChar(5, bukva_B);
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("BCE C\7CTEMb|: OK");
   lcd.setCursor(0, 1);
-  lcd.print("\6OTOB K PA\5OTE");
+  lcd.print("  BCE C\7CTEMb|: OK");
+  lcd.setCursor(0, 2);
+  lcd.print("   \6OTOB K PA\5OTE");
   delay(1500);
 }
 
@@ -1913,13 +1917,47 @@ void activateSilentMode() {
   lcd.createChar(6, bukva_ZH);
   lcd.createChar(5, bukva_SH);
 
-  lcd.setCursor (0, 0);
-  lcd.print("  AKT\7B\7POBAH PE\6\7M");
   lcd.setCursor (0, 1);
+  lcd.print("  AKT\7B\7POBAH PE\6\7M");
+  lcd.setCursor (0, 2);
   lcd.print("      T\7\5\7Hb|");
 
   delay(3000);
+  lcd.clear();
 
+}
+
+// Запуск принудительной вентиляции
+void activateForcedVentilation() {
+
+  lcd.clear();
+
+  lcd.createChar(7, bukva_I);
+  lcd.createChar(6, bukva_P);
+  lcd.createChar(5, bukva_Y);
+  lcd.createChar(4, bukva_D);
+  lcd.createChar(3, bukva_L);
+  lcd.createChar(2, bukva_Ya);
+  lcd.createChar(1, bukva_TS);
+
+  lcd.setCursor (0, 0);
+  lcd.print("   \6P\7H\5\4\7TE\3bHA\2");
+  lcd.setCursor (0, 1);
+  lcd.print("     BEHT\7\3\2\1\7\2");
+   delay(2000);
+  lcd.setCursor (0, 2);
+  lcd.print("   KO\3-BO M\7H:");
+  k = 2;
+  byte result = functionSet(0, 30, 1);
+
+  if (result == 0){
+    return;
+  }
+
+  settings.setForcedVentilationTimeout(result);
+  sendSettingsToBluetooth();
+
+  lcd.clear();
 
 }
 
@@ -1957,7 +1995,7 @@ void setupNetwork(){
 // Подключение к WiFi (5 попыток)
 bool connectToWiFi() {
   lcd.clear();
-  lcd.setCursor(0, 0);
+  lcd.setCursor(0, 1);
   lcd.print("WiFi: ");
   lcd.print(ssid);
   WiFi.begin(ssid, password);
@@ -1969,7 +2007,7 @@ bool connectToWiFi() {
     attempts++;
 
     lcd.createChar(7, bukva_P);
-    lcd.setCursor(0, 1);
+    lcd.setCursor(0, 2);
     lcd.print("\7O\7b|TKA ");
     lcd.print(attempts);
     lcd.print("/");
@@ -1984,7 +2022,7 @@ bool connectToWiFi() {
     while (millis() - animationStart < 3000 && WiFi.status() != WL_CONNECTED) {
       if (millis() - lastDotUpdate > 500) {
         lastDotUpdate = millis();
-        lcd.setCursor(15, 1);
+        lcd.setCursor(15, 2);
         switch (dotAnimation % 3) {
           case 0: lcd.print(".  "); break;
           case 1: lcd.print(".. "); break;
@@ -1998,9 +2036,9 @@ bool connectToWiFi() {
 
   if (WiFi.status() == WL_CONNECTED) {
     lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi: OK        ");
     lcd.setCursor(0, 1);
+    lcd.print("      WiFi: OK");
+    lcd.setCursor(0, 2);
     lcd.print("IP: ");
     lcd.print(WiFi.localIP());
     delay(800);
@@ -2017,8 +2055,8 @@ bool connectToMQTT() {
   lcd.createChar(6, bukva_P);
   lcd.createChar(5, bukva_D);
   lcd.createChar(4, bukva_Y);
-  lcd.setCursor(0, 0);
-  lcd.print("MQTT \7POKEP");
+  lcd.setCursor(0, 1);
+  lcd.print("       CEPBEP");
   mqtt.setDeviceId("greenhouse_01");
 
   int attempts = 0;
@@ -2027,7 +2065,7 @@ bool connectToMQTT() {
   while (attempts < maxAttempts) {
     attempts++;
 
-    lcd.setCursor(0, 1);
+    lcd.setCursor(0, 2);
     lcd.print("\6O\6b|TKA ");
     lcd.print(attempts);
     lcd.print("/");
@@ -2046,7 +2084,7 @@ bool connectToMQTT() {
       if (millis() - lastDotUpdate > 500) {
         lastDotUpdate = millis();
 
-        lcd.setCursor(15, 1);
+        lcd.setCursor(15, 2);
         switch (dotAnimation % 3) {
           case 0: lcd.print(".  "); break;
           case 1: lcd.print(".. "); break;
@@ -2057,10 +2095,10 @@ bool connectToMQTT() {
 
       if (mqtt.connected()) {
         lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("MQTT: OK       ");
         lcd.setCursor(0, 1);
-        lcd.print("\7POKEP \5OCT\4\6EH");
+        lcd.print("     CEPBEP: OK");
+        lcd.setCursor(0, 2);
+        lcd.print("  CEPBEP \5OCT\4\6EH");
         delay(800);
         return true;
       }
@@ -2421,11 +2459,6 @@ void updateTime() {
 
 // Отправить данные настроек по bluetooth
 void sendSettingsToBluetooth() {
-
-  if (isBluetoothConnected() == false) {
-    return;
-  }
-
   Serial.print("S(");
   Serial.print(fanDelay);
   Serial.print("-");
@@ -2447,11 +2480,6 @@ void sendSettingsToBluetooth() {
 
 // Синхронизировать время по bluetooth (только часы и минуты)
 void sendTimeToBluetooth(int hour, int minute) {
-
-  if (isBluetoothConnected() == false) {
-    return;
-  }
-
   Serial.print("T(");
   Serial.print(String(hour));
   Serial.print(":");
@@ -2667,7 +2695,7 @@ bool setTimeParam(TimeParam &param, int* A, bool isLast = false) {
     }
     
     // Нажатие желтой кнопки - отмена
-    if(yellowPressed) {
+    if (yellowPressed) {
       resetButtonFlags();
       lcd.clear();
       needRedraw = true;
@@ -2703,7 +2731,7 @@ void setTime() {
   // Настраиваем каждый параметр
   for(int i = 0; i < 6; i++) {
     // Создаем пользовательские символы для текущего параметра
-    switch(i) {
+    switch (i) {
       case 0:  // Часы
         lcd.createChar(1, bukva_CH);
         break;
@@ -2731,7 +2759,7 @@ void setTime() {
     
     // Настраиваем параметр
     bool isLast = (i == 5); // Последний параметр - год
-    if(!setTimeParam(params[i], A, isLast)) {
+    if (!setTimeParam(params[i], A, isLast)) {
       // Отмена настройки
       return;
     }
@@ -2763,6 +2791,8 @@ byte functionSet(int Param, int limit, byte interval) {
   while (true) {              // Цикл настройки таймаута дисплея
 
     yield();
+
+    enc.tick();
 
     if (needRedraw) {                         
       lcd.setCursor(14, k);
