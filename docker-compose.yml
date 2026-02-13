@@ -97,9 +97,9 @@ services:
         condition: service_started
     networks:
       - internal
-    # ports:
+    ports:
     # Мы не даем Web API, все через бота, а бот тоже в контейнерной сети
-      # - "8005:8005"
+      - "8005:8005"
     mem_limit: 200m
     cpus: "0.5"
     healthcheck:
@@ -137,7 +137,7 @@ services:
     networks:
       - internal
     ports:
-    # Только локальный проброс
+    # Только локальный проброс, это для nginx
       - "127.0.0.1:3008:3008" 
     environment:
       - NODE_ENV=production
