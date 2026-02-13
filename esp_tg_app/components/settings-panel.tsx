@@ -35,7 +35,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       setLoading(true);
       // Фронт на 4443, API на 4444
       const API_BASE = 'https://tgapp.dotnetdon.ru:4444';
-      const response = await fetch(`${API_BASE}/esp_service/telemetry`);
+      const response = await fetch(`${API_BASE}/esp_service/settings`);
       const data = await response.json();
       setSettings(data);
     } catch (error) {
@@ -52,7 +52,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     try {
       setSaving(true);
       const API_BASE = 'https://tgapp.dotnetdon.ru:4444';
-      const response = await fetch(`${API_BASE}/esp_service/telemetry`, {
+      const response = await fetch(`${API_BASE}/esp_service/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
