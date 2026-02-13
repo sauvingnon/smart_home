@@ -137,11 +137,6 @@ struct WeatherData {
   bool isExpired() {
     return (millis() - received_at) > (2 * 60 * 60 * 1000UL); // 2 часа
   }
-  
-  // Функция проверки свежести (<30 минут)
-  bool isFresh() {
-    return (millis() - received_at) < (30 * 60 * 1000UL); // 30 минут
-  }
 };
 
 WeatherData current_weather; // Текущая погода
@@ -290,6 +285,7 @@ void loop() {
     activateSilentMode();
   }
 
+  // Поворот и одновременное удержание кнопки энкодера 
   if (enc.isRightH() || enc.isLeftH()) {
     activateForcedVentilation();
   }
@@ -315,7 +311,11 @@ void loop() {
     lastModeSwitch = millis();
 
     bool weatherIsFresh = (current_weather.received_at > 0 && 
-                          current_weather.isFresh());
+                          !current_weather.isExpired());
+
+    if (weatherIsFresh == false) {
+      requestForecast();
+    }
 
     switch (currentDisplayMode) {
       case DISPLAY_MODE_TIME:
@@ -597,7 +597,7 @@ void displayTimeMode() {
 void displayTempMode() {
 
   bool weatherIsFresh = (current_weather.received_at > 0 && 
-                          current_weather.isFresh());
+                          !current_weather.isExpired());
 
   // Создаем символ градуса если нужно
   lcd.createChar(7, bukva_ZH);  // Символ градуса
@@ -638,7 +638,6 @@ void displayTempMode() {
     lcd.createChar(2, bukva_TS);
     lcd.setCursor(0, 2);
     lcd.print("   HET \4H\3OPMA\2\4\4");
-    requestForecast();
   }
   
   
