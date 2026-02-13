@@ -420,7 +420,7 @@ void displayOnlineWithoutMQTT() {
   lcd.setCursor(0, 1);
   lcd.print("      HET CET\7");
   lcd.setCursor(0, 2);
-  lcd.print("  MQTT HE \6OCT\5\4EH");
+  lcd.print(" CEPBEP HE \6OCT\5\4EH");
   delay(1500);
 }
 
