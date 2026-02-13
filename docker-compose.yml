@@ -150,7 +150,7 @@ services:
     ports: 
     # Даем ей выход, порт 3000 занят remnawave, поэтому даем 3001 для просмотра логов,
     # У графаны есть авторизация, включил. Но она по http, нужен переход на https
-      - "3001:3000"
+      - "127.0.0.1:3010:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_LOG_LEVEL=debug

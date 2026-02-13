@@ -30,7 +30,9 @@ export default function Dashboard() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/proxy/esp_service/telemetry');
+      // Фронт на 4443, API на 4444
+      const API_BASE = 'https://tgapp.dotnetdon.ru:4444';
+      const response = await fetch(`${API_BASE}/esp_service/telemetry`);
       const result = await response.json();
       
       setData(result);
