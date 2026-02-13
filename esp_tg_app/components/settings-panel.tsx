@@ -33,7 +33,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const fetchSettings = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/proxy/esp_service/settings');
+      const API_BASE = window.location.origin; // https://tgapp.dotnetdon.ru:4443
+      const response = await fetch(`${API_BASE}/api/esp_service/settings`);
       const data = await response.json();
       setSettings(data);
     } catch (error) {
@@ -49,7 +50,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     
     try {
       setSaving(true);
-      const response = await fetch('/api/proxy/esp_service/settings', {
+      const API_BASE = window.location.origin; // https://tgapp.dotnetdon.ru:4443
+      const response = await fetch(`${API_BASE}/api/esp_service/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
