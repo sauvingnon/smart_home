@@ -38,7 +38,7 @@ class SettingsData(BaseModel):
     # Время горения дисплея (секунды)
     displayTimeout: int = Field(default=30, ge=0, le=3600, description="Таймаут дисплея в секундах")
     # Время отображения каждого режима (секунды)
-    displayChangeModeTimeout: int = Field(default=30, ge=0, le=3600, description="Таймаут смены режимов в секундах")
+    displayChangeModeTimeout: int = Field(default=20, ge=0, le=3600, description="Таймаут смены режимов в секундах")
     
     # Вентилятор
     fanDelay: int = Field(default=60, ge=0, description="Задержка вентилятора в секундах")
@@ -48,7 +48,7 @@ class SettingsData(BaseModel):
     offlineModeActive: bool = Field(default=False, description="Оффлайн режим")
 
     # Показывать экран прогноза погоды
-    showForecastScreen: bool = Field(default=False, description="Отображение прогноза погоды")
+    showForecastScreen: bool = Field(default=True, description="Отображение прогноза погоды")
 
     # Показывать экран датчиков
-    showTempScreen: bool = Field(default=False, description="Отображение данных с датчиков")
+    showTempScreen: bool = Field(default=True, description="Отображение данных с датчиков")

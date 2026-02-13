@@ -144,7 +144,7 @@ class CacheManager:
         return int(calls) if calls else 0
     
 
-    async def should_sync_time(self, device_id: str, sync_interval_days: int = 7) -> bool:
+    async def should_sync_time(self, device_id: str, sync_interval_days: int = 2) -> bool:
         """
         Проверяет, нужно ли синхронизировать время устройства.
         """

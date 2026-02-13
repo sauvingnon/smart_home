@@ -16,8 +16,8 @@ import pytz
 IZHEVSK_TZ = pytz.timezone('Europe/Samara')
 
 # Константы и тайминги по умолчанию
-DEFAULT_WEATHER_UPDATE_INTERVAL = 300  # 5 минут (в секундах)
-DEFAULT_TIME_UPDATE_INTERVAL = 86400  # 1 сутки
+DEFAULT_WEATHER_UPDATE_INTERVAL = 1800  # 30 минут (в секундах)
+DEFAULT_TIME_UPDATE_INTERVAL = 43200  # 12 часов
 DEFAULT_HEARTBEAT_INTERVAL = 60
 DEFAULT_DEVICE_ID = "greenhouse_01"
 
@@ -214,8 +214,9 @@ class WeatherBackgroundWorker:
     def _record_device_activity(self, activity_name: str = ""):
         """Запимать активность устройства (любое сообщение)"""
         self.last_activity_timestamp = self._get_izhevsk_time()
+        self.device_status = self._update_device_status()
         if activity_name:
-            logger.debug(f"📍 Активность: {activity_name}")
+            logger.debug(f"📍 Активность: {activity_name}. Статус устройства {self.device_status.value}")
 
     async def _check_heartbeat_esp_loop(self):
         """Периодическая проверка статуса устройства"""

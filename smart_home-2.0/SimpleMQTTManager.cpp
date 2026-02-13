@@ -1,5 +1,12 @@
 #include "SimpleMQTTManager.h"
 
+// Флаг для отладки - true = вывод в Serial, false = тишина
+static const bool MQTT_DEBUG = false;
+
+#define MQTT_DEBUG_PRINT(...) do { if (MQTT_DEBUG) Serial.print(__VA_ARGS__); } while(0)
+#define MQTT_DEBUG_PRINTLN(...) do { if (MQTT_DEBUG) Serial.println(__VA_ARGS__); } while(0)
+#define MQTT_DEBUG_PRINTF(...) do { if (MQTT_DEBUG) Serial.printf(__VA_ARGS__); } while(0)
+
 SimpleMQTTManager::SimpleMQTTManager(WiFiClient* wifi, 
                                      const String& server, 
                                      int port,
@@ -20,9 +27,9 @@ void SimpleMQTTManager::setDeviceId(const String& id) {
 
 bool SimpleMQTTManager::begin() {
   mqttClient->setServer(mqttServer.c_str(), mqttPort);
-  mqttClient->setKeepAlive(60); // 60 секунд keepalive
-
-  mqttClient->setBufferSize(512);
+  mqttClient->setKeepAlive(60);
+  
+  mqttClient->setBufferSize(1024);
   
   mqttClient->setCallback([this](char* topic, byte* payload, unsigned int length) {
     String topicStr = String(topic);
@@ -32,10 +39,10 @@ bool SimpleMQTTManager::begin() {
       message += (char)payload[i];
     }
     
-    // Serial.print("[MQTT] RX: ");
-    // Serial.print(topicStr);
-    // Serial.print(" -> ");
-    // Serial.println(message);
+    MQTT_DEBUG_PRINT("[MQTT] RX: ");
+    MQTT_DEBUG_PRINT(topicStr);
+    MQTT_DEBUG_PRINT(" -> ");
+    MQTT_DEBUG_PRINTLN(message);
     
     for (int i = 0; i < handlerCount; i++) {
       if (handlers[i].topic == topicStr) {
@@ -45,37 +52,36 @@ bool SimpleMQTTManager::begin() {
     }
   });
   
-  // Не пытаемся подключиться сразу - пусть это делает loop()
   return true;
 }
 
 bool SimpleMQTTManager::tryConnect() {
-  
   String clientId = deviceId;
   
   unsigned long start = millis();
   bool connected = false;
   
+  MQTT_DEBUG_PRINTLN("[MQTT] Attempting connection...");
+  
   while (millis() - start < CONNECT_TIMEOUT) {
-    // +++ ДОБАВЬ ЭТОТ БЛОК +++
     if (mqttUser.length() > 0 && mqttPassword.length() > 0) {
-      // Подключение с аутентификацией
       connected = mqttClient->connect(
         clientId.c_str(), 
         mqttUser.c_str(), 
         mqttPassword.c_str()
       );
-      // Serial.print("[MQTT] Connecting as: ");
-      // Serial.print(clientId);
-      // Serial.print(" with user: ");
-      // Serial.print(mqttUser);
-      // Serial.print(" password: ");
-      // Serial.println(mqttPassword.length() > 0 ? "***" : "(empty)");
+      
+      MQTT_DEBUG_PRINT("[MQTT] Connecting as: ");
+      MQTT_DEBUG_PRINT(clientId);
+      MQTT_DEBUG_PRINT(" with user: ");
+      MQTT_DEBUG_PRINT(mqttUser);
+      MQTT_DEBUG_PRINT(" password: ");
+      MQTT_DEBUG_PRINTLN(mqttPassword.length() > 0 ? "***" : "(empty)");
     } else {
-      // Подключение без аутентификации (старый код)
       connected = mqttClient->connect(clientId.c_str());
+      MQTT_DEBUG_PRINT("[MQTT] Connecting without auth as: ");
+      MQTT_DEBUG_PRINTLN(clientId);
     }
-    // +++ КОНЕЦ БЛОКА +++
     
     if (connected) break;
     
@@ -84,14 +90,14 @@ bool SimpleMQTTManager::tryConnect() {
   }
   
   if (connected) {
-    // Serial.println("[MQTT] Connected to broker");
+    MQTT_DEBUG_PRINTLN("[MQTT] Connected to broker");
     isConnected = true;
     resubscribeAll();
     return true;
   }
   
-  // Serial.print("[MQTT] Connection failed, state: ");
-  // Serial.println(mqttClient->state());
+  MQTT_DEBUG_PRINT("[MQTT] Connection failed, state: ");
+  MQTT_DEBUG_PRINTLN(mqttClient->state());
   isConnected = false;
   return false;
 }
@@ -100,24 +106,21 @@ void SimpleMQTTManager::resubscribeAll() {
   for (int i = 0; i < handlerCount; i++) {
     if (handlers[i].isSubscribed) {
       mqttClient->subscribe(handlers[i].topic.c_str());
-      // Serial.print("[MQTT] Subscribed to: ");
-      // Serial.println(handlers[i].topic);
+      MQTT_DEBUG_PRINT("[MQTT] Subscribed to: ");
+      MQTT_DEBUG_PRINTLN(handlers[i].topic);
     }
   }
 }
 
 bool SimpleMQTTManager::loop() {
-  // ВСЕГДА вызываем loop() клиента - он сам разберется
   bool clientOk = mqttClient->loop();
   
-  // Обновляем статус ПОСЛЕ вызова loop()
   isConnected = mqttClient->connected();
   
-  // ТОЛЬКО если отключены, пробуем переподключиться
   static unsigned long lastConnectTry = 0;
   if (!isConnected && millis() - lastConnectTry > 15000) {
     lastConnectTry = millis();
-    // Serial.println("[MQTT] Reconnecting...");
+    MQTT_DEBUG_PRINTLN("[MQTT] Reconnecting...");
     tryConnect();
   }
   
@@ -129,7 +132,7 @@ bool SimpleMQTTManager::addHandler(const String& topic,
                                    std::function<void(const String&, 
                                    const String&)> callback) {
   if (handlerCount >= MAX_HANDLERS) {
-    // Serial.println("[ERROR] Too many handlers");
+    MQTT_DEBUG_PRINTLN("[ERROR] Too many handlers");
     return false;
   }
   
@@ -140,6 +143,8 @@ bool SimpleMQTTManager::addHandler(const String& topic,
   
   if (isConnected) {
     mqttClient->subscribe(topic.c_str());
+    MQTT_DEBUG_PRINT("[MQTT] Subscribed to: ");
+    MQTT_DEBUG_PRINTLN(topic);
   }
   
   return true;
@@ -152,6 +157,8 @@ bool SimpleMQTTManager::removeHandler(const String& topic) {
         handlers[j] = handlers[j + 1];
       }
       handlerCount--;
+      MQTT_DEBUG_PRINT("[MQTT] Removed handler for: ");
+      MQTT_DEBUG_PRINTLN(topic);
       return true;
     }
   }
@@ -159,50 +166,50 @@ bool SimpleMQTTManager::removeHandler(const String& topic) {
 }
 
 bool SimpleMQTTManager::publish(const String& topic, const String& message) {
-  // Serial.println("\n=== PUBLISH DEBUG ===");
-  // Serial.print("1. isConnected: ");
-  // Serial.println(isConnected);
+  MQTT_DEBUG_PRINTLN("\n=== PUBLISH DEBUG ===");
+  MQTT_DEBUG_PRINT("1. isConnected: ");
+  MQTT_DEBUG_PRINTLN(isConnected);
   
   if (!isConnected) {
-    // Serial.println("❌ FAIL: not connected");
+    MQTT_DEBUG_PRINTLN("❌ FAIL: not connected");
     return false;
   }
   
   String fullTopic = deviceId + "/" + topic;
-  // Serial.print("2. Topic: ");
-  // Serial.println(fullTopic);
-  // Serial.print("3. Msg length: ");
-  // Serial.print(message.length());
-  // Serial.println(" chars");
+  MQTT_DEBUG_PRINT("2. Topic: ");
+  MQTT_DEBUG_PRINTLN(fullTopic);
+  MQTT_DEBUG_PRINT("3. Msg length: ");
+  MQTT_DEBUG_PRINT(message.length());
+  MQTT_DEBUG_PRINTLN(" chars");
   
-  // Serial.print("4. Calling mqttClient->publish()... ");
+  MQTT_DEBUG_PRINT("4. Calling mqttClient->publish()... ");
   bool result = mqttClient->publish(fullTopic.c_str(), message.c_str(), true);
   
-  // Serial.print("Result: ");
-  // Serial.println(result);
+  MQTT_DEBUG_PRINT("Result: ");
+  MQTT_DEBUG_PRINTLN(result);
   
-  // Serial.print("5. After publish, connected: ");
-  // Serial.println(mqttClient->connected());
-  // Serial.print("6. State: ");
-  // Serial.println(mqttClient->state());
+  MQTT_DEBUG_PRINT("5. After publish, connected: ");
+  MQTT_DEBUG_PRINTLN(mqttClient->connected());
+  MQTT_DEBUG_PRINT("6. State: ");
+  MQTT_DEBUG_PRINTLN(mqttClient->state());
   
   isConnected = mqttClient->connected();
   
-  // if (result) {
-  //   Serial.print("✅ TX: ");
-  //   Serial.print(fullTopic);
-  //   Serial.print(" -> ");
-  //   if (message.length() > 50) {
-  //     Serial.print(message.substring(0, 50));
-  //     Serial.println("...");
-  //   } else {
-  //     Serial.println(message);
-  //   }
-  // } else {
-  //   Serial.println("❌ PUBLISH FAILED");
-  // }
+  if (result) {
+    MQTT_DEBUG_PRINT("✅ TX: ");
+    MQTT_DEBUG_PRINT(fullTopic);
+    MQTT_DEBUG_PRINT(" -> ");
+    if (message.length() > 50) {
+      MQTT_DEBUG_PRINT(message.substring(0, 50));
+      MQTT_DEBUG_PRINTLN("...");
+    } else {
+      MQTT_DEBUG_PRINTLN(message);
+    }
+  } else {
+    MQTT_DEBUG_PRINTLN("❌ PUBLISH FAILED");
+  }
   
-  // Serial.println("=== END DEBUG ===\n");
+  MQTT_DEBUG_PRINTLN("=== END DEBUG ===\n");
   return result;
 }
 
