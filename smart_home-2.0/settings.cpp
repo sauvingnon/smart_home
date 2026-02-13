@@ -131,6 +131,10 @@ String Settings::toJSON(bool pretty) {
   doc["showForecastScreen"] = data.showForecastScreen;
 
   doc["showTempScreen"] = data.showTempScreen;
+
+  doc["forcedVentilationTimeout"] = data.forcedVentilationTimeout;
+
+  doc["silentMode"] = data.silentMode;
   
   // Сериализуем в строку
   String output;
@@ -194,6 +198,8 @@ bool Settings::fromJSON(String json) {
   if (doc.containsKey("displayChangeModeTimeout")) newData.displayChangeModeTimeout = doc["displayChangeModeTimeout"];
   if (doc.containsKey("showForecastScreen")) newData.showForecastScreen = doc["showForecastScreen"];
   if (doc.containsKey("showTempScreen")) newData.showTempScreen = doc["showTempScreen"];
+  if (doc.containsKey("silentMode")) newData.silentMode = doc["silentMode"];
+  if (doc.containsKey("forcedVentilationTimeout")) newData.forcedVentilationTimeout = doc["forcedVentilationTimeout"];
   
   // Валидируем данные
   data = newData;
@@ -271,6 +277,10 @@ void Settings::setDefaultValues() {
   data.showForecastScreen = true;
 
   data.showTempScreen = true;
+
+  data.silentMode = false;
+
+  data.forcedVentilationTimeout = 0;
 }
 
 bool Settings::validateData() {
@@ -288,6 +298,7 @@ bool Settings::validateData() {
   if (data.displayTimeout > 255) return false; // byte ограничение
   if (data.fanDelay > 255) return false;
   if (data.fanDuration > 255) return false;
+  if (data.forcedVentilationTimeout > 255) return false;
   
   return true;
 }
@@ -406,6 +417,14 @@ void Settings::setShowForecastScreen(bool showForecastScreen) {
 
 void Settings::setShowTempScreen(bool showTempScreen) {
   data.showTempScreen = showTempScreen;
+}
+
+void Settings::setForcedVentilationTimeout(byte forcedVentilationTimeout) {
+  data.forcedVentilationTimeout = forcedVentilationTimeout;
+}
+
+void Settings::setSilentMode(bool silentMode) {
+  data.silentMode = silentMode;
 }
 
 // === СЛУЖЕБНЫЕ МЕТОДЫ ===

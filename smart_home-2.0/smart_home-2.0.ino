@@ -284,6 +284,11 @@ void loop() {
     resetInactivityTimer();
     lcd.backlight();
   }
+
+  // Обработка удержания кнопки энкодера
+  if (enc.isHolded()) {
+    activateSilentMode();
+  }
   
   // Обработка зелёной кнопки
   if (greenPressed) {
@@ -1897,6 +1902,27 @@ void settingsForAutoRelay() {
   }
 }
 
+// Активация режима тишины и сообщение об этом
+void activateSilentMode() {
+
+  settings.setSilentMode(true);
+  sendSettingsToBluetooth();
+
+  lcd.clear();
+  lcd.createChar(7, bukva_I);
+  lcd.createChar(6, bukva_ZH);
+  lcd.createChar(5, bukva_SH);
+
+  lcd.setCursor (0, 0);
+  lcd.print("  AKT\7B\7POBAH PE\6\7M");
+  lcd.setCursor (0, 1);
+  lcd.print("      T\7\5\7Hb|");
+
+  delay(3000);
+
+
+}
+
 // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===========================================
 
 
@@ -2101,10 +2127,10 @@ void setupMQTTHandlers() {
       current_weather.update_at = doc["update_at"].as<String>();
   });
   
-  // Установка настройек с бекенда
+  // Установка настроек с бекенда
   mqtt.addHandler(set_config_topic, [](const String& topic, const String& msg) {
     settings.fromJSON(msg);
-    
+    settings.save();
     loadSettingsInMemory();
   });
 
@@ -2395,14 +2421,19 @@ void updateTime() {
 
 // Отправить данные настроек по bluetooth
 void sendSettingsToBluetooth() {
+
+  if (isBluetoothConnected() == false) {
+    return;
+  }
+
   Serial.print("S(");
   Serial.print(fanDelay);
   Serial.print("-");
   Serial.print(fanDuration);
   Serial.print("-");
-  Serial.print(0);
+  Serial.print(settings.getSilentMode() ? 1 : 0);
   Serial.print("-");
-  Serial.print(0);
+  Serial.print(settings.getForcedVentilationTimeout());
   Serial.print("-");
   Serial.print(toiletRelay.startHour);
   Serial.print("-");
@@ -2416,6 +2447,11 @@ void sendSettingsToBluetooth() {
 
 // Синхронизировать время по bluetooth (только часы и минуты)
 void sendTimeToBluetooth(int hour, int minute) {
+
+  if (isBluetoothConnected() == false) {
+    return;
+  }
+
   Serial.print("T(");
   Serial.print(String(hour));
   Serial.print(":");

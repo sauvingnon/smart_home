@@ -44,6 +44,12 @@ struct SettingsData {
   byte fanDelay = 60;     // секунд до включения
   byte fanDuration = 5;   // минут работы после выхода
 
+  // Режим тишины
+  bool silentMode = false;
+
+  // Принудительное вентилирование
+  byte forcedVentilationTimeout = 0;
+
   // Интернет
   bool offlineModeActive = false;
 
@@ -102,6 +108,18 @@ public:
   bool getShowForecastScreen() const { return data.showForecastScreen; }
 
   byte getDisplayChangeModeTimeout() const { return data.displayChangeModeTimeout; }
+
+  byte getForcedVentilationTimeout() {
+    byte value = data.forcedVentilationTimeout;
+    data.forcedVentilationTimeout = 0;
+    return value;
+  }
+
+  bool getSilentMode() {
+    bool value = data.silentMode;
+    data.silentMode = false;
+    return value;
+  }
   
   // === СЕТТЕРЫ ===
   void setData(const SettingsData& newData);
@@ -125,6 +143,10 @@ public:
   void setShowTempScreen(bool showTempScreen);
 
   void setDisplayChangeModeTimeout(byte displayChangeModeTimeout);
+
+  void setForcedVentilationTimeout(byte forcedVentilationTimeout);
+
+  void setSilentMode(bool silentMode);
   
   // === СЛУЖЕБНЫЕ МЕТОДЫ ===
   void printToSerial();                    // Вывод в Serial

@@ -36,13 +36,13 @@ class SettingsData(BaseModel):
     manualNightState: bool = Field(default=False, description="Ручное состояние ночного реле")
     
     # Время горения дисплея (секунды)
-    displayTimeout: int = Field(default=30, ge=0, le=3600, description="Таймаут дисплея в секундах")
+    displayTimeout: int = Field(default=30, ge=0, le=255, description="Таймаут дисплея в секундах")
     # Время отображения каждого режима (секунды)
-    displayChangeModeTimeout: int = Field(default=20, ge=0, le=3600, description="Таймаут смены режимов в секундах")
+    displayChangeModeTimeout: int = Field(default=20, ge=0, le=255, description="Таймаут смены режимов в секундах")
     
     # Вентилятор
-    fanDelay: int = Field(default=60, ge=0, description="Задержка вентилятора в секундах")
-    fanDuration: int = Field(default=5, ge=0, description="Длительность работы вентилятора в минутах")
+    fanDelay: int = Field(default=60, ge=0, le=255, description="Задержка вентилятора в секундах")
+    fanDuration: int = Field(default=5, ge=0, le=255, description="Длительность работы вентилятора в минутах")
     
     # Интернет
     offlineModeActive: bool = Field(default=False, description="Оффлайн режим")
@@ -52,3 +52,9 @@ class SettingsData(BaseModel):
 
     # Показывать экран датчиков
     showTempScreen: bool = Field(default=True, description="Отображение данных с датчиков")
+
+    # Режим тишины
+    silentMode: bool = Field(default=False, description="Режим тишины")
+
+    # Принудительное вентилирование
+    forcedVentilationTimeout: int = Field(default=0, ge=0, le=255, description="Длительность принудительной работы вентилятора в минутах")
