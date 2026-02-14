@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Thermometer, Droplets, Wind, Fan, Lightbulb, Gauge, Clock, AlertCircle } from 'lucide-react'
+import { Thermometer, Droplets, Bluetooth, Fan, Lightbulb, Gauge, Clock, AlertCircle } from 'lucide-react'
 import SettingsPage from './SettingsPage'
 import { API_ENDPOINTS } from '../config'
 
@@ -110,9 +110,9 @@ export default function HomePage() {
                 </div>
 
                 <div className="climate-stats">
-                  <div className="stat"><Clock className="icon-xs"/> {formatUptime(data?.uptime)}</div>
-                  <div className="stat"><Gauge className="icon-xs"/> {data ? `${Math.round((data.free_memory||0)/1024)}Кб` : '--'}</div>
-                  <div className="stat"><Wind className="icon-xs"/> {data?.bluetooth_is_active ? 'BT вкл' : 'BT выкл'}</div>
+                  <div className="stat"><Clock className="icon-xs"/> <span>{formatUptime(data?.uptime)}</span></div>
+                  <div className="stat"><Gauge className="icon-xs"/> <span>{data ? `${Math.round((data.free_memory||0)/1024)}Кб` : '--'}</span></div>
+                  <div className="stat"><Bluetooth className="icon-xs"/> <span>{data?.bluetooth_is_active ? 'Bluetooth активен' : 'Bluetooth неактивен'}</span></div>
                 </div>
               </>
             )}

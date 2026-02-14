@@ -110,9 +110,9 @@
 .icon-sm { width:14px; height:14px }
 .big-val { font-size:2.5rem; font-weight:700 }
 .unit { font-size:1rem; opacity:0.95 }
-.climate-stats { margin-top:0.9rem; display:grid; grid-template-columns:repeat(3,1fr); gap:0.5rem; font-size:1.1rem }
-.stat { display:flex; align-items:center; gap:0.5rem; color:rgba(255,255,255,0.9) }
-.icon-xs { width:14px; height:14px }
+.climate-stats { margin-top:1.4rem; padding:1rem; display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; font-size:1.1rem; background:rgba(255,255,255,0.15); border-radius:8px }
+.stat { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.4rem; color:rgba(255,255,255,0.95); padding:0.6rem; background:rgba(255,255,255,0.08); border-radius:6px }
+.icon-xs { width:18px; height:18px }
 
 .control-card { padding:0 }
 .card-header { padding:0.8rem 1rem; font-weight:600; font-size:1.2rem }
@@ -220,7 +220,9 @@
   .device-title { font-size:2.2rem }
   .big-val { font-size:3rem }
   .label { font-size:1.3rem }
-  .climate-stats { font-size:1.3rem }
+  .climate-stats { font-size:1.3rem; padding:1.2rem; gap:1.2rem; margin-top:1.6rem }
+  .stat { padding:0.8rem; font-size:1.15rem }
+  .icon-xs { width:22px; height:22px }
   .card-header { font-size:1.4rem }
   .font-medium { font-size:1.3rem }
   .section-title { font-size:1.5rem }
