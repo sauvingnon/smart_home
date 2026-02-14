@@ -111,7 +111,10 @@ app = FastAPI(lifespan=lifespan, title="ESP Ядро")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://tgapp.dotnetdon.ru:4443"],  # или ["*"] для теста
+    allow_origins=[
+        "https://tgapp.dotnetdon.ru:4443",
+        "http://localhost:5173",  # для локальной разработки
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
