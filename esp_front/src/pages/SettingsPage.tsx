@@ -385,7 +385,7 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
                 <span className="text-sm">Режим тишины</span>
                 <button 
                   className={`silent-mode-btn ${settings.silentMode ? 'active' : ''}`}
-                  onClick={() => update('silentMode', true)}
+                  onClick={() => update('silentMode', !settings.silentMode)}
                 >
                   <span className="silent-icon">🔇</span>
                   Активировать режим тишины
@@ -398,13 +398,13 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
                 <div className="number-control forced-control">
                   <button 
                     className="btn-mini" 
-                    onClick={() => update('forcedVentilationTimeout', Math.max(0, settings.forcedVentilationTimeout - 5))}
+                    onClick={() => update('forcedVentilationTimeout', Math.max(0, settings.forcedVentilationTimeout - 1))}
                     disabled={settings.forcedVentilationTimeout <= 0}
                   >−</button>
-                  <span className="value">{settings.forcedVentilationTimeout} сек</span>
+                  <span className="value">{settings.forcedVentilationTimeout} мин</span>
                   <button 
                     className="btn-mini" 
-                    onClick={() => update('forcedVentilationTimeout', Math.min(3600, settings.forcedVentilationTimeout + 5))}
+                    onClick={() => update('forcedVentilationTimeout', Math.min(30, settings.forcedVentilationTimeout + 1))}
                   >+</button>
                 </div>
               </div>
@@ -413,9 +413,9 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
               <div className="control-with-buttons">
                 <span className="text-sm">Задержка перед включением</span>
                 <div className="number-control">
-                  <button className="btn-mini" onClick={() => update('fanDelay', Math.max(0, settings.fanDelay - 5))}>−</button>
+                  <button className="btn-mini" onClick={() => update('fanDelay', Math.max(0, settings.fanDelay - 10))}>−</button>
                   <span className="value">{settings.fanDelay} сек</span>
-                  <button className="btn-mini" onClick={() => update('fanDelay', Math.min(255, settings.fanDelay + 5))}>+</button>
+                  <button className="btn-mini" onClick={() => update('fanDelay', Math.min(255, settings.fanDelay + 10))}>+</button>
                 </div>
               </div>
 

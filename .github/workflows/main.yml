@@ -83,7 +83,7 @@ jobs:
             echo ""
             echo "🚨 Проверка: все сервисы running?"
             FAIL=0
-            for c in esp_grafana esp_promtail esp_redis esp_loki mosquitto esp_tg_bot esp_service; do
+            for c in esp_grafana esp_promtail esp_redis esp_loki mosquitto esp_tg_bot esp_service esp_front; do
               STATUS=$(sudo docker inspect -f "{{.State.Status}}" ${c} || echo "missing")
               echo "$c -> $STATUS"
               if [ "$STATUS" != "running" ]; then
