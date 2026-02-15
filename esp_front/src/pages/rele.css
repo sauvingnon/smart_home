@@ -1,0 +1,229 @@
+/* Таб реле */
+.tab-space {
+  padding: 16px 12px;
+}
+
+/* Заголовок раздела */
+.fan-section {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 18px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 20px;
+  color: white;
+  text-align: center;
+}
+
+.fan-section h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* КОНТЕЙНЕР КНОПОК АВТО/РУЧНОЙ - вертикально */
+.segment-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+/* КНОПКИ АВТО И РУЧНОЙ - во всю ширину */
+.segment {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px 12px;
+  background: white;
+  border: 2px solid #e2e8f0;
+  border-radius: 30px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+}
+
+/* Активная кнопка */
+.segment.active {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border-color: #2563eb;
+  color: white;
+  box-shadow: 0 8px 16px -4px rgba(37, 99, 235, 0.4);
+}
+
+/* Эмодзи в кнопках */
+.segment:first-child::before {
+  content: "⚡";
+  font-size: 24px;
+}
+
+.segment:last-child::before {
+  content: "🖐️";
+  font-size: 24px;
+}
+
+/* Текст под кнопками */
+.text-xs.muted {
+  text-align: center;
+  font-size: 14px;
+  color: #888;
+  margin: 12px 0 20px;
+  padding: 0 10px;
+  line-height: 1.5;
+}
+
+/* Контролы реле в ручном режиме */
+.relay-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 20px 0;
+}
+
+/* Карточка переключателя */
+.relay-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+  padding: 20px 18px;
+  border-radius: 24px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.05);
+  border: 1px solid #f0f0f0;
+}
+
+.relay-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.relay-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 30px;
+}
+
+.relay-icon.day {
+  background: #fff9e6;
+  color: #f39c12;
+}
+
+.relay-icon.night {
+  background: #e8f0fe;
+  color: #34495e;
+}
+
+.relay-info p {
+  margin: 0;
+}
+
+.relay-info .font-medium {
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.relay-info .text-xs {
+  font-size: 13px;
+  color: #888;
+}
+
+/* Стили для switch (как в iOS) */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 60px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .3s;
+  border-radius: 34px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+input:checked + .slider {
+  background: linear-gradient(135deg, #4ade80, #22c55e);
+}
+
+input:checked + .slider:before {
+  transform: translateX(26px);
+}
+
+/* Инфо бокс */
+.info-box {
+  background: #f0f9ff;
+  border-radius: 20px;
+  padding: 16px 18px;
+  margin-top: 24px;
+  border: 1px solid #b8e1ff;
+  color: #0369a1;
+  font-size: 14px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Адаптив для совсем маленьких */
+@media (max-width: 380px) {
+  .segment {
+    padding: 16px 8px;
+    font-size: 16px;
+    gap: 8px;
+  }
+  
+  .segment:first-child::before,
+  .segment:last-child::before {
+    font-size: 20px;
+  }
+  
+  .relay-switch {
+    padding: 16px 14px;
+  }
+  
+  .relay-icon {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .relay-info .font-medium {
+    font-size: 16px;
+  }
+}

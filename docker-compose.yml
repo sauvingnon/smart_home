@@ -130,19 +130,19 @@ services:
       retries: 2
       start_period: 30s  # боту нужно больше времени на старт
 
-  # esp_tg_app:
-  #   build: ./esp_tg_app
-  #   container_name: esp_tg_app
-  #   restart: unless-stopped
-  #   networks:
-  #     - internal
-  #   ports:
-  #   # Только локальный проброс, это для nginx
-  #     - "127.0.0.1:3008:3008" 
-  #   environment:
-  #     - NODE_ENV=production
-  #   mem_limit: 300m
-  #   cpus: '0.5'
+  esp_front:
+    build: ./esp_front
+    container_name: esp_front
+    restart: unless-stopped
+    networks:
+      - internal
+    ports:
+    # Только локальный проброс, это для nginx
+      - "127.0.0.1:3008:3008" 
+    environment:
+      - NODE_ENV=production
+    mem_limit: 300m
+    cpus: '0.5'
 
   esp_grafana:
     image: grafana/grafana:latest

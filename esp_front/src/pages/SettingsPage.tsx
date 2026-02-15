@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Clock, Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud, Settings2 } from 'lucide-react'
 import { API_ENDPOINTS } from '../config'
+import './SettingsPage.css'
+import './rele.css'
+import './screen.css'
 
 type SettingsPageProps = {
   onClose?: () => void
@@ -45,6 +48,7 @@ const defaultSettings: Settings = {
   offlineModeActive: false, showForecastScreen: true, showTempScreen: true,
   silentMode: false, forcedVentilationTimeout: 0,
 }
+
 
 export default function SettingsPage({ onClose }: SettingsPageProps) {
   const [settings, setSettings] = useState<Settings>(defaultSettings)
@@ -123,40 +127,124 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
 
       <div className="tabs-container">
         <div className="tabs-list">
-          {['schedule', 'relay', 'display', 'fan'].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} className={`tab-trigger ${activeTab === tab ? 'active' : ''}`}>
-              {tab === 'schedule' && 'Расписание'}
-              {tab === 'relay' && 'Реле'}
-              {tab === 'display' && 'Экран'}
-              {tab === 'fan' && 'Вентилятор'}
+          {[
+            { id: 'schedule', label: '📅 Расписание' },
+            { id: 'relay', label: '⚡ Реле' },
+            { id: 'display', label: '🖥️ Экран' },
+            { id: 'fan', label: '🌀 Вентилятор' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`tab-trigger ${activeTab === tab.id ? 'active' : ''}`}
+            >
+              <span className="tab-icon">{tab.icon}</span>
+              <span className="tab-label">{tab.label}</span>
+              {activeTab === tab.id && <span className="tab-active-indicator" />}
             </button>
           ))}
         </div>
 
+
         <div className="tabs-content">
           {activeTab === 'schedule' && (
             <div className="tab-space">
+
+              <div className="fan-section">
+                <Fan style={{ width: 20, height: 20 }} />
+                <h3 className="font-medium">Настройки расписания</h3>
+              </div>
+
               <div className="schedule-section">
-                <h3 className="section-title sun-color"><Sun style={{ width: 16, height: 16 }} />Дневной свет</h3>
+                <h3 className="section-title sun-color">
+                  <Sun style={{ width: 16, height: 16 }} />
+                  Дневной свет
+                </h3>
                 <div className="schedule-grid">
-                  <div><label>Включение</label><TimeInput hour={settings.dayOnHour} minute={settings.dayOnMinute} onHourChange={h => update('dayOnHour', h)} onMinuteChange={m => update('dayOnMinute', m)} /></div>
-                  <div><label>Выключение</label><TimeInput hour={settings.dayOffHour} minute={settings.dayOffMinute} onHourChange={h => update('dayOffHour', h)} onMinuteChange={m => update('dayOffMinute', m)} /></div>
+                  <div className="time-input-wrapper">
+                    <label>Включение</label>
+                    <div className="time-controls">
+                      <TimeInput 
+                        hour={settings.dayOnHour} 
+                        minute={settings.dayOnMinute} 
+                        onHourChange={h => update('dayOnHour', h)} 
+                        onMinuteChange={m => update('dayOnMinute', m)} 
+                      />
+                    </div>
+                  </div>
+                  <div className="time-input-wrapper">
+                    <label>Выключение</label>
+                    <div className="time-controls">
+                      <TimeInput 
+                        hour={settings.dayOffHour} 
+                        minute={settings.dayOffMinute} 
+                        onHourChange={h => update('dayOffHour', h)} 
+                        onMinuteChange={m => update('dayOffMinute', m)} 
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div className="schedule-section">
-                <h3 className="section-title moon-color"><Moon style={{ width: 16, height: 16 }} />Ночной свет</h3>
+                <h3 className="section-title moon-color">
+                  <Moon style={{ width: 16, height: 16 }} />
+                  Ночной свет
+                </h3>
                 <div className="schedule-grid">
-                  <div><label>Включение</label><TimeInput hour={settings.nightOnHour} minute={settings.nightOnMinute} onHourChange={h => update('nightOnHour', h)} onMinuteChange={m => update('nightOnMinute', m)} /></div>
-                  <div><label>Выключение</label><TimeInput hour={settings.nightOffHour} minute={settings.nightOffMinute} onHourChange={h => update('nightOffHour', h)} onMinuteChange={m => update('nightOffMinute', m)} /></div>
+                  <div className="time-input-wrapper">
+                    <label>Включение</label>
+                    <div className="time-controls">
+                      <TimeInput 
+                        hour={settings.nightOnHour} 
+                        minute={settings.nightOnMinute} 
+                        onHourChange={h => update('nightOnHour', h)} 
+                        onMinuteChange={m => update('nightOnMinute', m)} 
+                      />
+                    </div>
+                  </div>
+                  <div className="time-input-wrapper">
+                    <label>Выключение</label>
+                    <div className="time-controls">
+                      <TimeInput 
+                        hour={settings.nightOffHour} 
+                        minute={settings.nightOffMinute} 
+                        onHourChange={h => update('nightOffHour', h)} 
+                        onMinuteChange={m => update('nightOffMinute', m)} 
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div className="schedule-section">
-                <h3 className="section-title bath-color"><Bath style={{ width: 16, height: 16 }} />Уборная</h3>
+                <h3 className="section-title bath-color">
+                  <Bath style={{ width: 16, height: 16 }} />
+                  Уборная
+                </h3>
                 <div className="schedule-grid">
-                  <div><label>Включение</label><TimeInput hour={settings.toiletOnHour} minute={settings.toiletOnMinute} onHourChange={h => update('toiletOnHour', h)} onMinuteChange={m => update('toiletOnMinute', m)} /></div>
-                  <div><label>Выключение</label><TimeInput hour={settings.toiletOffHour} minute={settings.toiletOffMinute} onHourChange={h => update('toiletOffHour', h)} onMinuteChange={m => update('toiletOffMinute', m)} /></div>
+                  <div className="time-input-wrapper">
+                    <label>Включение</label>
+                    <div className="time-controls">
+                      <TimeInput 
+                        hour={settings.toiletOnHour} 
+                        minute={settings.toiletOnMinute} 
+                        onHourChange={h => update('toiletOnHour', h)} 
+                        onMinuteChange={m => update('toiletOnMinute', m)} 
+                      />
+                    </div>
+                  </div>
+                  <div className="time-input-wrapper">
+                    <label>Выключение</label>
+                    <div className="time-controls">
+                      <TimeInput 
+                        hour={settings.toiletOffHour} 
+                        minute={settings.toiletOffMinute} 
+                        onHourChange={h => update('toiletOffHour', h)} 
+                        onMinuteChange={m => update('toiletOffMinute', m)} 
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -164,13 +252,19 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
 
           {activeTab === 'relay' && (
             <div className="tab-space">
+
+              <div className="fan-section">
+                <Fan style={{ width: 20, height: 20 }} />
+                <h3 className="font-medium">Настройки реле</h3>
+              </div>
+
               <div className="relay-segment">
                 <div className="relay-icon"><Settings2 style={{ width: 16, height: 16 }} /></div>
                 <span className="font-medium">Режим управления</span>
               </div>
               <div className="segment-control">
-                <button onClick={() => update('relayMode', false)} className={`segment ${!settings.relayMode ? 'active' : ''}`}>⚡ Автоматический</button>
-                <button onClick={() => update('relayMode', true)} className={`segment ${settings.relayMode ? 'active' : ''}`}>🖐️ Ручной</button>
+                <button onClick={() => update('relayMode', false)} className={`segment ${!settings.relayMode ? 'active' : ''}`}>Автоматический</button>
+                <button onClick={() => update('relayMode', true)} className={`segment ${settings.relayMode ? 'active' : ''}`}>Ручной</button>
               </div>
               <p className="text-xs muted">{!settings.relayMode ? 'Реле работают по расписанию' : 'Управляйте реле вручную ниже'}</p>
 
@@ -214,6 +308,12 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
 
           {activeTab === 'display' && (
             <div className="tab-space">
+
+              <div className="fan-section">
+                <Fan style={{ width: 20, height: 20 }} />
+                <h3 className="font-medium">Настройки экрана</h3>
+              </div>
+
               <div className="display-section">
                 <div className="display-icon"><Monitor style={{ width: 16, height: 16 }} /></div>
                 <span className="font-medium">Режим экрана</span>
@@ -276,10 +376,40 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
           {activeTab === 'fan' && (
             <div className="tab-space">
               <div className="fan-section">
-                <div><Fan style={{ width: 20, height: 20 }} /></div>
+                <Fan style={{ width: 20, height: 20 }} />
                 <h3 className="font-medium">Настройки вентиляции</h3>
               </div>
 
+              {/* Кнопка режима тишины */}
+              <div className="control-with-buttons silent-mode-control">
+                <span className="text-sm">Режим тишины</span>
+                <button 
+                  className={`silent-mode-btn ${settings.silentMode ? 'active' : ''}`}
+                  onClick={() => update('silentMode', true)}
+                >
+                  <span className="silent-icon">🔇</span>
+                  Активировать режим тишины
+                </button>
+              </div>
+
+              {/* Принудительное вентилирование */}
+              <div className="control-with-buttons">
+                <span className="text-sm">Принудительное вентилирование</span>
+                <div className="number-control forced-control">
+                  <button 
+                    className="btn-mini" 
+                    onClick={() => update('forcedVentilationTimeout', Math.max(0, settings.forcedVentilationTimeout - 5))}
+                    disabled={settings.forcedVentilationTimeout <= 0}
+                  >−</button>
+                  <span className="value">{settings.forcedVentilationTimeout} сек</span>
+                  <button 
+                    className="btn-mini" 
+                    onClick={() => update('forcedVentilationTimeout', Math.min(3600, settings.forcedVentilationTimeout + 5))}
+                  >+</button>
+                </div>
+              </div>
+
+              {/* Существующие поля */}
               <div className="control-with-buttons">
                 <span className="text-sm">Задержка перед включением</span>
                 <div className="number-control">
