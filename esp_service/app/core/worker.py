@@ -298,6 +298,18 @@ class WeatherBackgroundWorker:
             
             # Ждем перед следующим обновлением
             await asyncio.sleep(self.update_board_weather_interval)
+
+    async def get_weather(self) -> Optional[WeatherData]:
+        """Получить погоду"""
+        try:
+
+            weather = await self.cache.get_cached_weather()
+        
+            return weather            
+            
+        except Exception as e:
+            logger.exception(f"❌ Ошибка получения погоды из кеша: {e}")
+            return None
     
     async def send_to_board_weather_from_cache(self):
         """Отправка данных на аппаратную плату"""

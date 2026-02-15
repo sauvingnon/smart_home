@@ -10,7 +10,7 @@ from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.core.worker import WeatherBackgroundWorker
 from config import YANDEX_WEATHER_API_KEY, REDIS_URL, MQTT_BROKER_HOST, MQTT_BROKER_PORT
 import os
-from app.api.endpoints import telemetry, settings
+from app.api.endpoints import telemetry, settings, weather
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -126,3 +126,4 @@ async def health():
 
 app.include_router(telemetry.router)
 app.include_router(settings.router)
+app.include_router(weather.router)
