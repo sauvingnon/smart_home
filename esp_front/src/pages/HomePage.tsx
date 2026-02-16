@@ -7,7 +7,7 @@ import {
   Sunrise, Sunset
 } from 'lucide-react'
 import SettingsPage from './SettingsPage'
-import { API_ENDPOINTS } from '../config'
+import { apiClient } from '../api/client';
 
 // Тип для данных погоды
 type WeatherData = {
@@ -110,7 +110,7 @@ export default function HomePage() {
   const fetchData = async () => {
     try {
       setLoading(true)
-      const res = await fetch(API_ENDPOINTS.telemetry)
+      const res = await apiClient.fetch('/esp_service/telemetry')
       if (!res.ok) throw new Error('fetch')
       const json = await res.json()
       setData(json)
@@ -127,7 +127,7 @@ export default function HomePage() {
   const fetchWeather = async () => {
     try {
       setWeatherLoading(true)
-      const res = await fetch(API_ENDPOINTS.weather)
+      const res = await apiClient.fetch('/esp_service/weather')
       if (!res.ok) throw new Error('weather fetch')
       const json = await res.json()
       setWeather(json)

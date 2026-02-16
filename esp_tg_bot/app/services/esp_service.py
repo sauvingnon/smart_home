@@ -4,6 +4,8 @@ from app.services.client import client
 from typing import Optional
 from app.schemas.telemetry import TelemetryData
 from app.schemas.settings import SettingsData
+from app.schemas.auth import KeyResponse
+from config import BOT_SECRET
 import httpx
 from logger import logger
 
@@ -104,4 +106,46 @@ async def set_settings(settings: SettingsData) -> Optional[bool]:
         return False
     except Exception as e:
         logger.exception(f"❌ Неожиданная ошибка при отправке настроек: {e}")
+        return None
+
+
+async def get_key(user_id: int) -> Optional[KeyResponse]:
+    """
+    Получить ключ авторизации.
+    """
+    try:
+        # Отправляем POST запрос на генерацию ключа
+        response = await client.post(
+            "/auth/generate_key",
+            params={"user_id": user_id},
+            headers={"X-Bot-Secret": BOT_SECRET}
+        )
+        
+        # Проверяем статус ответа
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(f"✅ Ключ успешно получен для user_id {user_id}")
+            return KeyResponse(**data)
+            
+        elif response.status_code == 403:
+            logger.error(f"❌ Неверный секрет бота")
+            return None
+            
+        elif response.status_code == 404:
+            logger.warning("⚠️ Эндпоинт генерации ключа не найден")
+            return None
+            
+        else:
+            logger.error(f"❌ Ошибка получения ключа: {response.status_code}")
+            response.raise_for_status()
+            return None
+            
+    except httpx.HTTPStatusError as e:
+        logger.error(f"❌ HTTP ошибка при получении ключа: {e}")
+        if e.response.status_code == 404:
+            return None
+        return None
+        
+    except Exception as e:
+        logger.exception(f"❌ Неожиданная ошибка при получении ключа: {e}")
         return None

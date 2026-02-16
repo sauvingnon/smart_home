@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Clock, Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud, Settings2 } from 'lucide-react'
-import { API_ENDPOINTS } from '../config'
 import './SettingsPage.css'
 import './rele.css'
 import './screen.css'
+import { apiClient } from '../api/client';
 
 type SettingsPageProps = {
   onClose?: () => void
@@ -60,7 +60,7 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
     let mounted = true
     const fetchSettings = async () => {
       try {
-        const res = await fetch(API_ENDPOINTS.settings)
+        const res = await apiClient.fetch('/esp_service/settings')
         if (res.ok) {
           const json = await res.json()
           if (mounted) setSettings(json)
@@ -82,7 +82,7 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
   const saveSettings = async () => {
     setSaving(true)
     try {
-      await fetch(API_ENDPOINTS.settings, {
+      await apiClient.fetch('/esp_service/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
@@ -138,7 +138,7 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
               onClick={() => setActiveTab(tab.id)}
               className={`tab-trigger ${activeTab === tab.id ? 'active' : ''}`}
             >
-              <span className="tab-icon">{tab.icon}</span>
+              {/* <span className="tab-icon">{tab.icon}</span> */}
               <span className="tab-label">{tab.label}</span>
               {activeTab === tab.id && <span className="tab-active-indicator" />}
             </button>

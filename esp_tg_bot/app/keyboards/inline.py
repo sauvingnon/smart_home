@@ -5,7 +5,7 @@ from app.schemas.settings import SettingsData
 
 # 📌 Команды, отображаемые в меню Telegram
 commands = [
-    BotCommand(command="panel", description="🎛 Управление ESP"),
+    BotCommand(command="getkey", description="🎛 Авторизация"),
     BotCommand(command="start", description="🏠 Перезапуск"),
     BotCommand(command="monitor", description="📊 Мониторинг"),
     BotCommand(command="settings", description="⚙️ Настройки")
@@ -15,7 +15,8 @@ commands = [
 start_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="📊 Мониторинг", callback_data="monitor")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")]
+        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")],
+        [InlineKeyboardButton(text="🎛 Авторизация", callback_data="getkey")]
     ]
 )
 

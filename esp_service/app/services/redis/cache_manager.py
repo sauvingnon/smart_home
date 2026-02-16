@@ -5,6 +5,7 @@ from datetime import timedelta, datetime
 import json
 from logger import logger
 import asyncio
+import secrets
 
 # =================== КЭШ МЕНЕДЖЕР ===================
 class CacheManager:
@@ -13,6 +14,9 @@ class CacheManager:
     def __init__(self, redis_url: str):
         self.redis_client = None
         self.redis_url = redis_url
+        self.key_prefix = "access_key:"
+        self.key_ttl = timedelta(days=180)  # 180 дней жизни ключа
+
         
     async def connect(self, max_retries: int = 5, retry_delay: int = 2):
         for attempt in range(max_retries):
@@ -214,3 +218,52 @@ class CacheManager:
             
         except Exception as e:
             logger.error(f"Ошибка сохранения времени синхронизации для {device_id}: {e}")
+
+    async def generate_key(self, user_id: int) -> str:
+        """Генерирует новый ключ для пользователя."""
+        if not self.redis_client:
+            return
+        
+        if not await self._ensure_connection():
+            return
+        
+        # Генерируем случайный ключ
+        key = secrets.token_urlsafe(32)
+        redis_key = f"{self.key_prefix}{key}"
+            
+        try:
+            # Сохраняем на 10 минут
+            await self.redis_client.setex(
+                redis_key,
+                self.key_ttl,
+                str(user_id)
+            )
+            
+            # Обновляем счетчик вызовов за день
+            return key
+        except Exception as e:
+            logger.exception(f"Ошибка сохранения в кэш ключа: {e}")
+
+
+    async def validate_key(self, key: str) -> Optional[int]:
+        """Проверяет ключ, возвращает user_id если валиден"""
+        if not self.redis_client:
+            return
+        
+        if not await self._ensure_connection():
+            return
+        
+        redis_key = f"{self.key_prefix}{key}"
+        user_id = await self.redis_client.get(redis_key)
+
+        if user_id:
+            # Продлеваем жизнь ключа при каждом использовании
+            await self.redis_client.expire(redis_key, self.key_ttl)
+            return int(user_id)
+        
+        return None
+    
+    async def revoke_key(self, key: str) -> bool:
+        """Отзывает ключ"""
+        redis_key = f"{self.key_prefix}{key}"
+        return bool(await self.redis_client.delete(redis_key))

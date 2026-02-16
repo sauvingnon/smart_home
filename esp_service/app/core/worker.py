@@ -1,6 +1,6 @@
 from typing import Optional
-import uuid
-
+from fastapi import Request, HTTPException
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from app.services.redis.cache_manager import CacheManager
 from app.services.weather_service.yandex_weather import WeatherService
 import asyncio
@@ -448,6 +448,29 @@ class WeatherBackgroundWorker:
         logger.info(f"🌤️ Плата {device_id} запросила погоду")
         
         await self.send_to_board_weather_from_cache()
+
+    async def verify_access_key(
+        self,
+        request: Request
+    ) -> int:
+        """Проверяет X-Access-Key в заголовках"""
+        access_key = request.headers.get("X-Access-Key")
+        
+        if not access_key:
+            raise HTTPException(
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="Missing X-Access-Key header"
+            )
+        
+        user_id = await self.cache.validate_key(access_key)
+        
+        if not user_id:
+            raise HTTPException(
+                status_code=HTTP_403_FORBIDDEN,
+                detail="Invalid or expired key"
+            )
+        
+        return user_id
 
     def _get_izhevsk_time(self) -> datetime:
         """Текущее время в Ижевске"""
