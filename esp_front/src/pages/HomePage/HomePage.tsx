@@ -101,7 +101,7 @@ export default function HomePage() {
         <header className="header">
           <div>
             <h1 className="header-title">
-              {data?.device_id || 'Мой Дом'}
+              {'Умный дом'}
             </h1>
             <div className="status">
               <span className={`status-dot ${isStale ? 'offline' : 'online'}`}>

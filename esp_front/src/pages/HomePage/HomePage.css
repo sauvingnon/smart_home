@@ -744,3 +744,131 @@ body {
     font-size: 2rem;
   }
 }
+
+/* Глобальная защита от вылезаний */
+* {
+  max-width: 100%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  -webkit-hyphens: auto;
+  hyphens: auto;
+}
+
+/* Для контейнеров с настройками */
+.settings-container {
+  padding: 1rem 0.75rem; /* чуть меньше отступы */
+}
+
+/* Защита для карточек */
+.section {
+  padding: 1rem;
+  margin: 0.5rem 0;
+}
+
+/* Урезаем время, если не влезает */
+.time-input {
+  width: 3rem; /* было 4rem */
+  font-size: 1.2rem; /* чуть меньше */
+  padding: 0.5rem 0.1rem;
+}
+
+/* Компактные кнопки режимов */
+.mode-btn {
+  padding: 0.75rem 0.25rem;
+  font-size: 0.9rem;
+  white-space: normal; /* разрешаем перенос */
+  min-width: 0; /* убираем минимальную ширину */
+}
+
+/* Защита для тогглов с текстом */
+.toggle-row.large .toggle-info {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.toggle-row.large .toggle-label {
+  font-size: 1rem;
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+/* Компактные счетчики */
+.counter-group {
+  gap: 0.35rem;
+}
+
+.counter-btn {
+  width: 2.2rem;
+  height: 2.2rem;
+}
+
+.counter-value-wrapper {
+  padding: 0.4rem 0.75rem;
+  min-width: 4rem;
+}
+
+/* Медиа-запрос специально для очень маленьких экранов */
+@media (max-width: 375px) {
+  .settings-container {
+    padding: 0.5rem;
+  }
+  
+  .section {
+    padding: 0.75rem;
+  }
+  
+  /* Дневной свет и другие заголовки */
+  .section-header h2 {
+    font-size: 1rem;
+  }
+  
+  /* Кнопки в хедере */
+  .back-button, .theme-button {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+  
+  .back-button svg, .theme-button svg {
+    width: 1.2rem;
+    height: 1.2rem;
+  }
+  
+  /* Таймпикеры */
+  .time-input-wrapper {
+    gap: 0.25rem;
+  }
+  
+  .time-input {
+    width: 2.5rem;
+    font-size: 1rem;
+  }
+  
+  .time-separator {
+    font-size: 1.2rem;
+  }
+  
+  .time-adjust-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+  
+  .time-adjust-btn .symbol {
+    font-size: 1.5rem;
+  }
+  
+  /* Режимы экрана */
+  .mode-buttons {
+    gap: 0.35rem;
+  }
+  
+  .mode-btn {
+    font-size: 0.8rem;
+    padding: 0.6rem 0.2rem;
+  }
+  
+  /* Нижняя кнопка */
+  .update-button {
+    height: 3rem;
+    font-size: 0.8rem;
+  }
+}
