@@ -23,9 +23,9 @@ async def get_history(
     Получить историю телеметрии за последние N часо
     """
     worker = WeatherBackgroundWorker.get_instance()
-    records  = worker.storage.get_history(hours=hours, device_id=worker.device_id)
+    records = await worker.storage.get_history(hours=hours, device_id=worker.device_id)
     
-    if records  is None:
+    if not records:  # records — это список, проверяем через if not
         raise HTTPException(
             status_code=404, 
             detail="История не получена"
@@ -33,8 +33,8 @@ async def get_history(
     
     return HistoryResponse(
         period_hours=hours,
-        records_count=len(records),
-        records=[TelemetryRecord(**r) for r in records]
+        records_count=len(records),  # records уже список TelemetryRecord
+        records=records  # ← просто records, без распаковки!
     )
 
 @router.get("/stats", response_model=StatsResponse)
@@ -46,7 +46,4 @@ async def get_stats(
     worker = WeatherBackgroundWorker.get_instance()
     stats = await worker.storage.get_stats(hours, worker.device_id)
     
-    return StatsResponse(
-        period_hours=hours,
-        **stats  # распаковываем словарь из БД
-    )
+    return stats
