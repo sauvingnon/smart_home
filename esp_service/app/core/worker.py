@@ -12,6 +12,7 @@ from app.schemas.weather_data import WeatherData
 from app.schemas.settings import SettingsData
 from app.schemas.device_status import DeviceStatus
 import pytz
+from app.services.monitor_db.telemetry_storage import TelemetryStorage
 
 IZHEVSK_TZ = pytz.timezone('Europe/Samara')
 
@@ -32,7 +33,8 @@ class WeatherBackgroundWorker:
             self, 
             cache_manager: CacheManager, 
             weather_service: WeatherService,
-            mqtt_service: MQTTService
+            mqtt_service: MQTTService,
+            storage: TelemetryStorage
             ):
         if WeatherBackgroundWorker._instance is not None:
             raise RuntimeError("Используйте WeatherBackgroundWorker.get_instance()")
@@ -40,6 +42,7 @@ class WeatherBackgroundWorker:
         self.cache = cache_manager
         self.mqtt_service = mqtt_service
         self.service = weather_service
+        self.storage = storage
         self.is_running = False
         self.update_board_weather_interval = DEFAULT_WEATHER_UPDATE_INTERVAL
         self.update_time_interval = DEFAULT_TIME_UPDATE_INTERVAL
@@ -54,14 +57,15 @@ class WeatherBackgroundWorker:
         cls,
         cache_manager: Optional[CacheManager] = None,
         weather_service: Optional[WeatherService] = None,
-        mqtt_service: Optional[MQTTService] = None
+        mqtt_service: Optional[MQTTService] = None,
+        storage: Optional[TelemetryStorage] = None
     ) -> 'WeatherBackgroundWorker':
         """Получить единственный экземпляр воркера"""
         if cls._instance is None:
             if cache_manager is None or weather_service is None or mqtt_service is None:
                 raise ValueError("При первом создании нужно передать все зависимости")
             
-            cls._instance = cls(cache_manager, weather_service, mqtt_service)
+            cls._instance = cls(cache_manager, weather_service, mqtt_service, storage)
         return cls._instance
     
     @classmethod
@@ -69,11 +73,12 @@ class WeatherBackgroundWorker:
         cls,
         cache_manager: Optional[CacheManager] = None,
         weather_service: Optional[WeatherService] = None,
-        mqtt_service: Optional[MQTTService] = None
+        mqtt_service: Optional[MQTTService] = None,
+        storage: Optional[TelemetryStorage] = None
     ) -> 'WeatherBackgroundWorker':
         """Асинхронная версия получения инстанса (с блокировкой)"""
         async with cls._lock:
-            return cls.get_instance(cache_manager, weather_service, mqtt_service)
+            return cls.get_instance(cache_manager, weather_service, mqtt_service, storage)
         
     async def start(self):
         """Запуск фонового воркера"""
@@ -292,6 +297,14 @@ class WeatherBackgroundWorker:
 
                 # ВСЕГДА отправляем погоду на плату (даже из кеша)
                 await self.send_to_board_weather_from_cache()
+
+                cached = await self.cache.get_cached_weather()
+
+                await self.storage.save_weather_reading(
+                    temp=cached.current_temp,
+                    hum=cached.humidity,
+                    timestamp=self._get_izhevsk_time()
+                )
             
             except Exception as e:
                 logger.exception(f"❌ Ошибка в цикле обновления погоды: {e}")
@@ -299,7 +312,7 @@ class WeatherBackgroundWorker:
             # Ждем перед следующим обновлением
             await asyncio.sleep(self.update_board_weather_interval)
 
-    async def get_weather(self) -> Optional[WeatherData]:
+    async def get_weather(self, weather: WeatherData) -> Optional[WeatherData]:
         """Получить погоду"""
         try:
 
@@ -431,10 +444,12 @@ class WeatherBackgroundWorker:
             self.current_telemetry = telemetry
             
             # Отправляем в базу данных
-            # await self.save_telemetry_to_db(telemetry)
-            
-            # Анализ данных (опционально)
-            # self._analyze_telemetry(telemetry)
+            await self.storage.save_esp_reading(
+                temp=telemetry.temperature,
+                hum=telemetry.humidity,
+                timestamp=self._get_izhevsk_time(),
+                device_id=self.device_id
+            )
             
         except ValueError as e:
             logger.exception(f"❌ Ошибка валидации телеметрии от {device_id}: {e}")

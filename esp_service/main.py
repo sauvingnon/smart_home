@@ -6,11 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.services.redis.cache_manager import CacheManager
 from app.services.weather_service.yandex_weather import WeatherService
+from app.services.monitor_db.telemetry_storage import get_telemetry_storage
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.core.worker import WeatherBackgroundWorker
 from config import YANDEX_WEATHER_API_KEY, REDIS_URL, MQTT_BROKER_HOST, MQTT_BROKER_PORT
 import os
-from app.api.endpoints import telemetry, settings, weather, auth
+from app.api.endpoints import telemetry, settings, weather, auth, statistic
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI):
             broker_port=int(MQTT_BROKER_PORT),
             client_id=f"esp-service-{os.getpid()}"
         )
+
+        # 4. База данных
+        storage = get_telemetry_storage()
         
         # Запускаем MQTT (подключение + прослушивание)
         mqtt_started = await mqtt_service.start()
@@ -50,7 +54,8 @@ async def lifespan(app: FastAPI):
         worker = WeatherBackgroundWorker.get_instance(
             cache_manager=cache_manager,
             weather_service=weather_service,
-            mqtt_service=mqtt_service
+            mqtt_service=mqtt_service,
+            storage=storage
         )
 
         app.state.worker = worker
@@ -129,3 +134,4 @@ app.include_router(telemetry.router)
 app.include_router(settings.router)
 app.include_router(weather.router)
 app.include_router(auth.router)
+app.include_router(statistic.router)
