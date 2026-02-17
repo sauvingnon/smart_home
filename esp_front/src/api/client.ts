@@ -1,7 +1,7 @@
 import { useAuth } from '../context/AuthContext';
 
-// const API_BASE_URL = 'https://tgapp.dotnetdon.ru:4444' 
-const API_BASE_URL = 'http://localhost:8005'
+const API_BASE_URL = 'https://tgapp.dotnetdon.ru:4444' 
+// const API_BASE_URL = 'http://localhost:8005'
 
 // export const API_ENDPOINTS = {
 //   telemetry: `${API_BASE}/telemetry`,
