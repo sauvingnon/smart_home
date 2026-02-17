@@ -10,6 +10,8 @@ import './SettingsPage.css'
 
 type SettingsPageProps = {
   onClose?: () => void
+  theme?: 'light' | 'dark'
+  onThemeToggle?: () => void
 }
 
 type Settings = {
@@ -234,7 +236,7 @@ const itemVar = {
   visible: { y: 0, opacity: 1 }
 }
 
-export default function SettingsPage({ onClose }: SettingsPageProps) {
+export default function SettingsPage({ onClose, theme, onThemeToggle }: SettingsPageProps) {
   const [settings, setSettings] = useState<Settings>(defaultSettings)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -304,7 +306,7 @@ export default function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   return (
-    <div className="settings-page">
+    <div className={`settings-page ${theme}`}>
       
       {/* Фоновые пятна */}
       <div className="background-spot">

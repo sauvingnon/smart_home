@@ -79,7 +79,13 @@ export default function HomePage() {
     setTheme(prev => prev === 'light' ? 'dark' : 'light')
   }
 
-  if (showSettings) return <SettingsPage onClose={() => setShowSettings(false)} />
+ if (showSettings) return (
+    <SettingsPage 
+      onClose={() => setShowSettings(false)} 
+      theme={theme}
+      onThemeToggle={toggleTheme}
+    />
+  )
 
   return (
     <div className={`home-container ${theme}`}>
