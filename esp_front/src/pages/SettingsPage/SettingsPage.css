@@ -1,0 +1,1406 @@
+/* SettingsPage.css */
+
+/* Импортируем переменные из HomePage.css (если они там, если нет - добавим) */
+:root, .light {
+  --glass-bg: rgba(255, 255, 255, 0.4);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+  --text-primary: #1e293b;
+  --text-secondary: #334155;
+  --text-tertiary: #64748b;
+  --accent-cyan: #06b6d4;
+  --accent-blue: #3b82f6;
+  --accent-indigo: #6366f1;
+  --accent-purple: #a855f7;
+  --accent-amber: #f97316;
+  --accent-emerald: #10b981;
+  --accent-red: #ef4444;
+  --accent-pink: #ec4899;
+  --accent-orange: #f97316;
+  --accent-sky: #0ea5e9;
+  --bg-gradient-from: #e0f2fe;
+  --bg-gradient-to: #f0f9ff;
+}
+
+.dark {
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-tertiary: rgba(255, 255, 255, 0.3);
+  --accent-cyan: #22d3ee;
+  --accent-blue: #3b82f6;
+  --accent-indigo: #818cf8;
+  --accent-purple: #a78bfa;
+  --accent-amber: #fbbf24;
+  --accent-emerald: #34d399;
+  --accent-red: #f87171;
+  --accent-pink: #f472b6;
+  --accent-orange: #fbbf24;
+  --accent-sky: #0ea5e9;
+  --bg-gradient-from: #0f172a;
+  --bg-gradient-to: #1e1b4b;
+}
+
+/* Базовые стили */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.settings-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, var(--bg-gradient-from), var(--bg-gradient-to));
+  color: var(--text-primary);
+  position: relative;
+  overflow-x: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Фоновые пятна (как в HomePage) */
+.background-spot {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.spot-1 {
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  width: 500px;
+  height: 500px;
+  background: rgba(249, 115, 22, 0.15);
+  border-radius: 50%;
+  filter: blur(120px);
+  mix-blend-mode: overlay;
+  animation: pulse 8s infinite;
+}
+
+.spot-2 {
+  position: absolute;
+  top: 20%;
+  right: -10%;
+  width: 400px;
+  height: 400px;
+  background: rgba(14, 165, 233, 0.15);
+  border-radius: 50%;
+  filter: blur(100px);
+  mix-blend-mode: overlay;
+}
+
+.spot-3 {
+  position: absolute;
+  bottom: -10%;
+  left: 20%;
+  width: 600px;
+  height: 600px;
+  background: rgba(139, 92, 246, 0.1);
+  border-radius: 50%;
+  filter: blur(130px);
+  mix-blend-mode: overlay;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+/* Контейнер */
+.settings-container {
+  position: relative;
+  z-index: 10;
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+/* Glass-карточка (общий стиль) */
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 2rem;
+  box-shadow: var(--glass-shadow);
+}
+
+/* Хедер */
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.back-button {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.back-button:hover {
+  transform: scale(1.1);
+  background: var(--glass-bg);
+  border-color: var(--accent-sky);
+  color: var(--accent-sky);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+}
+
+.settings-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(to right, var(--accent-sky), var(--accent-orange));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.save-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.25rem;
+  background: linear-gradient(to right, var(--accent-sky), var(--accent-orange));
+  border: none;
+  border-radius: 9999px;
+  color: white;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+.save-button:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.4);
+}
+
+.save-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Уведомление об успехе */
+.success-message {
+  background: var(--accent-emerald);
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+/* Табы */
+.tabs-wrapper {
+  overflow: hidden;
+}
+
+.tabs-header {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.tab-button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: none;
+  border-radius: 1rem;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-button:hover {
+  color: var(--text-secondary);
+  background: var(--glass-bg);
+}
+
+.tab-button.active {
+  background: var(--glass-bg);
+  color: var(--accent-sky);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.tabs-content {
+  padding: 1.5rem;
+  min-height: 400px;
+}
+
+.tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Секции */
+.section {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.5rem;
+  padding: 1.25rem;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.section-header h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.section-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.section-icon.sun { color: var(--accent-amber); }
+.section-icon.moon { color: var(--accent-indigo); }
+.section-icon.bath { color: var(--accent-emerald); }
+.section-icon.blue { color: var(--accent-blue); }
+.section-icon.purple { color: var(--accent-purple); }
+
+/* Расписание */
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.schedule-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.schedule-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+.time-input-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
+  padding: 0.5rem;
+}
+
+.time-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--glass-bg);
+  border-radius: 1rem;
+  padding: 0.25rem;
+}
+
+.time-input {
+  width: 4rem;
+  padding: 0.75rem 0.25rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.time-input:focus {
+  outline: none;
+  border-color: var(--accent-sky);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
+}
+
+.time-separator {
+  color: var(--accent-sky);
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin: 0 0.125rem;
+}
+
+.time-adjust-btn {
+  width: 4rem;
+  height: 3rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 1.5rem;
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.time-adjust-btn:hover {
+  border-color: var(--accent-sky);
+  color: var(--accent-sky);
+  background: rgba(14, 165, 233, 0.1);
+}
+
+/* Режимы управления */
+.mode-selector {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  padding: 0.25rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+  margin-bottom: 1rem;
+}
+
+.mode-selector.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.mode-button {
+  padding: 0.75rem;
+  border: none;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-button:hover {
+  color: var(--text-secondary);
+  background: var(--glass-bg);
+}
+
+.mode-button.active {
+  background: var(--glass-bg);
+  color: var(--accent-sky);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.mode-description {
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Ручное управление */
+.manual-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.manual-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+}
+
+.manual-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.manual-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.manual-icon.sun {
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--accent-orange);
+}
+
+.manual-icon.moon {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent-indigo);
+}
+
+.manual-title {
+  font-weight: 600;
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.manual-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+/* Info box */
+.info-box {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  border-radius: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.info-box p {
+  margin: 0;
+}
+
+/* Настройки с контролами */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+}
+
+.setting-row:not(:last-child) {
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.setting-label {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* Счетчик */
+.counter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.counter-btn {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 0.5rem;
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.counter-btn:hover:not(:disabled) {
+  background: var(--glass-bg);
+  border-color: var(--accent-sky);
+  color: var(--accent-sky);
+}
+
+.counter-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.counter-value {
+  min-width: 4rem;
+  text-align: center;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Переключатели (toggle) */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 3rem;
+  height: 1.75rem;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.75rem;
+  transition: 0.2s;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 1.25rem;
+  width: 1.25rem;
+  left: 0.25rem;
+  bottom: 0.25rem;
+  background: var(--text-tertiary);
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+.toggle-switch.amber input:checked + .toggle-slider:before {
+  background: var(--accent-amber);
+}
+
+.toggle-switch.indigo input:checked + .toggle-slider:before {
+  background: var(--accent-indigo);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(1.25rem);
+}
+
+/* Toggle rows */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+}
+
+.toggle-row:not(:last-child) {
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.toggle-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+/* Silent mode */
+.silent-mode {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem;
+}
+
+.silent-button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 2rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.silent-button:hover {
+  border-color: var(--accent-purple);
+  color: var(--accent-purple);
+}
+
+.silent-button.active {
+  background: var(--accent-purple);
+  color: white;
+  border-color: var(--accent-purple);
+}
+
+/* Загрузка */
+.loading-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.loading-card {
+  padding: 2rem;
+  text-align: center;
+  max-width: 20rem;
+  width: 100%;
+}
+
+.spinner {
+  width: 3rem;
+  height: 3rem;
+  border: 3px solid var(--glass-border);
+  border-top-color: var(--accent-sky);
+  border-radius: 50%;
+  margin: 0 auto 1rem;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Адаптивность */
+@media (max-width: 640px) {
+  .settings-container {
+    padding: 1rem;
+  }
+
+  .settings-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .settings-title {
+    font-size: 1.25rem;
+  }
+
+  .save-button span {
+    display: none;
+  }
+
+  .save-button {
+    padding: 0.5rem;
+    aspect-ratio: 1;
+  }
+
+  .tabs-header {
+    flex-wrap: wrap;
+  }
+
+  .tab-button {
+    flex: 1 0 calc(50% - 0.25rem);
+  }
+
+  .tab-button span {
+    display: none;
+  }
+
+  .tab-button svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .schedule-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .mode-selector.three {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-button {
+    padding: 0.5rem;
+    font-size: 0.8125rem;
+  }
+
+  .setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .counter-group {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .toggle-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .toggle-info {
+    width: 100%;
+  }
+
+  .toggle-switch {
+    align-self: flex-end;
+  }
+
+  .schedule-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .time-input-wrapper {
+    gap: 0.5rem;
+  }
+
+  .time-input {
+    width: 3.5rem;
+    font-size: 1.25rem;
+  }
+
+  .time-adjust-btn {
+    width: 3rem;
+    height: 3rem;
+    border: 1px solid var(--glass-border);
+    border-radius: 2rem;
+    background: var(--glass-bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .time-adjust-btn .symbol {
+    font-size: 1.75rem;
+    font-weight: 300;
+    line-height: 1;
+  }
+
+  .time-adjust-btn:hover {
+    border-color: var(--accent-sky);
+    color: var(--accent-sky);
+    background: rgba(14, 165, 233, 0.1);
+  }
+
+}
+
+/* тест слайдера */
+
+/* Карточки-плитки */
+.tabs-header-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  padding: 1.5rem 1.5rem 0.5rem 1.5rem;
+}
+
+.tab-button-tile {
+  padding: 1rem 0.5rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.5rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--glass-shadow);
+  cursor: pointer;
+  width: 100%;
+}
+
+.tab-button-tile:hover {
+  background: var(--glass-bg);
+  border-color: var(--accent-sky);
+  transform: translateY(-2px);
+}
+
+.tab-button-tile.active {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(249, 115, 22, 0.15));
+  border-color: var(--accent-sky);
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(14, 165, 233, 0.2);
+  color: var(--accent-sky);
+}
+
+.tab-button-tile svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  transition: transform 0.2s;
+  color: currentColor;
+}
+
+.tab-button-tile.active svg {
+  transform: scale(1.1);
+}
+
+.tab-button-tile span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/* Адаптивность для мобильных */
+@media (max-width: 480px) {
+  .tabs-header-tiles {
+    gap: 0.5rem;
+    padding: 1rem 1rem 0.25rem 1rem;
+  }
+
+  .tab-button-tile {
+    padding: 0.75rem 0.25rem;
+    border-radius: 1.25rem;
+  }
+
+  .tab-button-tile svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .tab-button-tile span {
+    font-size: 0.6875rem;
+  }
+}
+
+/* Для совсем маленьких экранов */
+@media (max-width: 360px) {
+  .tabs-header-tiles {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+  
+  .tab-button-tile {
+    flex-direction: row;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+}
+
+/* Segmented Control */
+.segmented-control {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 3rem;
+  margin: 1rem 0;
+  position: relative;
+}
+
+.segmented-option {
+  flex: 1;
+  position: relative;
+  padding: 1rem 0.5rem;
+  border: none;
+  background: transparent;
+  border-radius: 2.5rem;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: color 0.2s;
+  z-index: 1;
+}
+
+.segmented-option.active {
+  color: white;
+}
+
+.segmented-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 2.5rem;
+  z-index: -1;
+}
+
+.segmented-icon {
+  font-size: 1.25rem;
+}
+
+.segmented-label {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Обновлённые manual-controls */
+.manual-section-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.manual-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.manual-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.5rem;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.manual-item:hover {
+  border-color: var(--accent-sky);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+}
+
+.manual-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.manual-icon {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.manual-icon.sun {
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--accent-orange);
+}
+
+.manual-icon.moon {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent-indigo);
+}
+
+.manual-title {
+  font-weight: 700;
+  margin: 0;
+  font-size: 1.125rem;
+  color: var(--text-primary);
+}
+
+.manual-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+/* Info box */
+.info-box {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  border-radius: 1.5rem;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.info-box p {
+  margin: 0;
+}
+
+/* Адаптивность */
+@media (max-width: 640px) {
+  .segmented-option {
+    padding: 0.75rem 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  .segmented-icon {
+    font-size: 1rem;
+  }
+
+  .segmented-label {
+    font-size: 0.875rem;
+  }
+
+  .manual-item {
+    padding: 0.75rem;
+  }
+
+  .manual-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .manual-icon svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .manual-title {
+    font-size: 1rem;
+  }
+
+  .manual-subtitle {
+    font-size: 0.75rem;
+  }
+
+  .info-box {
+    padding: 1rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* Яркие тогглы */
+.toggle-switch {
+  position: relative;
+  width: 3.5rem;
+  height: 2rem;
+  border: 2px solid var(--glass-border);
+  border-radius: 2rem;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.toggle-switch.active {
+  border-width: 2px;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+.toggle-thumb {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  margin-left: 0.25rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch.active .toggle-thumb {
+  box-shadow: 0 2px 8px rgba(255, 255, 255, 0.5);
+}
+
+.toggle-check {
+  position: absolute;
+  right: 0.5rem;
+  color: white;
+  font-size: 1rem;
+  font-weight: bold;
+  pointer-events: none;
+}
+
+/* Адаптивность */
+@media (max-width: 640px) {
+  .toggle-switch {
+    width: 3rem;
+    height: 1.75rem;
+  }
+
+  .toggle-thumb {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .toggle-check {
+    right: 0.4rem;
+    font-size: 0.875rem;
+  }
+
+  .toggle-switch.active .toggle-thumb {
+    transform: translateX(1.25rem);
+  }
+}
+
+.mode-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.mode-btn {
+  padding: 0.875rem 0.5rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: var(--glass-shadow);
+  white-space: nowrap;
+}
+
+.mode-btn.active {
+  background: linear-gradient(135deg, var(--accent-sky), var(--accent-blue));
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+/* Адаптивность */
+@media (max-width: 480px) {
+  .mode-buttons {
+    gap: 0.5rem;
+  }
+
+  .mode-btn {
+    padding: 0.75rem 0.25rem;
+    font-size: 0.875rem;
+  }
+}
+
+
+.toggle-row.large {
+  padding: 0.75rem 0;
+}
+
+.toggle-row.large .toggle-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.toggle-row.large .toggle-label {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1; /* Занимает всё доступное место */
+  white-space: normal; /* Разрешаем перенос */
+  word-break: break-word; /* Переносим длинные слова */
+  line-height: 1.4;
+}
+
+.toggle-row.large svg {
+  flex-shrink: 0; /* Иконка не сжимается */
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--accent-sky);
+}
+
+/* Стили для тоггла (оставляем как есть) */
+.toggle-row.large .custom-toggle {
+  flex-shrink: 0; /* Тоггл не сжимается */
+}
+
+/* Адаптивность */
+@media (max-width: 480px) {
+  .toggle-row.large .toggle-info {
+    flex-wrap: wrap; /* На узких экранах переносим */
+    gap: 0.75rem;
+  }
+
+  .toggle-row.large .toggle-label {
+    font-size: 1rem;
+    min-width: 120px; /* Минимальная ширина для текста */
+  }
+
+  .toggle-row.large .custom-toggle {
+    margin-left: auto; /* Прижимаем тоггл к правому краю при переносе */
+  }
+}
+
+@media (max-width: 360px) {
+  .toggle-row.large .toggle-info {
+    flex-direction: column; /* На совсем маленьких - в колонку */
+    align-items: flex-start;
+  }
+
+  .toggle-row.large .custom-toggle {
+    align-self: flex-end;
+  }
+}
+
+.counter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--glass-bg);
+  border: 2px solid var(--glass-border);
+  border-radius: 3rem;
+  padding: 0.25rem;
+  box-shadow: var(--glass-shadow);
+}
+
+.counter-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 2.5rem;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.counter-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, var(--accent-sky) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.counter-btn:hover::before {
+  opacity: 0.1;
+}
+
+.counter-btn:active::before {
+  opacity: 0.2;
+}
+
+.counter-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.counter-btn:disabled:hover {
+  background: transparent;
+}
+
+.counter-btn:disabled::before {
+  display: none;
+}
+
+.counter-symbol {
+  font-size: 2rem;
+  font-weight: 300;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+  color: var(--text-secondary);
+}
+
+.counter-btn:hover .counter-symbol {
+  color: var(--accent-sky);
+}
+
+.counter-value-wrapper {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
+  padding: 0.5rem 1.25rem;
+  min-width: 5rem;
+  justify-content: center;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.counter-number {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.counter-unit {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/* Адаптивность */
+@media (max-width: 640px) {
+  .counter-group {
+    gap: 0.5rem;
+  }
+
+  .counter-btn {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .counter-symbol {
+    font-size: 1.75rem;
+  }
+
+  .counter-value-wrapper {
+    padding: 0.4rem 1rem;
+    min-width: 4.5rem;
+  }
+
+  .counter-number {
+    font-size: 1.125rem;
+  }
+
+  .counter-unit {
+    font-size: 0.75rem;
+  }
+}

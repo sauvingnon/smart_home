@@ -1,6 +1,6 @@
 import { useAuth } from './context/AuthContext';
-import { Login } from './pages/Login';
-import HomePage from './pages/HomePage';
+import { Login } from './pages/Login/Login';
+import HomePage from './pages/HomePage/HomePage';
 import { useEffect, useState } from 'react';
 import { apiClient, AuthError } from './api/client';
 
