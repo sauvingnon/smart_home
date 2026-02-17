@@ -312,7 +312,7 @@ class WeatherBackgroundWorker:
             # Ждем перед следующим обновлением
             await asyncio.sleep(self.update_board_weather_interval)
 
-    async def get_weather(self, weather: WeatherData) -> Optional[WeatherData]:
+    async def get_weather(self) -> Optional[WeatherData]:
         """Получить погоду"""
         try:
 
