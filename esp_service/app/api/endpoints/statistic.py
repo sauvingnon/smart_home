@@ -16,8 +16,8 @@ router = APIRouter(
 
 @router.get("/history", response_model=HistoryResponse)
 async def get_history(
-    hours: int = Query(24, ge=1, le=168)
-    # user_id: int = Depends(get_current_user_id)
+    hours: int = Query(24, ge=1, le=168),
+    user_id: int = Depends(get_current_user_id)
 ):
     """
     Получить историю телеметрии за последние N часо
@@ -39,8 +39,8 @@ async def get_history(
 
 @router.get("/stats", response_model=StatsResponse)
 async def get_stats(
-    hours: int = Query(24, ge=1, le=168, description="Количество часов для статистики")
-    # user_id: int = Depends(get_current_user_id)
+    hours: int = Query(24, ge=1, le=168, description="Количество часов для статистики"),
+    user_id: int = Depends(get_current_user_id)
 ):
     """Получить статистику за период"""
     worker = WeatherBackgroundWorker.get_instance()
