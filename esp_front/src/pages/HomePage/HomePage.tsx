@@ -8,6 +8,7 @@ import {
 import SettingsPage from '../SettingsPage/SettingsPage'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
+import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {
@@ -272,6 +273,9 @@ export default function HomePage() {
             </motion.div>
 
           </div>
+          
+          <TemperatureChart theme={theme} />
+
         </motion.div>
       </div>
 
