@@ -23,7 +23,11 @@ async def get_history(
     Получить историю телеметрии за последние N часо
     """
     worker = WeatherBackgroundWorker.get_instance()
-    records = await worker.storage.get_history(hours=hours, device_id=worker.device_id)
+    records = await worker.storage.get_history(
+        end_time=worker._get_izhevsk_time(),
+        hours=hours,
+        device_id=worker.device_id
+    )
     
     if not records:  # records — это список, проверяем через if not
         raise HTTPException(

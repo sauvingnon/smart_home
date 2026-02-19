@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from contextlib import contextmanager
@@ -99,7 +99,8 @@ class TelemetryStorage:
     
     def _get_history_raw(
         self, 
-        hours: int = 24, 
+        hours: int,
+        end_time: datetime,  # текущее время Ижевска
         device_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Сырое получение истории (без заполнения пропусков, без валидации)"""
@@ -113,9 +114,12 @@ class TelemetryStorage:
                     hum_out,
                     device_id
                 FROM telemetry 
-                WHERE timestamp >= datetime('now', ?)
+                WHERE timestamp >= ? AND timestamp <= ?  -- 👈 добавил верхнюю границу
             """
-            params = [f'-{hours} hours']
+            
+            start_time = end_time - timedelta(hours=hours)
+            
+            params = [start_time.isoformat(), end_time.isoformat()]
             
             if device_id:
                 query += " AND device_id = ?"
@@ -220,17 +224,77 @@ class TelemetryStorage:
     
     async def get_history(
         self, 
-        hours: int = 24, 
-        device_id: Optional[str] = None
+        end_time: datetime,
+        hours: int = 24,
+        device_id: Optional[str] = None,
+        max_points: int = 100  # максимум точек для графика
     ) -> List[TelemetryRecord]:
         """
         Получить историю за последние N часов.
+        Автоматически агрегирует данные если точек больше max_points.
         Возвращает валидированные записи с заполненными пропусками.
         """
-        logger.info(f"📖 Получение истории за последние {hours}h")
+        logger.info(f"📖 Получение истории за последние {hours}h (макс {max_points} точек)")
         
         # Получаем сырые данные
-        raw_records = self._get_history_raw(hours, device_id)
+        raw_records = self._get_history_raw(
+            hours=hours,
+            end_time=end_time,
+            device_id=device_id
+        )
+        
+        if not raw_records:
+            logger.info("✅ Нет данных за указанный период")
+            return []
+        
+        # АГРЕГАЦИЯ: если данных слишком много
+        if len(raw_records) > max_points:
+            logger.info(f"📊 Сырых данных: {len(raw_records)}, агрегирую до {max_points}")
+            
+            # Размер чанка для группировки
+            chunk_size = len(raw_records) // max_points
+            if chunk_size == 0:
+                chunk_size = 1
+                
+            aggregated = []
+            last_temp_out = None
+            last_hum_out = None
+            
+            for i in range(0, len(raw_records), chunk_size):
+                chunk = raw_records[i:i+chunk_size]
+                
+                # Собираем значения для усреднения
+                temp_in_vals = [r['temp_in'] for r in chunk if r.get('temp_in') is not None]
+                hum_in_vals = [r['hum_in'] for r in chunk if r.get('hum_in') is not None]
+                
+                # Для внешних данных берем последнее не-null значение в чанке
+                chunk_temp_out = None
+                chunk_hum_out = None
+                for r in chunk:
+                    if r.get('temp_out') is not None:
+                        chunk_temp_out = r['temp_out']
+                    if r.get('hum_out') is not None:
+                        chunk_hum_out = r['hum_out']
+                
+                # Обновляем last значения (для заполнения пропусков)
+                if chunk_temp_out is not None:
+                    last_temp_out = chunk_temp_out
+                if chunk_hum_out is not None:
+                    last_hum_out = chunk_hum_out
+                
+                # Создаем агрегированную запись
+                agg_record = {
+                    'timestamp': chunk[0]['timestamp'],  # берем время первой записи в чанке
+                    'temp_in': sum(temp_in_vals)/len(temp_in_vals) if temp_in_vals else None,
+                    'hum_in': sum(hum_in_vals)/len(hum_in_vals) if hum_in_vals else None,
+                    'temp_out': last_temp_out,
+                    'hum_out': last_hum_out,
+                    'device_id': chunk[0].get('device_id', 'unknown')
+                }
+                aggregated.append(agg_record)
+            
+            raw_records = aggregated
+            logger.info(f"📊 После агрегации: {len(raw_records)} точек")
         
         # Заполняем пропуски и валидируем
         result = []
@@ -255,11 +319,10 @@ class TelemetryStorage:
                 )
                 result.append(record)
             except Exception as e:
-                logger.exception(f"❌ Не удалось считать запись за {raw.get('timestamp')}: {e}")
-                # Пропускаем битую запись
+                logger.exception(f"❌ Не удалось создать запись за {raw.get('timestamp')}: {e}")
                 continue
         
-        logger.info(f"✅ История: {len(result)} валидных данных из {len(raw_records)} сырых")
+        logger.info(f"✅ История: {len(result)} точек готово к отправке")
         return result
     
     async def get_stats(self, hours: int = 24, device_id: Optional[str] = None) -> StatsResponse:

@@ -51,6 +51,7 @@ class WeatherBackgroundWorker:
         self.current_telemetry: Optional[TelemetryData] = None
         self.last_activity_timestamp: Optional[datetime] = None  # Любое сообщение от платы
         self.device_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
+        self.counter_for_telemetry = 0
         
     @classmethod
     def get_instance(
@@ -442,14 +443,18 @@ class WeatherBackgroundWorker:
             
             # Сохраняем в кэш
             self.current_telemetry = telemetry
-            
-            # Отправляем в базу данных
-            await self.storage.save_esp_reading(
-                temp=telemetry.temperature,
-                hum=telemetry.humidity,
-                timestamp=self._get_izhevsk_time(),
-                device_id=self.device_id
-            )
+
+            self.counter_for_telemetry += 1
+
+            if self.counter_for_telemetry >= 5:
+                self.counter_for_telemetry = 0
+                # Отправляем в базу данных
+                await self.storage.save_esp_reading(
+                    temp=telemetry.temperature,
+                    hum=telemetry.humidity,
+                    timestamp=self._get_izhevsk_time(),
+                    device_id=self.device_id
+                )
             
         except ValueError as e:
             logger.exception(f"❌ Ошибка валидации телеметрии от {device_id}: {e}")
