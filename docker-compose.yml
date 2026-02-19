@@ -100,6 +100,8 @@ services:
     ports:
     # Даем Web API, но оно доступно только на localhost, а оттуда его подхватит nginx и переведет на https
       - "127.0.0.1:8005:8005"
+    volumes:
+      - ./esp_service/data:/app/data
     mem_limit: 200m
     cpus: "0.5"
     healthcheck:
