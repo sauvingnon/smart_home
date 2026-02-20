@@ -231,14 +231,16 @@ class TelemetryStorage:
     ) -> List[TelemetryRecord]:
         """
         Получить историю за последние N часов.
-        Автоматически агрегирует данные если точек больше max_points.
+        Берем данные за N+1 час для заполнения начала периода,
+        агрегируем, потом отсекаем лишний час.
         Возвращает валидированные записи с заполненными пропусками.
         """
         logger.info(f"📖 Получение истории за последние {hours}h (макс {max_points} точек)")
         
-        # Получаем сырые данные
+        # 1️⃣ Берем на час больше для заполнения начала
+        extended_hours = hours + 1
         raw_records = self._get_history_raw(
-            hours=hours,
+            hours=extended_hours,
             end_time=end_time,
             device_id=device_id
         )
@@ -247,7 +249,7 @@ class TelemetryStorage:
             logger.info("✅ Нет данных за указанный период")
             return []
         
-        # АГРЕГАЦИЯ: если данных слишком много
+        # 2️⃣ АГРЕГАЦИЯ: если данных слишком много
         if len(raw_records) > max_points:
             logger.info(f"📊 Сырых данных: {len(raw_records)}, агрегирую до {max_points}")
             
@@ -284,7 +286,7 @@ class TelemetryStorage:
                 
                 # Создаем агрегированную запись
                 agg_record = {
-                    'timestamp': chunk[0]['timestamp'],  # берем время первой записи в чанке
+                    'timestamp': chunk[0]['timestamp'],
                     'temp_in': sum(temp_in_vals)/len(temp_in_vals) if temp_in_vals else None,
                     'hum_in': sum(hum_in_vals)/len(hum_in_vals) if hum_in_vals else None,
                     'temp_out': last_temp_out,
@@ -296,7 +298,11 @@ class TelemetryStorage:
             raw_records = aggregated
             logger.info(f"📊 После агрегации: {len(raw_records)} точек")
         
-        # Заполняем пропуски и валидируем
+        # 3️⃣ Отсекаем лишний час
+        cutoff_time = (end_time - timedelta(hours=hours)).isoformat()
+        raw_records = [r for r in raw_records if r['timestamp'] >= cutoff_time]
+        
+        # 4️⃣ Заполняем пропуски и валидируем
         result = []
         last_temp_out = None
         last_hum_out = None
@@ -322,7 +328,7 @@ class TelemetryStorage:
                 logger.exception(f"❌ Не удалось создать запись за {raw.get('timestamp')}: {e}")
                 continue
         
-        logger.info(f"✅ История: {len(result)} точек готово к отправке")
+        logger.info(f"✅ История: {len(result)} точек за {hours}ч готово к отправке")
         return result
     
     async def get_stats(self, hours: int = 24, device_id: Optional[str] = None) -> StatsResponse:

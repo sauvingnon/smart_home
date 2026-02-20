@@ -299,7 +299,7 @@ export default function TemperatureChart({
                 stroke={colors.inside}
                 strokeWidth={isMobile ? 2 : 2.5}
                 dot={false}
-                connectNulls={false}
+                connectNulls={true}
                 activeDot={{ r: isMobile ? 4 : 6, fill: colors.inside }}
                 animationDuration={1000}
               />
@@ -311,7 +311,7 @@ export default function TemperatureChart({
                 stroke={colors.outside}
                 strokeWidth={isMobile ? 2 : 2.5}
                 dot={false}
-                connectNulls={false}
+                connectNulls={true}
                 activeDot={{ r: isMobile ? 4 : 6, fill: colors.outside }}
                 animationDuration={1000}
               />
