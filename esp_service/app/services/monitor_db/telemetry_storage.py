@@ -151,9 +151,9 @@ class TelemetryStorage:
                     MIN(temp_out) as min_temp_out,
                     MAX(temp_out) as max_temp_out,
 
-                    AVG(hum_in) as avg_hum_out,
-                    MIN(hum_in) as min_hum_out,
-                    MAX(hum_in) as max_hum_out
+                    AVG(hum_out) as avg_hum_out,
+                    MIN(hum_out) as min_hum_out,
+                    MAX(hum_out) as max_hum_out
                     
                 FROM telemetry 
                 WHERE timestamp >= datetime('now', ?)
