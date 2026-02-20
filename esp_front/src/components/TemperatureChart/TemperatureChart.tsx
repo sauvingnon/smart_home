@@ -337,7 +337,7 @@ export default function TemperatureChart({
                 interval={isMobile ? 4 : 1}
                 angle={-45}
                 textAnchor={isMobile ? 'end' : 'middle'}
-                height={isMobile ? 60 : 40}
+                height={isMobile ? 10 : 20}
               />
               
               <YAxis 
@@ -345,7 +345,7 @@ export default function TemperatureChart({
                 tick={{ fill: colors.axis, fontSize: isMobile ? 11 : 13 }}
                 tickLine={{ stroke: colors.grid }}
                 domain={['auto', 'auto']}
-                width={isMobile ? 30 : 40}
+                width={isMobile ? 35 : 40}
                 unit={dataType === 'temperature' ? '°C' : '%'}
               />
               
