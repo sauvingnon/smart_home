@@ -17,7 +17,8 @@ router = APIRouter(
 @router.get("/history", response_model=HistoryResponse)
 async def get_history(
     hours: int = Query(24, ge=1, le=168),
-    user_id: int = Depends(get_current_user_id)
+    max_points: int = Query(100, ge=10, le=250)
+    # user_id: int = Depends(get_current_user_id)
 ):
     """
     Получить историю телеметрии за последние N часо
@@ -26,7 +27,8 @@ async def get_history(
     records = await worker.storage.get_history(
         end_time=worker._get_izhevsk_time(),
         hours=hours,
-        device_id=worker.device_id
+        device_id=worker.device_id,
+        max_points=max_points
     )
     
     if not records:  # records — это список, проверяем через if not
@@ -43,8 +45,8 @@ async def get_history(
 
 @router.get("/stats", response_model=StatsResponse)
 async def get_stats(
-    hours: int = Query(24, ge=1, le=168, description="Количество часов для статистики"),
-    user_id: int = Depends(get_current_user_id)
+    hours: int = Query(24, ge=1, le=168, description="Количество часов для статистики")
+    # user_id: int = Depends(get_current_user_id)
 ):
     """Получить статистику за период"""
     worker = WeatherBackgroundWorker.get_instance()

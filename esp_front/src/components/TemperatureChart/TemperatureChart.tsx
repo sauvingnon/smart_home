@@ -14,6 +14,15 @@ const rangeToHours: Record<TimeRange, number> = {
   '7d': 168
 }
 
+// Количество точек для каждого диапазона
+const rangePoints: Record<TimeRange, number> = {
+  '6h': 50,   // 6 часов = 50 точек
+  '12h': 75,  // 12 часов = 75 точек
+  '24h': 100, // 24 часа = 100 точек
+  '48h': 120, // 48 часов = 120 точек
+  '7d': 168   // 7 дней = 168 точек (каждый час)
+}
+
 interface HistoryRecord {
   timestamp: string
   temp_in: number | null
@@ -44,7 +53,8 @@ export default function TemperatureChart({
       
       try {
         const hours = rangeToHours[selectedRange]
-        const response = await apiClient.fetch(`/esp_service/history?hours=${hours}`)
+        const points = rangePoints[selectedRange]
+        const response = await apiClient.fetch(`/esp_service/history?hours=${hours}&max_points=${points}`)
         
         // Преобразуем данные для графика
         const chartData = response.records.map((record: HistoryRecord) => {
@@ -136,8 +146,9 @@ export default function TemperatureChart({
   const minInside = validInside.length ? Math.min(...validInside).toFixed(1) : '--'
   const maxInside = validInside.length ? Math.max(...validInside).toFixed(1) : '--'
 
+ // Вместо фиксированной высоты:
   const chartHeight = isMobile ? 350 : 450
-  const chartWidth = isMobile ? 700 : Math.min(containerWidth - 40, 1400)
+  const chartWidth = isMobile ? 450 : Math.min(containerWidth - 40, 600) // Уменьшил ширину
 
   return (
     <div 
@@ -213,7 +224,8 @@ export default function TemperatureChart({
       }}>
         {data.length === 0 && !loading ? (
           <div style={{
-            height: chartHeight,
+            width: '100%', 
+            height: isMobile ? 350 : 450,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -223,11 +235,11 @@ export default function TemperatureChart({
           </div>
         ) : (
           <div style={{ 
-            width: isMobile ? 700 : '100%',
+            width: chartWidth,
             height: chartHeight
           }}>
             <LineChart
-              width={isMobile ? 700 : chartWidth}
+              width={chartWidth}
               height={chartHeight}
               data={data}
               margin={{ top: 20, right: 30, left: 0, bottom: 30 }}
@@ -240,7 +252,7 @@ export default function TemperatureChart({
                 tick={{ fill: colors.axis, fontSize: isMobile ? 9 : 11 }}
                 tickLine={{ stroke: colors.grid }}
                 interval={isMobile ? 2 : 1}
-                angle={isMobile ? -30 : 0}
+                angle={-60}
                 textAnchor={isMobile ? 'end' : 'middle'}
                 height={isMobile ? 60 : 40}
               />
