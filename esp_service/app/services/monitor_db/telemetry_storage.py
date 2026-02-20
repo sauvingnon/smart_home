@@ -149,7 +149,11 @@ class TelemetryStorage:
                     
                     AVG(temp_out) as avg_temp_out,
                     MIN(temp_out) as min_temp_out,
-                    MAX(temp_out) as max_temp_out
+                    MAX(temp_out) as max_temp_out,
+
+                    AVG(hum_in) as avg_hum_out,
+                    MIN(hum_in) as min_hum_out,
+                    MAX(hum_in) as max_hum_out
                     
                 FROM telemetry 
                 WHERE timestamp >= datetime('now', ?)
@@ -359,7 +363,10 @@ class TelemetryStorage:
                 max_hum_in=validated_raw.max_hum_in,
                 avg_temp_out=validated_raw.avg_temp_out,
                 min_temp_out=validated_raw.min_temp_out,
-                max_temp_out=validated_raw.max_temp_out
+                max_temp_out=validated_raw.max_temp_out,
+                avg_hum_out=validated_raw.avg_hum_out,
+                min_hum_out=validated_raw.min_hum_out,
+                max_hum_out=validated_raw.max_hum_out
             )
             
             logger.info(f"✅ Статистика получена: {stats.total_records} записей, "

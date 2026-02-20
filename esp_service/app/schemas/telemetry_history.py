@@ -40,6 +40,11 @@ class StatsResponse(BaseModel):
     min_temp_out: Optional[float] = Field(None, description="Минимальная температура снаружи")
     max_temp_out: Optional[float] = Field(None, description="Максимальная температура снаружи")
 
+    # Уличные датчики (добавить)
+    avg_hum_out: Optional[float] = Field(None, description="Средняя влажность снаружи")
+    min_hum_out: Optional[float] = Field(None, description="Минимальная влажность снаружи")
+    max_hum_out: Optional[float] = Field(None, description="Максимальная влажность снаружи")
+
 # Модель для сырых данных из БД
 class RawStats(BaseModel):
     total_records: int = 0
@@ -57,6 +62,10 @@ class RawStats(BaseModel):
     avg_temp_out: Optional[float] = None
     min_temp_out: Optional[float] = None
     max_temp_out: Optional[float] = None
+
+    avg_hum_out: Optional[float] = None
+    min_hum_out: Optional[float] = None
+    max_hum_out: Optional[float] = None
     
     @validator('*', pre=True)
     def handle_null(cls, v):

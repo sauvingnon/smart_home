@@ -4,6 +4,7 @@ import { apiClient } from '../../api/client'
 
 // Типы для диапазонов
 type TimeRange = '6h' | '12h' | '24h' | '48h' | '7d'
+type DataType = 'temperature' | 'humidity'
 
 // Маппинг диапазонов в часы
 const rangeToHours: Record<TimeRange, number> = {
@@ -16,17 +17,35 @@ const rangeToHours: Record<TimeRange, number> = {
 
 // Количество точек для каждого диапазона
 const rangePoints: Record<TimeRange, number> = {
-  '6h': 50,   // 6 часов = 50 точек
-  '12h': 75,  // 12 часов = 75 точек
-  '24h': 100, // 24 часа = 100 точек
-  '48h': 120, // 48 часов = 120 точек
-  '7d': 168   // 7 дней = 168 точек (каждый час)
+  '6h': 50,
+  '12h': 50,
+  '24h': 50,
+  '48h': 50,
+  '7d': 50
 }
 
 interface HistoryRecord {
   timestamp: string
   temp_in: number | null
   temp_out: number | null
+  hum_in: number | null
+  hum_out: number | null
+}
+
+interface StatsData {
+  period_hours: number
+  total_records: number
+  esp_records: number
+  weather_records: number
+  avg_temp_in: number | null
+  min_temp_in: number | null
+  max_temp_in: number | null
+  avg_hum_in: number | null
+  min_hum_in: number | null
+  max_hum_in: number | null
+  avg_temp_out: number | null
+  min_temp_out: number | null
+  max_temp_out: number | null
 }
 
 interface TemperatureChartProps {
@@ -39,13 +58,16 @@ export default function TemperatureChart({
   deviceId = 'greenhouse_01' 
 }: TemperatureChartProps) {
   const [selectedRange, setSelectedRange] = useState<TimeRange>('24h')
+  const [dataType, setDataType] = useState<DataType>('temperature')
   const [data, setData] = useState<any[]>([])
+  const [stats, setStats] = useState<StatsData | null>(null)
   const [loading, setLoading] = useState(false)
+  const [statsLoading, setStatsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [containerWidth, setContainerWidth] = useState(0)
   const [containerRef, setContainerRef] = useState<HTMLDivElement | null>(null)
 
-  // Загрузка реальных данных
+  // Загрузка истории
   useEffect(() => {
     const fetchHistory = async () => {
       setLoading(true)
@@ -56,7 +78,6 @@ export default function TemperatureChart({
         const points = rangePoints[selectedRange]
         const response = await apiClient.fetch(`/esp_service/history?hours=${hours}&max_points=${points}`)
         
-        // Преобразуем данные для графика
         const chartData = response.records.map((record: HistoryRecord) => {
           const date = new Date(record.timestamp)
           
@@ -76,8 +97,8 @@ export default function TemperatureChart({
           
           return {
             time: timeFormat,
-            inside: record.temp_in,
-            outside: record.temp_out,
+            inside: dataType === 'temperature' ? record.temp_in : record.hum_in,
+            outside: dataType === 'temperature' ? record.temp_out : record.hum_out,
             rawTime: date.getTime()
           }
         })
@@ -92,6 +113,24 @@ export default function TemperatureChart({
     }
 
     fetchHistory()
+  }, [selectedRange, deviceId, dataType])
+
+  // Загрузка статистики
+  useEffect(() => {
+    const fetchStats = async () => {
+      setStatsLoading(true)
+      try {
+        const hours = rangeToHours[selectedRange]
+        const response = await apiClient.fetch(`/esp_service/stats?hours=${hours}`)
+        setStats(response)
+      } catch (err) {
+        console.error('Failed to fetch stats:', err)
+      } finally {
+        setStatsLoading(false)
+      }
+    }
+
+    fetchStats()
   }, [selectedRange, deviceId])
 
   // Измеряем ширину контейнера
@@ -117,8 +156,8 @@ export default function TemperatureChart({
     textSecondary: isDark ? '#9ca3af' : '#6b7280',
     grid: isDark ? '#374151' : '#e5e7eb',
     axis: isDark ? '#9ca3af' : '#6b7280',
-    inside: '#f97316',
-    outside: '#3b82f6',
+    inside: dataType === 'temperature' ? '#f97316' : '#3b82f6',
+    outside: dataType === 'temperature' ? '#3b82f6' : '#10b981',
     cardBg: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)',
     border: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'
   }
@@ -131,24 +170,13 @@ export default function TemperatureChart({
     { value: '7d', label: '7д' }
   ]
 
-  // Статистика (только для не-null значений)
-  const validInside = data.filter(d => d.inside !== null).map(d => d.inside)
-  const validOutside = data.filter(d => d.outside !== null).map(d => d.outside)
-  
-  const avgInside = validInside.length 
-    ? (validInside.reduce((a, b) => a + b, 0) / validInside.length).toFixed(1)
-    : '--'
-  
-  const avgOutside = validOutside.length 
-    ? (validOutside.reduce((a, b) => a + b, 0) / validOutside.length).toFixed(1)
-    : '--'
-  
-  const minInside = validInside.length ? Math.min(...validInside).toFixed(1) : '--'
-  const maxInside = validInside.length ? Math.max(...validInside).toFixed(1) : '--'
-
- // Вместо фиксированной высоты:
   const chartHeight = isMobile ? 350 : 450
-  const chartWidth = isMobile ? 450 : Math.min(containerWidth - 40, 600) // Уменьшил ширину
+  const chartWidth = isMobile ? 450 : Math.min(containerWidth - 40, 600)
+
+  const formatValue = (value: number | null, type: 'temp' | 'hum') => {
+    if (value === null || value === undefined) return '—'
+    return type === 'temp' ? `${value.toFixed(1)}°C` : `${Math.round(value)}%`
+  }
 
   return (
     <div 
@@ -174,45 +202,96 @@ export default function TemperatureChart({
         marginBottom: 20
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 24 }}>🌡️</span>
-          <span style={{ color: colors.text, fontWeight: 600, fontSize: isMobile ? 16 : 18 }}>
-            Температура: дом / улица
+          <span style={{ fontSize: 24 }}>
+            {dataType === 'temperature' ? '🌡️' : '💧'}
           </span>
-          {loading && <span style={{ color: colors.textSecondary, fontSize: 12 }}>⏳</span>}
+          <span style={{ color: colors.text, fontWeight: 600, fontSize: isMobile ? 16 : 18 }}>
+            {dataType === 'temperature' ? 'Температура' : 'Влажность'}: дом / улица
+          </span>
+          {(loading || statsLoading) && <span style={{ color: colors.textSecondary, fontSize: 12 }}>⏳</span>}
           {error && <span style={{ color: '#ef4444', fontSize: 12 }}>⚠️</span>}
         </div>
 
-        {/* Кнопки выбора диапазона */}
         <div style={{
           display: 'flex',
-          gap: 4,
-          backgroundColor: colors.cardBg,
-          padding: 4,
-          borderRadius: 12,
+          gap: 8,
+          alignItems: 'center',
           flexWrap: 'wrap'
         }}>
-          {ranges.map(({ value, label }) => (
+          {/* Переключатель температура/влажность */}
+          <div style={{
+            display: 'flex',
+            gap: 4,
+            backgroundColor: colors.cardBg,
+            padding: 4,
+            borderRadius: 12
+          }}>
             <button
-              key={value}
-              onClick={() => setSelectedRange(value)}
-              disabled={loading}
+              onClick={() => setDataType('temperature')}
               style={{
-                padding: isMobile ? '6px 10px' : '8px 16px',
+                padding: isMobile ? '6px 10px' : '8px 12px',
                 borderRadius: 10,
                 border: 'none',
-                backgroundColor: selectedRange === value ? colors.inside : 'transparent',
-                color: selectedRange === value ? '#ffffff' : colors.textSecondary,
+                backgroundColor: dataType === 'temperature' ? colors.inside : 'transparent',
+                color: dataType === 'temperature' ? '#ffffff' : colors.textSecondary,
                 fontSize: isMobile ? 12 : 14,
                 fontWeight: 500,
-                cursor: loading ? 'wait' : 'pointer',
-                transition: 'all 0.2s',
-                flex: isMobile ? 1 : 'auto',
-                opacity: loading ? 0.5 : 1
+                cursor: 'pointer',
+                transition: 'all 0.2s'
               }}
             >
-              {label}
+              🌡️
             </button>
-          ))}
+            <button
+              onClick={() => setDataType('humidity')}
+              style={{
+                padding: isMobile ? '6px 10px' : '8px 12px',
+                borderRadius: 10,
+                border: 'none',
+                backgroundColor: dataType === 'humidity' ? colors.inside : 'transparent',
+                color: dataType === 'humidity' ? '#ffffff' : colors.textSecondary,
+                fontSize: isMobile ? 12 : 14,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              💧
+            </button>
+          </div>
+
+          {/* Кнопки выбора диапазона */}
+          <div style={{
+            display: 'flex',
+            gap: 4,
+            backgroundColor: colors.cardBg,
+            padding: 4,
+            borderRadius: 12,
+            flexWrap: 'wrap'
+          }}>
+            {ranges.map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setSelectedRange(value)}
+                disabled={loading}
+                style={{
+                  padding: isMobile ? '6px 10px' : '8px 16px',
+                  borderRadius: 10,
+                  border: 'none',
+                  backgroundColor: selectedRange === value ? colors.inside : 'transparent',
+                  color: selectedRange === value ? '#ffffff' : colors.textSecondary,
+                  fontSize: isMobile ? 12 : 14,
+                  fontWeight: 500,
+                  cursor: loading ? 'wait' : 'pointer',
+                  transition: 'all 0.2s',
+                  flex: isMobile ? 1 : 'auto',
+                  opacity: loading ? 0.5 : 1
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -263,6 +342,7 @@ export default function TemperatureChart({
                 tickLine={{ stroke: colors.grid }}
                 domain={['auto', 'auto']}
                 width={isMobile ? 30 : 40}
+                unit={dataType === 'temperature' ? '°C' : '%'}
               />
               
               <Tooltip
@@ -276,7 +356,8 @@ export default function TemperatureChart({
                 labelStyle={{ color: colors.text, fontWeight: 600, marginBottom: 4 }}
                 formatter={(value: number, name: string) => {
                   if (value === null) return ['—', name === 'inside' ? 'Внутри' : 'Снаружи']
-                  return [`${value.toFixed(1)}°C`, name === 'inside' ? 'Внутри' : 'Снаружи']
+                  const unit = dataType === 'temperature' ? '°C' : '%'
+                  return [`${value.toFixed(1)}${unit}`, name === 'inside' ? 'Внутри' : 'Снаружи']
                 }}
               />
               
@@ -320,74 +401,172 @@ export default function TemperatureChart({
         )}
       </div>
 
-      {/* Статистика внизу */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: isMobile ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)',
-        gap: isMobile ? 8 : 16,
-        marginTop: 20,
-        padding: isMobile ? 12 : 16,
-        backgroundColor: colors.cardBg,
-        borderRadius: 16,
-        border: `1px solid ${colors.border}`
-      }}>
-        <StatBlock 
-          label="Средняя внутри"
-          value={`${avgInside}°C`}
-          color={colors.inside}
-          isMobile={isMobile}
-        />
-        <StatBlock 
-          label="Средняя снаружи"
-          value={`${avgOutside}°C`}
-          color={colors.outside}
-          isMobile={isMobile}
-        />
-        <StatBlock 
-          label="Мин/макс вн."
-          value={`${minInside} / ${maxInside}°`}
-          color={colors.inside}
-          isMobile={isMobile}
-        />
-        <StatBlock 
-          label="Разница"
-          value={avgInside !== '--' && avgOutside !== '--' 
-            ? `${(Number(avgInside) - Number(avgOutside)).toFixed(1)}°C`
-            : '--'
-          }
-          color="#10b981"
-          isMobile={isMobile}
-        />
-      </div>
+      {/* Статистика - теперь из реальных данных */}
+      {stats && (
+        <div style={{
+          marginTop: 24,
+          padding: isMobile ? 16 : 20,
+          backgroundColor: colors.cardBg,
+          borderRadius: 16,
+          border: `1px solid ${colors.border}`
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 16
+          }}>
+            <span style={{ color: colors.text, fontWeight: 600, fontSize: isMobile ? 14 : 16 }}>
+              📊 Статистика за {stats.period_hours}ч
+            </span>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)',
+            gap: isMobile ? 20 : 24
+          }}>
+            {/* Внутренние датчики */}
+            <div>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 12
+              }}>
+                <span style={{ fontSize: 20 }}>🏠</span>
+                <span style={{ color: colors.text, fontWeight: 500, fontSize: isMobile ? 14 : 16 }}>
+                  Внутри
+                </span>
+              </div>
+              
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: isMobile ? 8 : 12
+              }}>
+                <StatValue 
+                  label="Средняя" 
+                  temp={stats.avg_temp_in} 
+                  hum={stats.avg_hum_in}
+                  dataType={dataType}
+                  color={colors.inside}
+                  isMobile={isMobile}
+                />
+                <StatValue 
+                  label="Мин" 
+                  temp={stats.min_temp_in} 
+                  hum={stats.min_hum_in}
+                  dataType={dataType}
+                  color={colors.inside}
+                  isMobile={isMobile}
+                />
+                <StatValue 
+                  label="Макс" 
+                  temp={stats.max_temp_in} 
+                  hum={stats.max_hum_in}
+                  dataType={dataType}
+                  color={colors.inside}
+                  isMobile={isMobile}
+                />
+              </div>
+            </div>
+
+            {/* Уличные датчики */}
+            <div>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 12
+              }}>
+                <span style={{ fontSize: 20 }}>🌍</span>
+                <span style={{ color: colors.text, fontWeight: 500, fontSize: isMobile ? 14 : 16 }}>
+                  Снаружи
+                </span>
+              </div>
+              
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: isMobile ? 8 : 12
+              }}>
+                <StatValue 
+                  label="Средняя" 
+                  temp={stats.avg_temp_out} 
+                  hum={stats.avg_hum_out}
+                  dataType={dataType}
+                  color={colors.outside}
+                  isMobile={isMobile}
+                />
+                <StatValue 
+                  label="Мин" 
+                  temp={stats.min_temp_out} 
+                  hum={stats.min_hum_out}
+                  dataType={dataType}
+                  color={colors.outside}
+                  isMobile={isMobile}
+                />
+                <StatValue 
+                  label="Макс" 
+                  temp={stats.max_temp_out} 
+                  hum={stats.max_hum_out}
+                  dataType={dataType}
+                  color={colors.outside}
+                  isMobile={isMobile}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-// Компонент для блока статистики
-function StatBlock({ label, value, color, isMobile }: { 
+// Компонент для отображения значения статистики
+function StatValue({ 
+  label, 
+  temp, 
+  hum, 
+  dataType, 
+  color, 
+  isMobile 
+}: { 
   label: string
-  value: string
+  temp: number | null
+  hum: number | null
+  dataType: DataType
   color: string
   isMobile: boolean 
 }) {
+  const value = dataType === 'temperature' ? temp : hum
+  const unit = dataType === 'temperature' ? '°C' : '%'
+  
   return (
-    <div style={{ textAlign: isMobile ? 'center' : 'left' }}>
-      <div style={{ 
-        color: '#9ca3af', 
-        fontSize: isMobile ? 9 : 11,
-        marginBottom: 4,
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px'
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      textAlign: 'center'
+    }}>
+      <span style={{
+        color: '#9ca3af',
+        fontSize: isMobile ? 10 : 11,
+        marginBottom: 4
       }}>
         {label}
-      </div>
-      <div style={{ 
-        color, 
-        fontSize: isMobile ? 14 : 18, 
-        fontWeight: 600 
+      </span>
+      <span style={{
+        color: value !== null ? color : '#9ca3af',
+        fontSize: isMobile ? 16 : 18,
+        fontWeight: 600
       }}>
-        {value}
-      </div>
+        {value !== null && value !== undefined 
+          ? `${value.toFixed(1)}${unit}` 
+          : '—'
+        }
+      </span>
     </div>
   )
 }
