@@ -170,7 +170,7 @@ export default function TemperatureChart({
     { value: '7d', label: '7д' }
   ]
 
-  const chartHeight = isMobile ? 350 : 450
+  const chartHeight = isMobile ? 450 : 450
   const chartWidth = isMobile ? 450 : Math.min(containerWidth - 40, 600)
 
   const formatValue = (value: number | null, type: 'temp' | 'hum') => {
@@ -192,15 +192,17 @@ export default function TemperatureChart({
       }}
     >
       
-      {/* Заголовок и выбор диапазона */}
+      {/* Заголовок и выбор диапазона - теперь по центру */}
       <div style={{
         display: 'flex',
         flexDirection: isMobile ? 'column' : 'row',
-        justifyContent: 'space-between',
-        alignItems: isMobile ? 'stretch' : 'center',
-        gap: 12,
-        marginBottom: 20
+        justifyContent: 'center',  // ← было 'space-between', стало 'center'
+        alignItems: 'center',
+        gap: isMobile ? 16 : 32,    // ← увеличил gap для разделения
+        marginBottom: 20,
+        flexWrap: 'wrap'
       }}>
+        {/* Левая часть с иконкой и заголовком */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 24 }}>
             {dataType === 'temperature' ? '🌡️' : '💧'}
@@ -212,11 +214,13 @@ export default function TemperatureChart({
           {error && <span style={{ color: '#ef4444', fontSize: 12 }}>⚠️</span>}
         </div>
 
+        {/* Правая часть с кнопками */}
         <div style={{
           display: 'flex',
           gap: 8,
           alignItems: 'center',
-          flexWrap: 'wrap'
+          flexWrap: 'wrap',
+          justifyContent: 'center'  // ← центрируем кнопки внутри
         }}>
           {/* Переключатель температура/влажность */}
           <div style={{
@@ -267,7 +271,8 @@ export default function TemperatureChart({
             backgroundColor: colors.cardBg,
             padding: 4,
             borderRadius: 12,
-            flexWrap: 'wrap'
+            flexWrap: 'wrap',
+            justifyContent: 'center'
           }}>
             {ranges.map(({ value, label }) => (
               <button
@@ -284,7 +289,6 @@ export default function TemperatureChart({
                   fontWeight: 500,
                   cursor: loading ? 'wait' : 'pointer',
                   transition: 'all 0.2s',
-                  flex: isMobile ? 1 : 'auto',
                   opacity: loading ? 0.5 : 1
                 }}
               >
@@ -298,7 +302,7 @@ export default function TemperatureChart({
       {/* График */}
       <div style={{ 
         width: '100%', 
-        height: isMobile ? 380 : 500,
+        height: isMobile ? 480 : 500,
         overflowX: isMobile ? 'auto' : 'visible'
       }}>
         {data.length === 0 && !loading ? (
@@ -321,24 +325,24 @@ export default function TemperatureChart({
               width={chartWidth}
               height={chartHeight}
               data={data}
-              margin={{ top: 20, right: 30, left: 0, bottom: 30 }}
+              margin={{ top: 0, right: 30, left: 0, bottom: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
               
               <XAxis 
                 dataKey="time" 
                 stroke={colors.axis}
-                tick={{ fill: colors.axis, fontSize: isMobile ? 9 : 11 }}
+                tick={{ fill: colors.axis, fontSize: isMobile ? 11 : 13 }}
                 tickLine={{ stroke: colors.grid }}
-                interval={isMobile ? 2 : 1}
-                angle={-60}
+                interval={isMobile ? 4 : 1}
+                angle={-45}
                 textAnchor={isMobile ? 'end' : 'middle'}
                 height={isMobile ? 60 : 40}
               />
               
               <YAxis 
                 stroke={colors.axis}
-                tick={{ fill: colors.axis, fontSize: isMobile ? 9 : 11 }}
+                tick={{ fill: colors.axis, fontSize: isMobile ? 11 : 13 }}
                 tickLine={{ stroke: colors.grid }}
                 domain={['auto', 'auto']}
                 width={isMobile ? 30 : 40}
@@ -364,8 +368,8 @@ export default function TemperatureChart({
               <Legend 
                 wrapperStyle={{ 
                   color: colors.text, 
-                  paddingTop: 10,
-                  fontSize: isMobile ? 11 : 13
+                  paddingTop: 0,
+                  fontSize: isMobile ? 13 : 15
                 }}
                 iconType="circle"
                 formatter={(value) => {
