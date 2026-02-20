@@ -3,6 +3,7 @@ auth_enabled: false
 
 server:
   http_listen_port: 3100
+  grpc_listen_port: 0
 
 common:
   path_prefix: /tmp/loki
@@ -12,25 +13,48 @@ common:
       rules_directory: /tmp/loki/rules
   replication_factor: 1
   ring:
-    instance_addr: 0.0.0.0  # ← СЛУШАЕМ ВСЕ ИНТЕРФЕЙСЫ
+    instance_addr: 0.0.0.0
     kvstore:
       store: inmemory
 
 schema_config:
   configs:
-    - from: 2020-10-24
-      store: tsdb
+    - from: 2023-01-01
+      store: boltdb-shipper
       object_store: filesystem
-      schema: v13
+      schema: v11
       index:
         prefix: index_
         period: 24h
 
 storage_config:
-  tsdb_shipper:
+  boltdb_shipper:
     active_index_directory: /tmp/loki/index
+    cache_location: /tmp/loki/cache
+    cache_ttl: 24h
   filesystem:
     directory: /tmp/loki/chunks
 
 limits_config:
-  retention_period: 720h
+  allow_structured_metadata: false  # ← ГЛАВНЫЙ ФИКС
+  retention_period: 168h
+  ingestion_rate_mb: 5
+  ingestion_burst_size_mb: 10
+  max_streams_per_user: 500
+  max_global_streams_per_user: 1000
+
+querier:
+  max_concurrent: 2
+
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+  chunk_idle_period: 30m
+  chunk_retain_period: 5m
+
+table_manager:
+  retention_deletes_enabled: true
+  retention_period: 168h
