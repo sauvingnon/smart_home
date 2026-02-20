@@ -418,13 +418,16 @@ export default function TemperatureChart({
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: 16
+            marginBottom: 16,
+            flexWrap: 'wrap',
+            gap: 12
           }}>
             <span style={{ color: colors.text, fontWeight: 600, fontSize: isMobile ? 14 : 16 }}>
               📊 Статистика за {stats.period_hours}ч
             </span>
           </div>
 
+          {/* Сетка с внутренней/внешней статистикой */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)',
