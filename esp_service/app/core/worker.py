@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, List, Optional
 from fastapi import Request, HTTPException
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from app.services.redis.cache_manager import CacheManager
@@ -13,6 +13,7 @@ from app.schemas.settings import SettingsData
 from app.schemas.device_status import DeviceStatus
 import pytz
 from app.services.monitor_db.telemetry_storage import TelemetryStorage
+from app.services.ai_api.deepseek_client import ai_message_request
 
 IZHEVSK_TZ = pytz.timezone('Europe/Samara')
 
@@ -423,6 +424,176 @@ class WeatherBackgroundWorker:
         finally:
             # Убираем временный обработчик
             self.mqtt_service.remove_settings_callback()
+
+    async def get_daily_report(self) -> Optional[str]:
+        """
+        Получить ИИ анализ данных телеметрии за последние сутки.
+        Берем прошлый день 00:00-23:59 относительно текущей даты.
+        Выполняем запрос на анализ с оптимальным кол-вом точек.
+        """
+        now = self._get_izhevsk_time()
+        
+        # Получаем статистику за вчера
+        daily_stats = await self.storage.get_yesterday_stats(
+            now=now,
+            device_id=self.device_id
+        )
+        
+        if not daily_stats:
+            logger.warning("⚠️ Нет статистики за вчерашний день")
+            return None
+        
+        # Получаем записи (агрегированные до 50 точек)
+        daily_records = await self.storage.get_yesterday_records(
+            now=now,
+            device_id=self.device_id,
+            max_points=50
+        )
+        
+        # Формируем понятный промпт для ИИ
+        prompt = f"""
+    Ты — умный помощник системы умного дома. Проанализируй данные за вчерашний день ({daily_stats['date']}) и напиши дружелюбный отчёт.
+
+    📊 **Статистика за день:**
+    - Температура внутри: средняя {daily_stats['temperature']['inside']['avg']}°C, от {daily_stats['temperature']['inside']['min']} до {daily_stats['temperature']['inside']['max']}
+    - Влажность внутри: средняя {daily_stats['humidity']['inside']['avg']}%, от {daily_stats['humidity']['inside']['min']} до {daily_stats['humidity']['inside']['max']}
+
+    🌍 **На улице:**
+    - Температура: средняя {daily_stats['temperature']['outside']['avg']}°C, от {daily_stats['temperature']['outside']['min']} до {daily_stats['temperature']['outside']['max']}
+    - Влажность: средняя {daily_stats['humidity']['outside']['avg']}%, от {daily_stats['humidity']['outside']['min']} до {daily_stats['humidity']['outside']['max']}
+
+    📈 **Динамика за день:**
+    Вот как менялись показатели (время → температура/влажность внутри и снаружи):
+    {self._format_records_for_prompt(daily_records)}
+
+    📊 **Дополнительно:**
+    - Всего записей: {daily_stats['records']['total']} (ESP: {daily_stats['records']['esp']}, погода: {daily_stats['records']['weather']})
+
+    Напиши короткий (3-5 предложений), дружелюбный отчёт на русском языке. 
+    Отметь, был ли день типичным, были ли аномалии, дай совет, если нужно.
+    Не используй markdown, просто текст.
+    """
+        
+        logger.info(f"🤖 Отправляю запрос в ИИ за {daily_stats['date']}")
+        
+        result = await ai_message_request(message=prompt)
+        
+        if result:
+            logger.info(f"✅ Получен отчёт за {daily_stats['date']}")
+            return result
+        else:
+            logger.error("❌ Не удалось получить ответ от ИИ")
+            return None
+
+    def _format_records_for_prompt(self, records: List[Dict]) -> str:
+        """Форматирует записи для вставки в промпт (чтобы не было огромно)"""
+        if not records:
+            return "Нет данных"
+        
+        # Берём каждый 5-й элемент для компактности
+        step = max(1, len(records) // 10)
+        sampled = records[::step][:10]  # максимум 10 точек
+        
+        lines = []
+        for r in sampled:
+            time = r.get('time', '')
+            temp_in = r.get('temp_in', '—')
+            hum_in = r.get('hum_in', '—')
+            temp_out = r.get('temp_out', '—')
+            hum_out = r.get('hum_out', '—')
+            
+            line = f"{time}: внутри {temp_in}°C/{hum_in}%, снаружи {temp_out}°C/{hum_out}%"
+            lines.append(line)
+        
+        return "\n".join(lines)
+
+    async def get_weekly_report(self) -> Optional[str]:
+        """
+        Получить ИИ анализ данных телеметрии за последние 7 дней.
+        Берем неделю, заканчивающуюся вчера (00:00-23:59 каждого дня).
+        """
+        now = self._get_izhevsk_time()
+        
+        # Получаем статистику за неделю
+        weekly_stats = await self.storage.get_week_stats(
+            now=now,
+            device_id=self.device_id
+        )
+        
+        if not weekly_stats:
+            logger.warning("⚠️ Нет статистики за последнюю неделю")
+            return None
+        
+        # Получаем записи за неделю (агрегированные)
+        weekly_records = await self.storage.get_week_records(
+            now=now,
+            device_id=self.device_id,
+            max_points=100  # 100 точек на всю неделю
+        )
+        
+        # Формируем промпт для ИИ
+        prompt = f"""
+    Ты — умный помощник системы умного дома. Проанализируй данные за последнюю неделю ({weekly_stats['period']['start']} - {weekly_stats['period']['end']}) и напиши дружелюбный отчёт.
+
+    📊 **Общая статистика за неделю:**
+
+    🌡️ **Температура внутри:**
+    • Средняя: {weekly_stats['summary']['temperature']['inside']['avg']}°C
+    • Минимальная: {weekly_stats['summary']['temperature']['inside']['min']}°C
+    • Максимальная: {weekly_stats['summary']['temperature']['inside']['max']}°C
+
+    💧 **Влажность внутри:**
+    • Средняя: {weekly_stats['summary']['humidity']['inside']['avg']}%
+    • Мин/макс: {weekly_stats['summary']['humidity']['inside']['min']}% / {weekly_stats['summary']['humidity']['inside']['max']}%
+
+    🌍 **На улице:**
+    • Температура: средняя {weekly_stats['summary']['temperature']['outside']['avg']}°C (от {weekly_stats['summary']['temperature']['outside']['min']} до {weekly_stats['summary']['temperature']['outside']['max']})
+    • Влажность: средняя {weekly_stats['summary']['humidity']['outside']['avg']}% (от {weekly_stats['summary']['humidity']['outside']['min']} до {weekly_stats['summary']['humidity']['outside']['max']})
+
+    📈 **Тренд за неделю:**
+    Температура {'выросла' if weekly_stats['summary']['trend'] and weekly_stats['summary']['trend'] > 0 else 'снизилась' if weekly_stats['summary']['trend'] and weekly_stats['summary']['trend'] < 0 else 'не изменилась'} {abs(weekly_stats['summary']['trend'])}°C
+
+    📊 **По дням:**
+    {self._format_weekly_for_prompt(weekly_stats['daily'])}
+
+    📋 **Детали:**
+    • Всего записей за неделю: {weekly_stats['summary']['records']['total']}
+    • Записей с ESP: {weekly_stats['summary']['records']['esp']}
+    • Обновлений погоды: {weekly_stats['summary']['records']['weather']}
+
+    Напиши краткий (5-7 предложений) дружелюбный отчёт на русском языке.
+    Опиши общую картину недели, выдели самый холодный/тёплый день,
+    сравни снаружи и внутри, дай совет, если нужно.
+    Не используй markdown, просто текст.
+    """
+        
+        logger.info(f"🤖 Отправляю запрос в ИИ за неделю {weekly_stats['period']['start']} - {weekly_stats['period']['end']}")
+        
+        result = await ai_message_request(message=prompt)
+        
+        if result:
+            logger.info(f"✅ Получен отчёт за неделю")
+            return result
+        else:
+            logger.error("❌ Не удалось получить ответ от ИИ")
+            return None
+
+    def _format_weekly_for_prompt(self, daily_stats: List[Dict]) -> str:
+        """Форматирует статистику по дням для промпта"""
+        if not daily_stats:
+            return "Нет данных"
+        
+        lines = []
+        for day in daily_stats:
+            date = day['date'][5:]  # MM-DD
+            temp = day['temp_avg']
+            hum = day['hum_avg']
+            out_temp = day['outside_temp']
+            
+            line = f"📅 {date}: внутри {temp}°C/{hum}%, снаружи {out_temp}°C"
+            lines.append(line)
+        
+        return "\n".join(lines)
 
     async def handle_telemetry(self, device_id: str, data: dict):
         """Обработчик телеметрии от платы"""
