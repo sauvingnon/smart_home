@@ -6,15 +6,16 @@ from logger import logger
 client = OpenAI(api_key=API_TOKEN_DEEPSEEK, base_url=BASE_URL_DEEPSEEK)
 
 # --- 💬 Chat LLM ---
-async def ai_message_request(message) -> str | None:
+async def ai_message_request(message: str) -> str | None:
     """Обработка текстового запроса пользователем."""
     try:
         response = client.chat.completions.create(
             model="deepseek-chat",
-            messages=message,
+            messages=[
+                {"role": "user", "content": message} 
+            ],
             stream=False
         )
-        
 
         result = response.choices[0].message.content.strip()
         return result
