@@ -126,6 +126,7 @@ class WeatherBackgroundWorker:
         """
         Цикл синхронизации времени. Проверяет раз в сутки.
         """
+        await asyncio.sleep(30)
         while self.is_running:
             try:
                 logger.info(f"⏰ Проверка синхронизации времени для {self.device_id}")
