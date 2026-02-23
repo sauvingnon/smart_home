@@ -618,6 +618,23 @@ class WeatherBackgroundWorker:
             logger.error("❌ Не удалось получить ответ от ИИ")
             return None
 
+    def _format_weekly_for_prompt(self, daily_stats: List[Dict]) -> str:
+        """Форматирует статистику по дням для промпта"""
+        if not daily_stats:
+            return "Нет данных"
+        
+        lines = []
+        for day in daily_stats:
+            date = day['date'][5:]  # MM-DD
+            temp = day.get('temp_avg', '—')
+            hum = day.get('hum_avg', '—')
+            out_temp = day.get('outside_temp', '—')
+            
+            line = f"📅 {date}: внутри {temp}°C/{hum}%, снаружи {out_temp}°C"
+            lines.append(line)
+        
+        return "\n".join(lines)
+
     def _format_weekly_records_for_prompt(self, weekly_records: Dict) -> str:
         """Форматирует записи за неделю для промпта (по 2-3 точки с каждого дня)"""
         if not weekly_records or 'days' not in weekly_records:
