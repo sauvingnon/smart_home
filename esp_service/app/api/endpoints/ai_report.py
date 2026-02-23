@@ -10,7 +10,7 @@ router = APIRouter(
 
 @router.get("/ai_report/daily", response_model=str)
 async def ai_report_daily_endpoint(
-    # user_id: int = Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id)
 ):
     """
     Получить аналитический обзор показателей с помощью истории и ИИ
@@ -29,7 +29,7 @@ async def ai_report_daily_endpoint(
 
 @router.get("/ai_report/weekly", response_model=str)
 async def ai_report_weekly_endpoint(
-    # user_id: int = Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id)
 ):
     """
     Получить аналитический обзор показателей с помощью истории и ИИ

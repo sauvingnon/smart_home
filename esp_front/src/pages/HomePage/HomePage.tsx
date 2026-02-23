@@ -9,6 +9,7 @@ import SettingsPage from '../SettingsPage/SettingsPage'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
+import AIReport from '../../components/AIReport/AIReport'
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {
@@ -275,6 +276,9 @@ export default function HomePage() {
           </div>
           
           <TemperatureChart theme={theme} />
+
+          {/* Новый блок с ИИ отчётами */}
+          <AIReport theme={theme} />
 
         </motion.div>
       </div>

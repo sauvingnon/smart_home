@@ -1,0 +1,222 @@
+.ai-report-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 2rem;
+  padding: 1.5rem;
+  margin-top: 1.25rem;
+  width: 100%;
+  transition: all 0.3s ease;
+}
+
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.report-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.report-icon {
+  color: var(--accent-orange);
+}
+
+.report-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.report-type-toggle {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--glass-bg);
+  padding: 0.25rem;
+  border-radius: 2rem;
+  border: 1px solid var(--glass-border);
+}
+
+.type-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 2rem;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.type-btn.active {
+  background: var(--accent-orange);
+  color: white;
+}
+
+.refresh-btn,
+.expand-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.refresh-btn:hover,
+.expand-btn:hover {
+  background: var(--glass-bg);
+  color: var(--accent-orange);
+  transform: scale(1.05);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+.chevron {
+  transition: transform 0.3s;
+}
+
+.chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.report-content {
+  margin-top: 1.5rem;
+  overflow: hidden;
+}
+
+.report-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem;
+  color: var(--text-secondary);
+}
+
+.loading-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 3px solid var(--glass-border);
+  border-top-color: var(--accent-orange);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.report-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 1rem;
+  color: var(--accent-red);
+}
+
+.retry-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.retry-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.report-text {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.report-text p {
+  margin: 0 0 0.75rem 0;
+}
+
+.report-text p:last-child {
+  margin-bottom: 0;
+}
+
+.report-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Адаптивность */
+@media (max-width: 640px) {
+  .ai-report-card {
+    padding: 1.25rem;
+  }
+
+  .report-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .report-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .type-btn {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8125rem;
+  }
+}
+
+@media (max-width: 375px) {
+  .report-type-toggle {
+    width: 100%;
+  }
+
+  .type-btn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .refresh-btn,
+  .expand-btn {
+    width: 2.2rem;
+    height: 2.2rem;
+  }
+}
