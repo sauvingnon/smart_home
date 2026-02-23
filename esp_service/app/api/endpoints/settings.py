@@ -11,7 +11,7 @@ router = APIRouter(
 )
 
 @router.get("/settings", response_model=SettingsData)
-async def get_current_setttings(
+async def get_current_setttings_endpoint(
     user_id: int = Depends(get_current_user_id)
 ):
     """
@@ -32,7 +32,7 @@ async def get_current_setttings(
 
 
 @router.post("/settings")
-async def update_settings(
+async def update_settings_endpoint(
     settings: SettingsData,
     user_id: int = Depends(get_current_user_id)
     ):

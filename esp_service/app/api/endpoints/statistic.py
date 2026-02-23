@@ -15,7 +15,7 @@ router = APIRouter(
 )
 
 @router.get("/history", response_model=HistoryResponse)
-async def get_history(
+async def get_history_endpoint(
     hours: int = Query(24, ge=1, le=168),
     max_points: int = Query(100, ge=10, le=250)
     # user_id: int = Depends(get_current_user_id)
@@ -44,7 +44,7 @@ async def get_history(
     )
 
 @router.get("/stats", response_model=StatsResponse)
-async def get_stats(
+async def get_stats_endpoint(
     hours: int = Query(24, ge=1, le=168, description="Количество часов для статистики")
     # user_id: int = Depends(get_current_user_id)
 ):

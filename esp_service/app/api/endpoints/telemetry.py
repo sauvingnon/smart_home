@@ -11,7 +11,7 @@ router = APIRouter(
 )
 
 @router.get("/telemetry", response_model=TelemetryData)
-async def get_current_telemetry(
+async def get_current_telemetry_endpoint(
     user_id: int = Depends(get_current_user_id)
 ):
     """

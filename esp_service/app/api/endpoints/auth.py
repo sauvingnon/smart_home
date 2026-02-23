@@ -11,7 +11,7 @@ router = APIRouter(
 )
 
 @router.post("/generate_key", response_model=KeyResponse)
-async def generate_key(
+async def generate_key_endpoint(
     user_id: int, 
     request: Request,
     x_bot_secret: str = Header(...)

@@ -10,7 +10,7 @@ router = APIRouter(
 )
 
 @router.get("/weather", response_model=WeatherData)
-async def get_current_weather(
+async def get_current_weather_endpoint(
     user_id: int = Depends(get_current_user_id)
 ):
     """
