@@ -515,7 +515,7 @@ class WeatherBackgroundWorker:
         if result:
             logger.info(f"✅ Получен отчёт за {daily_stats['date']}")
             # Сохраним в кеш.
-            await self.cache.cache_daily_report(result, yesterday)
+            await self.cache.cache_daily_report(result, yesterday, now)
             return result
         else:
             logger.error("❌ Не удалось получить ответ от ИИ")
@@ -631,7 +631,7 @@ class WeatherBackgroundWorker:
         
         if result:
             logger.info(f"✅ Получен отчёт за неделю")
-            await self.cache.cache_weekly_report(result, last_day)
+            await self.cache.cache_weekly_report(result, last_day, now)
             return result
         else:
             logger.error("❌ Не удалось получить ответ от ИИ")
