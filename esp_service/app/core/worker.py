@@ -433,6 +433,12 @@ class WeatherBackgroundWorker:
         Выполняем запрос на анализ с оптимальным кол-вом точек.
         """
         now = self._get_izhevsk_time()
+        yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Проверим кеш
+        cached = await self.cache.get_cached_daily_report(yesterday)
+        if cached:
+            return cached
         
         # Получаем статистику за вчера
         daily_stats = await self.storage.get_yesterday_stats(
@@ -478,6 +484,8 @@ class WeatherBackgroundWorker:
         # Формируем понятный промпт для ИИ
         prompt = f"""
     Ты — умный помощник системы умного дома. Проанализируй данные за вчерашний день ({daily_stats['date']}) и напиши дружелюбный отчёт.
+    Скачки значения влажности можно описать тем, что в доме создается движения воздуха, а именно тем
+    что жильцы проснулись и начали активничать. Ну или была влажная уброрка\стирка.
 
     📊 **Статистика за день:**
     - Температура внутри: средняя {temp_in_avg}°C, от {temp_in_min} до {temp_in_max}
@@ -495,7 +503,7 @@ class WeatherBackgroundWorker:
     - Всего записей: {total_records} (ESP: {esp_records}, погода: {weather_records})
 
     Напиши короткий (3-5 предложений), дружелюбный отчёт на русском языке. 
-    Отметь, был ли день типичным, были ли аномалии, дай совет, если нужно.
+    Отметь, был ли день типичным, были ли аномалии, дай совет, если нужно, но не про увлажнитель воздуха.
     Обрати внимание на интересные моменты из динамики.
     Не используй markdown, просто текст.
     """
@@ -506,6 +514,8 @@ class WeatherBackgroundWorker:
         
         if result:
             logger.info(f"✅ Получен отчёт за {daily_stats['date']}")
+            # Сохраним в кеш.
+            await self.cache.cache_daily_report(result, yesterday)
             return result
         else:
             logger.error("❌ Не удалось получить ответ от ИИ")
@@ -539,6 +549,12 @@ class WeatherBackgroundWorker:
         Берем неделю, заканчивающуюся вчера (00:00-23:59 каждого дня).
         """
         now = self._get_izhevsk_time()
+        last_day = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Проверим кеш.
+        cached = await self.cache.get_cached_weekly_report(last_day)
+        if cached:
+            return cached
         
         # Получаем статистику за неделю
         weekly_stats = await self.storage.get_week_stats(
@@ -571,6 +587,8 @@ class WeatherBackgroundWorker:
         # Формируем промпт для ИИ
         prompt = f"""
     Ты — умный помощник системы умного дома. Проанализируй данные за последнюю неделю ({weekly_stats['period']['start']} - {weekly_stats['period']['end']}) и напиши дружелюбный отчёт.
+    Скачки значения влажности можно описать тем, что в доме создается движения воздуха, а именно тем
+    что жильцы проснулись и начали активничать. Ну или была влажная уброрка\стирка.
 
     📊 **Общая статистика за неделю:**
 
@@ -603,7 +621,7 @@ class WeatherBackgroundWorker:
     Напиши краткий (5-7 предложений) дружелюбный отчёт на русском языке.
     Опиши общую картину недели, выдели самый холодный/тёплый день,
     сравни снаружи и внутри, отметь интересные моменты из детальной динамики,
-    дай совет, если нужно.
+    дай совет, если нужно, но не про увлажнитель воздуха.
     Не используй markdown, просто текст.
     """
         
@@ -613,6 +631,7 @@ class WeatherBackgroundWorker:
         
         if result:
             logger.info(f"✅ Получен отчёт за неделю")
+            await self.cache.cache_weekly_report(result, last_day)
             return result
         else:
             logger.error("❌ Не удалось получить ответ от ИИ")

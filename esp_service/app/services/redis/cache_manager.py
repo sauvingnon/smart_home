@@ -147,7 +147,6 @@ class CacheManager:
         calls = await self.redis_client.get(f"api_calls:{today}")
         return int(calls) if calls else 0
     
-
     async def should_sync_time(self, device_id: str, sync_interval_days: int = 2) -> bool:
         """
         Проверяет, нужно ли синхронизировать время устройства.
@@ -189,7 +188,6 @@ class CacheManager:
             logger.error(f"Ошибка проверки синхронизации для {device_id}: {e}")
             return True
         
-
     async def mark_sync_completed(self, device_id: str) -> None:
         """
         Отмечает успешную синхронизацию времени устройства.
@@ -244,7 +242,6 @@ class CacheManager:
         except Exception as e:
             logger.exception(f"Ошибка сохранения в кэш ключа: {e}")
 
-
     async def validate_key(self, key: str) -> Optional[int]:
         """Проверяет ключ, возвращает user_id если валиден"""
         if not self.redis_client:
@@ -267,3 +264,120 @@ class CacheManager:
         """Отзывает ключ"""
         redis_key = f"{self.key_prefix}{key}"
         return bool(await self.redis_client.delete(redis_key))
+    
+    async def cache_daily_report(self, report_text: str, report_date: str, now: datetime) -> bool:
+        """
+        Сохранить дневной отчёт в кэш до конца текущего дня.
+        report_date: дата отчёта в формате YYYY-MM-DD
+        """
+        if not self.redis_client:
+            return False
+        
+        if not await self._ensure_connection():
+            return False
+        
+        try:
+            # Считаем, сколько секунд осталось до конца дня
+            end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            seconds_until_end = int((end_of_day - now).total_seconds())
+            
+            # Если вдруг уже после 23:59 (маловероятно, но вдруг)
+            if seconds_until_end < 0:
+                seconds_until_end = 60  # кэш на минуту, чтобы не сломаться
+            
+            # Сохраняем отчёт
+            await self.redis_client.setex(
+                f"report:daily:{report_date}",
+                seconds_until_end,
+                report_text
+            )
+            
+            logger.info(f"📅 Дневной отчёт за {report_date} сохранён в кэш на {seconds_until_end}с")
+            return True
+            
+        except Exception as e:
+            logger.exception(f"❌ Ошибка сохранения дневного отчёта в кэш: {e}")
+            return False
+
+    async def get_cached_daily_report(self, report_date: str) -> Optional[str]:
+        """
+        Получить дневной отчёт из кэша.
+        report_date: дата отчёта в формате YYYY-MM-DD
+        """
+        if not self.redis_client:
+            return None
+        
+        if not await self._ensure_connection():
+            return None
+        
+        try:
+            report = await self.redis_client.get(f"report:daily:{report_date}")
+            
+            if report:
+                logger.info(f"📅 Дневной отчёт за {report_date} получен из кэша")
+            else:
+                logger.info(f"📅 Дневной отчёт за {report_date} в кэше не найден")
+            
+            return report
+            
+        except Exception as e:
+            logger.exception(f"❌ Ошибка получения дневного отчёта из кэша: {e}")
+            return None
+        
+    async def cache_weekly_report(self, report_text: str, week_key: str, now: datetime) -> bool:
+        """
+        Сохранить недельный отчёт в кэш до конца текущего дня.
+        week_key: ключ недели в формате YYYY-MM-DD (последний день недели)
+        """
+        if not self.redis_client:
+            return False
+        
+        if not await self._ensure_connection():
+            return False
+        
+        try:
+            # Считаем, сколько секунд осталось до конца дня
+            end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            seconds_until_end = int((end_of_day - now).total_seconds())
+            
+            if seconds_until_end < 0:
+                seconds_until_end = 60
+            
+            # Сохраняем отчёт
+            await self.redis_client.setex(
+                f"report:weekly:{week_key}",
+                seconds_until_end,
+                report_text
+            )
+            
+            logger.info(f"📆 Недельный отчёт за неделю {week_key} сохранён в кэш на {seconds_until_end}с")
+            return True
+            
+        except Exception as e:
+            logger.exception(f"❌ Ошибка сохранения недельного отчёта в кэш: {e}")
+            return False
+
+    async def get_cached_weekly_report(self, week_key: str) -> Optional[str]:
+        """
+        Получить недельный отчёт из кэша.
+        week_key: ключ недели в формате YYYY-MM-DD (последний день недели)
+        """
+        if not self.redis_client:
+            return None
+        
+        if not await self._ensure_connection():
+            return None
+        
+        try:
+            report = await self.redis_client.get(f"report:weekly:{week_key}")
+            
+            if report:
+                logger.info(f"📆 Недельный отчёт за неделю {week_key} получен из кэша")
+            else:
+                logger.info(f"📆 Недельный отчёт за неделю {week_key} в кэше не найден")
+            
+            return report
+            
+        except Exception as e:
+            logger.exception(f"❌ Ошибка получения недельного отчёта из кэша: {e}")
+            return None
