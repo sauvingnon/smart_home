@@ -451,27 +451,52 @@ class WeatherBackgroundWorker:
             max_points=50
         )
         
+        # Форматируем записи для промпта
+        records_text = self._format_records_for_prompt(daily_records)
+        
+        # Безопасные значения (на случай None)
+        temp_in_avg = daily_stats['temperature']['inside']['avg'] or '—'
+        temp_in_min = daily_stats['temperature']['inside']['min'] or '—'
+        temp_in_max = daily_stats['temperature']['inside']['max'] or '—'
+        
+        hum_in_avg = daily_stats['humidity']['inside']['avg'] or '—'
+        hum_in_min = daily_stats['humidity']['inside']['min'] or '—'
+        hum_in_max = daily_stats['humidity']['inside']['max'] or '—'
+        
+        temp_out_avg = daily_stats['temperature']['outside']['avg'] or '—'
+        temp_out_min = daily_stats['temperature']['outside']['min'] or '—'
+        temp_out_max = daily_stats['temperature']['outside']['max'] or '—'
+        
+        hum_out_avg = daily_stats['humidity']['outside']['avg'] or '—'
+        hum_out_min = daily_stats['humidity']['outside']['min'] or '—'
+        hum_out_max = daily_stats['humidity']['outside']['max'] or '—'
+        
+        total_records = daily_stats['records']['total']
+        esp_records = daily_stats['records']['esp']
+        weather_records = daily_stats['records']['weather']
+        
         # Формируем понятный промпт для ИИ
         prompt = f"""
     Ты — умный помощник системы умного дома. Проанализируй данные за вчерашний день ({daily_stats['date']}) и напиши дружелюбный отчёт.
 
     📊 **Статистика за день:**
-    - Температура внутри: средняя {daily_stats['temperature']['inside']['avg']}°C, от {daily_stats['temperature']['inside']['min']} до {daily_stats['temperature']['inside']['max']}
-    - Влажность внутри: средняя {daily_stats['humidity']['inside']['avg']}%, от {daily_stats['humidity']['inside']['min']} до {daily_stats['humidity']['inside']['max']}
+    - Температура внутри: средняя {temp_in_avg}°C, от {temp_in_min} до {temp_in_max}
+    - Влажность внутри: средняя {hum_in_avg}%, от {hum_in_min} до {hum_in_max}
 
     🌍 **На улице:**
-    - Температура: средняя {daily_stats['temperature']['outside']['avg']}°C, от {daily_stats['temperature']['outside']['min']} до {daily_stats['temperature']['outside']['max']}
-    - Влажность: средняя {daily_stats['humidity']['outside']['avg']}%, от {daily_stats['humidity']['outside']['min']} до {daily_stats['humidity']['outside']['max']}
+    - Температура: средняя {temp_out_avg}°C, от {temp_out_min} до {temp_out_max}
+    - Влажность: средняя {hum_out_avg}%, от {hum_out_min} до {hum_out_max}
 
     📈 **Динамика за день:**
     Вот как менялись показатели (время → температура/влажность внутри и снаружи):
-    {self._format_records_for_prompt(daily_records)}
+    {records_text}
 
     📊 **Дополнительно:**
-    - Всего записей: {daily_stats['records']['total']} (ESP: {daily_stats['records']['esp']}, погода: {daily_stats['records']['weather']})
+    - Всего записей: {total_records} (ESP: {esp_records}, погода: {weather_records})
 
     Напиши короткий (3-5 предложений), дружелюбный отчёт на русском языке. 
     Отметь, был ли день типичным, были ли аномалии, дай совет, если нужно.
+    Обрати внимание на интересные моменты из динамики.
     Не используй markdown, просто текст.
     """
         
@@ -529,8 +554,19 @@ class WeatherBackgroundWorker:
         weekly_records = await self.storage.get_week_records(
             now=now,
             device_id=self.device_id,
-            max_points=100  # 100 точек на всю неделю
+            max_points=100
         )
+        
+        # Форматируем записи для промпта
+        records_text = self._format_weekly_records_for_prompt(weekly_records)
+        
+        # Безопасно обрабатываем trend
+        trend = weekly_stats['summary'].get('trend')
+        if trend is None:
+            trend_text = "недостаточно данных для анализа тренда"
+        else:
+            direction = "выросла" if trend > 0 else "снизилась"
+            trend_text = f"{direction} на {abs(trend)}°C"
         
         # Формируем промпт для ИИ
         prompt = f"""
@@ -551,20 +587,23 @@ class WeatherBackgroundWorker:
     • Температура: средняя {weekly_stats['summary']['temperature']['outside']['avg']}°C (от {weekly_stats['summary']['temperature']['outside']['min']} до {weekly_stats['summary']['temperature']['outside']['max']})
     • Влажность: средняя {weekly_stats['summary']['humidity']['outside']['avg']}% (от {weekly_stats['summary']['humidity']['outside']['min']} до {weekly_stats['summary']['humidity']['outside']['max']})
 
-    📈 **Тренд за неделю:**
-    Температура {'выросла' if weekly_stats['summary']['trend'] and weekly_stats['summary']['trend'] > 0 else 'снизилась' if weekly_stats['summary']['trend'] and weekly_stats['summary']['trend'] < 0 else 'не изменилась'} {abs(weekly_stats['summary']['trend'])}°C
+    📈 **Тренд за неделю:** {trend_text}
 
-    📊 **По дням:**
+    📊 **По дням (средние значения):**
     {self._format_weekly_for_prompt(weekly_stats['daily'])}
 
-    📋 **Детали:**
+    📋 **Детальная динамика (выборочные точки):**
+    {records_text}
+
+    📊 **Дополнительно:**
     • Всего записей за неделю: {weekly_stats['summary']['records']['total']}
     • Записей с ESP: {weekly_stats['summary']['records']['esp']}
     • Обновлений погоды: {weekly_stats['summary']['records']['weather']}
 
     Напиши краткий (5-7 предложений) дружелюбный отчёт на русском языке.
     Опиши общую картину недели, выдели самый холодный/тёплый день,
-    сравни снаружи и внутри, дай совет, если нужно.
+    сравни снаружи и внутри, отметь интересные моменты из детальной динамики,
+    дай совет, если нужно.
     Не используй markdown, просто текст.
     """
         
@@ -579,20 +618,34 @@ class WeatherBackgroundWorker:
             logger.error("❌ Не удалось получить ответ от ИИ")
             return None
 
-    def _format_weekly_for_prompt(self, daily_stats: List[Dict]) -> str:
-        """Форматирует статистику по дням для промпта"""
-        if not daily_stats:
-            return "Нет данных"
+    def _format_weekly_records_for_prompt(self, weekly_records: Dict) -> str:
+        """Форматирует записи за неделю для промпта (по 2-3 точки с каждого дня)"""
+        if not weekly_records or 'days' not in weekly_records:
+            return "Нет данных по дням"
         
         lines = []
-        for day in daily_stats:
+        for day in weekly_records['days']:
             date = day['date'][5:]  # MM-DD
-            temp = day['temp_avg']
-            hum = day['hum_avg']
-            out_temp = day['outside_temp']
+            records = day.get('records', [])
             
-            line = f"📅 {date}: внутри {temp}°C/{hum}%, снаружи {out_temp}°C"
-            lines.append(line)
+            if not records:
+                continue
+            
+            # Берём утро, день, вечер (первые 3 точки)
+            sampled = records[::max(1, len(records)//3)][:3]
+            
+            day_lines = [f"  {date}:"]
+            for r in sampled:
+                time = r.get('time', '')
+                temp_in = r.get('temp_in', '—')
+                hum_in = r.get('hum_in', '—')
+                temp_out = r.get('temp_out', '—')
+                hum_out = r.get('hum_out', '—')
+                
+                day_lines.append(f"    {time}: внутри {temp_in}°C/{hum_in}%, снаружи {temp_out}°C/{hum_out}%")
+            
+            lines.extend(day_lines)
+            lines.append("")  # пустая строка между днями
         
         return "\n".join(lines)
 
