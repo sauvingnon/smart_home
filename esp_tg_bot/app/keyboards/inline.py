@@ -7,15 +7,15 @@ from app.schemas.settings import SettingsData
 commands = [
     BotCommand(command="getkey", description="🎛 Авторизация"),
     BotCommand(command="start", description="🏠 Перезапуск"),
-    BotCommand(command="monitor", description="📊 Мониторинг"),
-    BotCommand(command="settings", description="⚙️ Настройки")
+    # BotCommand(command="monitor", description="📊 Мониторинг"),
+    # BotCommand(command="settings", description="⚙️ Настройки")
 ]
 
 # 📱 Клавиатура приветствия
 start_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Мониторинг", callback_data="monitor")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")],
+        # [InlineKeyboardButton(text="📊 Мониторинг", callback_data="monitor")],
+        # [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")],
         [InlineKeyboardButton(text="🎛 Авторизация", callback_data="getkey")]
     ]
 )

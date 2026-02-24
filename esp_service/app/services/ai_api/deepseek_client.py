@@ -6,13 +6,14 @@ from logger import logger
 client = OpenAI(api_key=API_TOKEN_DEEPSEEK, base_url=BASE_URL_DEEPSEEK)
 
 # --- 💬 Chat LLM ---
-async def ai_message_request(message: str) -> str | None:
+async def ai_message_request(user_message: str, system_message: str) -> str | None:
     """Обработка текстового запроса пользователем."""
     try:
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "user", "content": message} 
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message} 
             ],
             stream=False
         )

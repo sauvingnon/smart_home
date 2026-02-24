@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Thermometer, Droplets, Bluetooth, Gauge, Clock, AlertCircle,
-  Sun, Cloud, CloudRain, CloudSnow, CloudLightning, CloudDrizzle, 
+  Sun, Cloud, CloudRain, CloudSnow, CloudLightning, CloudDrizzle, Sparkles, 
   Sunrise, Sunset, Moon, Settings2, RefreshCw, Wind, Zap
 } from 'lucide-react'
 import SettingsPage from '../SettingsPage/SettingsPage'
@@ -10,6 +10,7 @@ import { apiClient } from '../../api/client'
 import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import AIReport from '../../components/AIReport/AIReport'
+import AIVoiceChat from '../../components/AIVoiceChat/AIVoiceChat'
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {
@@ -58,6 +59,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [isStale, setIsStale] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showAIChat, setShowAIChat] = useState(false)
 
   const fetchData = async () => {
     try {
@@ -89,6 +91,13 @@ export default function HomePage() {
     />
   )
 
+  if (showAIChat) return (
+    <AIVoiceChat 
+      theme={theme} 
+      onClose={() => setShowAIChat(false)} 
+    />
+  )
+
   return (
     <div className={`home-container ${theme}`}>
       
@@ -116,6 +125,17 @@ export default function HomePage() {
           </div>
           
           <div className="header-actions">
+
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowAIChat(true)}
+              className="settings-button"
+              title="AI Ассистент"
+            >
+              <Sparkles size={20} />
+            </motion.button>
+
             {/* Кнопка переключения темы */}
             <motion.button
               whileHover={{ scale: 1.1, rotate: theme === 'light' ? 180 : -180 }}

@@ -3,10 +3,10 @@ from app.handlers import start, settings, monitoring, display_mode, display_time
 
 def setup_routers(dp: Dispatcher):
     dp.include_router(start.router)
-    dp.include_router(settings.router)
-    dp.include_router(monitoring.router)
-    dp.include_router(display_mode.router)
-    dp.include_router(display_timeout.router)
-    dp.include_router(relay_settings.router)
+    # dp.include_router(settings.router)
+    # dp.include_router(monitoring.router)
+    # dp.include_router(display_mode.router)
+    # dp.include_router(display_timeout.router)
+    # dp.include_router(relay_settings.router)
     dp.include_router(auth.router)
 

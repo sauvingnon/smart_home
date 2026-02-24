@@ -510,7 +510,7 @@ class WeatherBackgroundWorker:
         
         logger.info(f"🤖 Отправляю запрос в ИИ за {daily_stats['date']}")
         
-        result = await ai_message_request(message=prompt)
+        result = await ai_message_request(user_message="Нужен отчет.", system_message=prompt)
         
         if result:
             logger.info(f"✅ Получен отчёт за {daily_stats['date']}")
@@ -627,7 +627,7 @@ class WeatherBackgroundWorker:
         
         logger.info(f"🤖 Отправляю запрос в ИИ за неделю {weekly_stats['period']['start']} - {weekly_stats['period']['end']}")
         
-        result = await ai_message_request(message=prompt)
+        result = await ai_message_request(user_message="Нужен отчет.", system_message=prompt)
         
         if result:
             logger.info(f"✅ Получен отчёт за неделю")
