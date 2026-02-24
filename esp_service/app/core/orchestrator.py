@@ -19,9 +19,6 @@ async def handle_text_command(request: str) -> str:
 
         logger.info(f"Команда предобработана: {clean_text}")
 
-        if preprocessor.is_greeting_only(clean_text):
-            return "Привет! Чем могу помочь?"
-
         parser = LLMCommandParser()
         llm_result = await parser.parse(clean_text)
 
