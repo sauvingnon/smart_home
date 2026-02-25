@@ -15,7 +15,8 @@ export default function AIReport({ theme = 'dark' }: AIReportProps) {
   const [report, setReport] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(true)
+  // По умолчанию свернуто
+  const [expanded, setExpanded] = useState(false)
 
   const fetchReport = async (type: ReportType) => {
     setLoading(true)
@@ -33,17 +34,35 @@ export default function AIReport({ theme = 'dark' }: AIReportProps) {
     }
   }
 
-  useEffect(() => {
-    fetchReport(reportType)
-  }, [reportType])
+  // Убираем useEffect с автоматическим запросом
 
-  const handleRefresh = () => {
-    fetchReport(reportType)
+  const handleExpand = async () => {
+    const newExpanded = !expanded
+    
+    if (newExpanded && !report && !loading && !error) {
+      // Если разворачиваем и нет данных - грузим
+      await fetchReport(reportType)
+    }
+    
+    setExpanded(newExpanded)
   }
 
-  const handleTypeChange = (type: ReportType) => {
+  const handleRefresh = async () => {
+    await fetchReport(reportType)
+    if (!expanded) {
+      setExpanded(true) // Если было свернуто - разворачиваем
+    }
+  }
+
+  const handleTypeChange = async (type: ReportType) => {
     setReportType(type)
-    setExpanded(true)
+    setReport(null) // Сбрасываем старый отчёт
+    
+    if (expanded) {
+      // Если уже развернуто - сразу грузим новый тип
+      await fetchReport(type)
+    }
+    // Если свернуто - просто меняем тип, запрос пойдет при разворачивании
   }
 
   const isDark = theme === 'dark'
@@ -89,7 +108,7 @@ export default function AIReport({ theme = 'dark' }: AIReportProps) {
 
           <button
             className="expand-btn"
-            onClick={() => setExpanded(!expanded)}
+            onClick={handleExpand}
           >
             <ChevronDown size={16} className={`chevron ${expanded ? 'expanded' : ''}`} />
           </button>
