@@ -1,51 +1,66 @@
 import { useAuth } from './context/AuthContext';
 import { Login } from './pages/Login/Login';
 import HomePage from './pages/HomePage/HomePage';
+import { LaunchScreen } from './components/LaunchScreen/LaunchScreen';
 import { useEffect, useState } from 'react';
 import { apiClient, AuthError } from './api/client';
 
 function App() {
   const { accessKey, isLoading, clearAccessKey } = useAuth();
-  const [isValidating, setIsValidating] = useState(true);
-  const [isValid, setIsValid] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null); // 👈 Добавили
+  const [appReady, setAppReady] = useState(false);
+  const [shouldShowLogin, setShouldShowLogin] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [minTimePassed, setMinTimePassed] = useState(false); // 👈 Флаг минимального времени
+
+  // 👇 Засекаем минимальное время показа лаунча (3 секунды)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setMinTimePassed(true);
+    }, 3000); // 👈 3 секунды, можешь менять
+    
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
-    if (accessKey) {
-      apiClient.setAccessKey(accessKey);
-      
-      const validateKey = async () => {
+    const initializeApp = async () => {
+      // Ждем пока AuthContext загрузит ключ из localStorage
+      if (isLoading) return;
+
+      // Если есть ключ - валидируем
+      if (accessKey) {
+        apiClient.setAccessKey(accessKey);
+        
         try {
           await apiClient.fetch('/esp_service/telemetry');
-          setIsValid(true);
-          setAuthError(null); // 👈 Очищаем ошибку при успехе
+          // Валидация успешна - покажем HomePage
+          setShouldShowLogin(false);
         } catch (error) {
           if (error instanceof AuthError) {
             clearAccessKey();
-            setAuthError('Неверный ключ доступа'); // 👈 Устанавливаем ошибку
+            setAuthError('Неверный ключ доступа');
+            setShouldShowLogin(true);
           }
-        } finally {
-          setIsValidating(false);
         }
-      };
-      
-      validateKey();
-    } else {
-      setIsValidating(false);
-      setIsValid(false);
-    }
-  }, [accessKey]);
+      } else {
+        // Нет ключа - покажем Login
+        setShouldShowLogin(true);
+      }
 
-  if (isLoading || isValidating) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
-      </div>
-    );
+      // Говорим что всё готово к показу
+      setAppReady(true);
+    };
+
+    initializeApp();
+  }, [accessKey, isLoading]);
+
+  // 👇 Показываем лаунч пока не пройдет минимум 3 секунды ИЛИ пока не готово приложение
+  if (!minTimePassed || !appReady) {
+    return <LaunchScreen />;
   }
 
-  if (!accessKey || !isValid) {
-    return <Login error={authError} />; // 👈 Передаем ошибку
+  // Всё готово + прошло 3 секунды - показываем нужный экран
+  if (shouldShowLogin) {
+    return <Login error={authError} />;
   }
 
   return <HomePage />;
