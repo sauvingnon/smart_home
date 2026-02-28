@@ -1,11 +1,8 @@
 # Гибридная обработка команд
 
-from typing import Dict, Any, Tuple, Optional
 from app.core.worker import WeatherBackgroundWorker
 from app.core.command_executor import CommandExecutor
-from app.core.preprocess import CommandPreprocessor
-from app.core.llm_parser import LLMCommandParser
-from app.core.mather import CommandMatcher
+from app.core.command_triagram_matcher import matcher
 from logger import logger
 
 async def handle_text_command(request: str) -> str:
@@ -13,22 +10,20 @@ async def handle_text_command(request: str) -> str:
 
         logger.info(f"Поступила команда: {request}")
 
-        # Препроцессинг
-        preprocessor = CommandPreprocessor()
-        clean_text = preprocessor.process(request)
+        # parser = LLMCommandParser()
+        # llm_result = await parser.parse(clean_text)
 
-        logger.info(f"Команда предобработана: {clean_text}")
+        command = matcher.match(request)
 
-        parser = LLMCommandParser()
-        llm_result = await parser.parse(clean_text)
+        logger.info(command)
 
         worker = WeatherBackgroundWorker.get_instance()
         executor = CommandExecutor(worker=worker)
 
-        if llm_result and llm_result.get("confidence", 0) >= 0.7:
+        if command:
             logger.info(f"Ответ LLM удовлятворяет")
             # Тут уже выполняем команду
-            command_result = await executor.execute(llm_result)
+            command_result = await executor.execute(command)
             logger.info(command_result)
             return command_result
         
@@ -41,7 +36,7 @@ async def handle_text_command(request: str) -> str:
 
         return "Намерение не распознано. Повторите попытку."
     except:
-        return "Произошла ошибка. Команда не отправлена."
+        return "Внутренняя ошибка. Команда не выполнена."
 
     
     

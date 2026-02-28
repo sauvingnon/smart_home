@@ -10,7 +10,25 @@ class CommandExecutor:
     def __init__(self, worker: WeatherBackgroundWorker):
         self.worker = worker
         self.current_settings: Optional[SettingsData] = None
+
+    async def get_current_telemetry(self) -> str:
+        data = self.worker.get_current_telemetry()
+        if data is None:
+            return "Не удалось получить данные телеметрии."
+        return data.to_str()
     
+    async def get_ai_daily_report(self) -> str:
+        data = await self.worker.get_daily_report()
+        if data is None:
+            return "Не удалось получить данные анализа за вчера."
+        return data
+    
+    async def get_ai_weekly_report(self) -> str:
+        data = await self.worker.get_weekly_report()
+        if data is None:
+            return "Не удалось получить данные анализа за неделю."
+        return data
+
     async def _get_settings(self) -> SettingsData:
         """Получить текущие настройки"""
         if not self.current_settings:
@@ -19,6 +37,7 @@ class CommandExecutor:
     
     async def _save_settings(self, updates: Dict[str, Any]) -> bool:
         """Сохранить обновленные настройки"""
+        return True
         settings = await self._get_settings()
         
         # Обновляем только указанные поля
@@ -47,34 +66,34 @@ class CommandExecutor:
         try:
             # Расписание
             if cmd == "set_day_on":
-                h, m = self._parse_time(command["time"])
+                h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"dayOnHour": h, "dayOnMinute": m})
-                return f"✅ Дневной свет будет включаться в {command['time']}"
+                return f"✅ Дневной свет будет включаться в {command['params']['time']}"
             
             elif cmd == "set_day_off":
-                h, m = self._parse_time(command["time"])
+                h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"dayOffHour": h, "dayOffMinute": m})
-                return f"✅ Дневной свет будет выключаться в {command['time']}"
+                return f"✅ Дневной свет будет выключаться в {command['params']['time']}"
             
             elif cmd == "set_night_on":
-                h, m = self._parse_time(command["time"])
+                h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"nightOnHour": h, "nightOnMinute": m})
-                return f"✅ Ночной свет будет включаться в {command['time']}"
+                return f"✅ Ночной свет будет включаться в {command['params']['time']}"
             
             elif cmd == "set_night_off":
-                h, m = self._parse_time(command["time"])
+                h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"nightOffHour": h, "nightOffMinute": m})
-                return f"✅ Ночной свет будет выключаться в {command['time']}"
+                return f"✅ Ночной свет будет выключаться в {command['params']['time']}"
             
             elif cmd == "set_toilet_on":
-                h, m = self._parse_time(command["time"])
+                h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"toiletOnHour": h, "toiletOnMinute": m})
-                return f"✅ Свет в уборной будет включаться в {command['time']}"
+                return f"✅ Свет в уборной будет включаться в {command['params']['time']}"
             
             elif cmd == "set_toilet_off":
-                h, m = self._parse_time(command["time"])
+                h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"toiletOffHour": h, "toiletOffMinute": m})
-                return f"✅ Свет в уборной будет выключаться в {command['time']}"
+                return f"✅ Свет в уборной будет выключаться в {command['params']['time']}"
             
             # Режимы реле
             elif cmd == "set_relay_auto":
@@ -91,7 +110,7 @@ class CommandExecutor:
                 return "✅ Дневной свет включен вручную"
             
             elif cmd == "set_manual_day_off":
-                await self._save_settings({"manualDayState": False})
+                await self._save_settings({"manualDayState": False, "relayMode": True})
                 return "✅ Дневной свет выключен"
             
             elif cmd == "set_manual_night_on":
@@ -99,61 +118,27 @@ class CommandExecutor:
                 return "✅ Ночной свет включен вручную"
             
             elif cmd == "set_manual_night_off":
-                await self._save_settings({"manualNightState": False})
+                await self._save_settings({"manualNightState": False, "relayMode": True})
                 return "✅ Ночной свет выключен"
-            
-            # Экран
-            elif cmd == "set_display_constant":
-                await self._save_settings({"displayMode": 0})
-                return "✅ Установлен постоянный режим экрана"
-            
-            elif cmd == "set_display_auto":
-                await self._save_settings({"displayMode": 1})
-                return "✅ Установлен автоматический режим экрана"
-            
-            elif cmd == "set_display_smart":
-                await self._save_settings({"displayMode": 2})
-                return "✅ Установлен умный режим экрана"
-            
-            elif cmd == "set_display_timeout":
-                await self._save_settings({"displayTimeout": command["value"]})
-                return f"✅ Таймаут экрана установлен на {command['value']} секунд"
-            
-            elif cmd == "set_display_change_timeout":
-                await self._save_settings({"displayChangeModeTimeout": command["value"]})
-                return f"✅ Таймаут смены режимов установлен на {command['value']} секунд"
-            
-            elif cmd == "toggle_show_temp":
-                settings = await self._get_settings()
-                await self._save_settings({"showTempScreen": not settings.showTempScreen})
-                return "✅ Экран датчиков " + ("включен" if not settings.showTempScreen else "выключен")
-            
-            elif cmd == "toggle_show_forecast":
-                settings = await self._get_settings()
-                await self._save_settings({"showForecastScreen": not settings.showForecastScreen})
-                return "✅ Экран прогноза " + ("включен" if not settings.showForecastScreen else "выключен")
             
             # Вентилятор
             elif cmd == "set_silent_mode_on":
                 await self._save_settings({"silentMode": True})
                 return "✅ Режим тишины активирован"
             
-            elif cmd == "set_silent_mode_off":
-                await self._save_settings({"silentMode": False})
-                return "✅ Режим тишины отключен"
-            
             elif cmd == "start_fan":
-                minutes = command.get("minutes", 5)
+                minutes = int(command["params"]["minutes"])
                 await self._save_settings({"forcedVentilationTimeout": minutes})
                 return f"✅ Вентилятор включен на {minutes} минут"
             
-            elif cmd == "set_fan_delay":
-                await self._save_settings({"fanDelay": command["value"]})
-                return f"✅ Задержка вентилятора установлена на {command['value']} секунд"
+            elif cmd == "get_current_data":
+                return await self.get_current_telemetry()
             
-            elif cmd == "set_fan_duration":
-                await self._save_settings({"fanDuration": command["value"]})
-                return f"✅ Длительность работы вентилятора установлена на {command['value']} минут"
+            elif cmd == "get_ai_yesterday":
+                return await self.get_ai_daily_report()
+            
+            elif cmd == "get_ai_weekly":
+                return await self.get_ai_weekly_report()
             
             else:
                 return f"❌ Неизвестная команда: {cmd}"

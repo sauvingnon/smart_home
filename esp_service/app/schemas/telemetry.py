@@ -23,3 +23,27 @@ class TelemetryData(BaseModel):
             'timestamp': self.timestamp.isoformat(),
             'bluetooth_is_active': self.bluetooth_is_active
         }
+    
+    def to_str(self) -> str:
+        """Повествовательное строковое представление телеметрии"""
+        description = f"Получены текущие данные телеметрии платы умного дома: "
+        description += f"температура {self.temperature:.1f}°C, влажность {self.humidity:.1f}%"
+        
+        
+        if self.uptime is not None:
+            hours = self.uptime // 3600
+            minutes = (self.uptime % 3600) // 60
+            if hours > 0 and minutes > 0:
+                description += f", время работы {hours} ч {minutes} мин"
+            elif hours > 0:
+                description += f", время работы {hours} ч"
+            else:
+                description += f", время работы {minutes} мин"
+        
+        if self.bluetooth_is_active is not None:
+            status = "активно" if self.bluetooth_is_active else "неактивно"
+            description += f", Bluetooth-соединение {status}"
+        
+        description += f" (данные от {self.timestamp.strftime('%d.%m.%Y %H:%M')})"
+        
+        return description
