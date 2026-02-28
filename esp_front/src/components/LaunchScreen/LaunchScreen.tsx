@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import styles from './LaunchScreen.module.css'
+import logo from '../../assets/logo.png'
 
 export const LaunchScreen = () => {
   return (
@@ -16,11 +17,7 @@ export const LaunchScreen = () => {
           transition={{ duration: 0.8, ease: [0.23, 1, 0.32, 1] }}
         >
           <div className={styles.logoGlow} />
-          <img 
-            src="/public/android-chrome-512x512.png" 
-            alt="Logo" 
-            className={styles.logo}
-          />
+          <img src={logo} alt="Logo" className={styles.logo} />
         </motion.div>
         
         {/* Текст */}
