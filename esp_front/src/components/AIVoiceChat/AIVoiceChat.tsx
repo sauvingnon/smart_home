@@ -191,31 +191,41 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
     }
   }
 
+  const cleanTextForSpeech = (text: string) => {
+    // Регулярка для удаления эмодзи и спецсимволов
+    return text.replace(/[✅❌⚠️🔔📊📅📆🔇🖐️⏰⏱️🎯❓❗]+/g, '')
+              .replace(/[^\w\s.,!?а-яА-ЯёЁ]/g, '') // Оставляем только буквы, цифры и базовые знаки
+              .trim()
+  }
+
   // Функция озвучивания
   const speakResponse = (text: string) => {
     if (!voiceOutput || !synthRef.current) return
+
+    const cleanText = cleanTextForSpeech(text)
+    if (!cleanText) return
     
     // Если требуется ручное воспроизведение - сохраняем текст
     if (manualPlayRequired) {
-      setPendingResponse(text)
+      setPendingResponse(cleanText)
       return
     }
     
     try {
       synthRef.current.cancel()
-      const utterance = new SpeechSynthesisUtterance(text)
+      const utterance = new SpeechSynthesisUtterance(cleanText)
       utterance.lang = 'ru-RU'
       utterance.rate = 1.0
       utterance.onerror = () => {
         // Если ошибка - переключаем в ручной режим
         setManualPlayRequired(true)
-        setPendingResponse(text)
+        setPendingResponse(cleanText)
       }
       synthRef.current.speak(utterance)
     } catch (e) {
       console.error('Ошибка озвучивания:', e)
       setManualPlayRequired(true)
-      setPendingResponse(text)
+      setPendingResponse(cleanText)
     }
   }
 
