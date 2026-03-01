@@ -37,7 +37,6 @@ class CommandExecutor:
     
     async def _save_settings(self, updates: Dict[str, Any]) -> bool:
         """Сохранить обновленные настройки"""
-        return True
         settings = await self._get_settings()
         
         # Обновляем только указанные поля

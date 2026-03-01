@@ -27,11 +27,23 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
   const [speechSupported, setSpeechSupported] = useState(true)
   const [voiceOutput, setVoiceOutput] = useState(true)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
   const synthRef = useRef(window.speechSynthesis)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Определяем мобильное устройство
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 480)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Инициализация SpeechRecognition
   useEffect(() => {
@@ -49,6 +61,8 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
     recognitionRef.current.onresult = (event: any) => {
       const text = event.results[0][0].transcript
       setInputText(text)
+      // Автофокус на инпут после распознавания
+      inputRef.current?.focus()
       setIsListening(false)
     }
 
@@ -66,6 +80,30 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
       }
     }
   }, [])
+
+  // ФИЧА 1: Активация голоса на мобильных устройствах
+  useEffect(() => {
+    const enableVoiceOnMobile = () => {
+      if (synthRef.current && 'speechSynthesis' in window) {
+        // "Пробуждаем" синтезатор речи пустым сообщением
+        const utterance = new SpeechSynthesisUtterance('')
+        synthRef.current.speak(utterance)
+        synthRef.current.cancel()
+        console.log('🔊 Голос активирован')
+      }
+      // Удаляем обработчик после первого касания
+      document.removeEventListener('touchstart', enableVoiceOnMobile)
+    }
+
+    // Добавляем обработчик только для мобильных
+    if (isMobile) {
+      document.addEventListener('touchstart', enableVoiceOnMobile)
+    }
+    
+    return () => {
+      document.removeEventListener('touchstart', enableVoiceOnMobile)
+    }
+  }, [isMobile])
 
   // Загрузка истории из localStorage
   useEffect(() => {
@@ -107,6 +145,27 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
     setShowScrollBtn(!isNearBottom)
   }
 
+  // Функция озвучивания с защитой для мобильных
+  const speakResponse = (text: string) => {
+    if (!voiceOutput || !synthRef.current) return
+    
+    // Отменяем предыдущую озвучку
+    synthRef.current.cancel()
+    
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'ru-RU'
+    utterance.rate = 1.0
+    
+    // Для мобильных добавляем небольшую задержку
+    if (isMobile) {
+      setTimeout(() => {
+        synthRef.current.speak(utterance)
+      }, 100)
+    } else {
+      synthRef.current.speak(utterance)
+    }
+  }
+
   // Отправка сообщения
   const sendMessage = async () => {
     if (!inputText.trim() || loading) return
@@ -137,13 +196,8 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
 
       setMessages(prev => [...prev, assistantMessage])
 
-      // Озвучивание ответа
-      if (voiceOutput && synthRef.current) {
-        const utterance = new SpeechSynthesisUtterance(assistantMessage.content)
-        utterance.lang = 'ru-RU'
-        utterance.rate = 1.0
-        synthRef.current.speak(utterance)
-      }
+      // Используем новую функцию озвучивания
+      speakResponse(assistantMessage.content)
 
     } catch (error) {
       console.error('AI command failed:', error)
@@ -187,7 +241,7 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
 
   return (
     <motion.div 
-      className={`ai-chat-container ${isDark ? 'dark' : 'light'}`}
+      className={`ai-chat-container ${isDark ? 'dark' : 'light'} ${isMobile ? 'mobile' : ''}`}
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
@@ -282,10 +336,11 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
         )}
       </AnimatePresence>
 
-      {/* Поле ввода */}
+      {/* ФИЧА 2: Поле ввода с фиксированной шириной для мобильных */}
       <div className="input-area">
         <div className="input-wrapper">
           <input
+            ref={inputRef}
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}

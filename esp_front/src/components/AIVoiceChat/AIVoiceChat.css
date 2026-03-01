@@ -424,3 +424,58 @@
     bottom: 6rem; /* чуть ниже на мобилках */
   }
 }
+
+/* В AIVoiceChat.css добавь в конец */
+
+/* Фикс для мобильных устройств */
+@media (max-width: 480px) {
+  .ai-chat-container.mobile {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+  }
+  
+  .chat-header {
+    padding: 1rem;
+  }
+  
+  .messages-container {
+    padding: 1rem;
+  }
+  
+  /* ФИЧА 2: Фиксированная ширина для поля ввода */
+  .input-area {
+    padding: 0.75rem;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--glass-border);
+  }
+  
+  .input-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  
+  .message-input {
+    flex: 1;
+    min-width: 0; /* Важно для flex-детей */
+    width: auto;
+    max-width: calc(100% - 100px); /* Оставляем место для кнопок */
+  }
+  
+  .mic-btn,
+  .send-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    flex-shrink: 0; /* Запрещаем сжиматься */
+  }
+  
+  .recording-indicator,
+  .loading-indicator,
+  .scroll-bottom-btn {
+    bottom: 5.5rem;
+  }
+}
