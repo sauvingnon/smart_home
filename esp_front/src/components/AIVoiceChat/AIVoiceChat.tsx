@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Mic, MicOff, Send, X, Bot, User, Sparkles, 
-  ChevronDown, Trash2, Volume2, VolumeX 
+  ChevronDown, Trash2, Volume2, VolumeX, Play 
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './AIVoiceChat.css'
@@ -29,20 +29,56 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   
+  // ФИЧА 1: Состояния для ручного воспроизведения на мобилках
+  const [manualPlayRequired, setManualPlayRequired] = useState(false)
+  const [pendingResponse, setPendingResponse] = useState<string | null>(null)
+  const [voiceInitialized, setVoiceInitialized] = useState(false)
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
-  const synthRef = useRef(window.speechSynthesis)
+  const synthRef = useRef<SpeechSynthesis | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Определяем мобильное устройство
+  // Инициализация синтезатора речи
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      synthRef.current = window.speechSynthesis
+    }
+  }, [])
+
+  // Определяем мобильное устройство и проверяем поддержку голоса
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth <= 480)
     }
     checkMobile()
     window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
+
+    // Проверяем мобильный браузер по user-agent
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    
+    // На мобильных iOS особенно проблемно
+    if (isMobileDevice && synthRef.current) {
+      // Проверяем работает ли синтез (на iOS возвращает false если не инициализирован)
+      try {
+        const testUtterance = new SpeechSynthesisUtterance('')
+        const success = synthRef.current.speak(testUtterance)
+        synthRef.current.cancel()
+        
+        if (!success) {
+          setManualPlayRequired(true)
+          console.log('📱 Мобильное устройство требует ручного воспроизведения')
+        }
+      } catch (e) {
+        setManualPlayRequired(true)
+        console.log('📱 Ошибка инициализации голоса, будет ручное воспроизведение')
+      }
+    }
+
+    return () => {
+      window.removeEventListener('resize', checkMobile)
+    }
   }, [])
 
   // Инициализация SpeechRecognition
@@ -61,7 +97,6 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
     recognitionRef.current.onresult = (event: any) => {
       const text = event.results[0][0].transcript
       setInputText(text)
-      // Автофокус на инпут после распознавания
       inputRef.current?.focus()
       setIsListening(false)
     }
@@ -80,30 +115,6 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
       }
     }
   }, [])
-
-  // ФИЧА 1: Активация голоса на мобильных устройствах
-  useEffect(() => {
-    const enableVoiceOnMobile = () => {
-      if (synthRef.current && 'speechSynthesis' in window) {
-        // "Пробуждаем" синтезатор речи пустым сообщением
-        const utterance = new SpeechSynthesisUtterance('')
-        synthRef.current.speak(utterance)
-        synthRef.current.cancel()
-        console.log('🔊 Голос активирован')
-      }
-      // Удаляем обработчик после первого касания
-      document.removeEventListener('touchstart', enableVoiceOnMobile)
-    }
-
-    // Добавляем обработчик только для мобильных
-    if (isMobile) {
-      document.addEventListener('touchstart', enableVoiceOnMobile)
-    }
-    
-    return () => {
-      document.removeEventListener('touchstart', enableVoiceOnMobile)
-    }
-  }, [isMobile])
 
   // Загрузка истории из localStorage
   useEffect(() => {
@@ -145,24 +156,66 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
     setShowScrollBtn(!isNearBottom)
   }
 
-  // Функция озвучивания с защитой для мобильных
+  // Функция принудительной инициализации голоса по жесту пользователя
+  const initializeVoice = () => {
+    if (!synthRef.current || voiceInitialized) return
+    
+    try {
+      // Пробуем активировать голос
+      const utterance = new SpeechSynthesisUtterance('')
+      synthRef.current.speak(utterance)
+      synthRef.current.cancel()
+      setVoiceInitialized(true)
+      setManualPlayRequired(false)
+      console.log('🔊 Голос активирован по жесту')
+    } catch (e) {
+      console.log('❌ Не удалось активировать голос')
+    }
+  }
+
+  // Функция ручного воспроизведения последнего ответа
+  const playLastResponse = () => {
+    if (!pendingResponse || !synthRef.current) return
+    
+    try {
+      synthRef.current.cancel()
+      const utterance = new SpeechSynthesisUtterance(pendingResponse)
+      utterance.lang = 'ru-RU'
+      utterance.rate = 1.0
+      utterance.onend = () => {
+        setPendingResponse(null)
+      }
+      synthRef.current.speak(utterance)
+    } catch (e) {
+      console.error('Ошибка воспроизведения:', e)
+    }
+  }
+
+  // Функция озвучивания
   const speakResponse = (text: string) => {
     if (!voiceOutput || !synthRef.current) return
     
-    // Отменяем предыдущую озвучку
-    synthRef.current.cancel()
+    // Если требуется ручное воспроизведение - сохраняем текст
+    if (manualPlayRequired) {
+      setPendingResponse(text)
+      return
+    }
     
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'ru-RU'
-    utterance.rate = 1.0
-    
-    // Для мобильных добавляем небольшую задержку
-    if (isMobile) {
-      setTimeout(() => {
-        synthRef.current.speak(utterance)
-      }, 100)
-    } else {
+    try {
+      synthRef.current.cancel()
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.lang = 'ru-RU'
+      utterance.rate = 1.0
+      utterance.onerror = () => {
+        // Если ошибка - переключаем в ручной режим
+        setManualPlayRequired(true)
+        setPendingResponse(text)
+      }
       synthRef.current.speak(utterance)
+    } catch (e) {
+      console.error('Ошибка озвучивания:', e)
+      setManualPlayRequired(true)
+      setPendingResponse(text)
     }
   }
 
@@ -196,7 +249,7 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
 
       setMessages(prev => [...prev, assistantMessage])
 
-      // Используем новую функцию озвучивания
+      // Озвучиваем ответ
       speakResponse(assistantMessage.content)
 
     } catch (error) {
@@ -237,6 +290,13 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
     }
   }
 
+  // Обработчик касания для инициализации голоса
+  const handleTouchStart = () => {
+    if (!voiceInitialized) {
+      initializeVoice()
+    }
+  }
+
   const isDark = theme === 'dark'
 
   return (
@@ -246,6 +306,8 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
+      onTouchStart={handleTouchStart}
+      onClick={handleTouchStart}
     >
       {/* Заголовок */}
       <div className="chat-header">
@@ -332,6 +394,22 @@ export default function AIVoiceChat({ theme = 'dark', onClose }: AIVoiceChatProp
             onClick={scrollToBottom}
           >
             <ChevronDown size={20} />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* ФИЧА 1: Кнопка ручного воспроизведения для мобилок */}
+      <AnimatePresence>
+        {manualPlayRequired && pendingResponse && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className="play-voice-btn"
+            onClick={playLastResponse}
+            title="Озвучить ответ"
+          >
+            <Play size={20} />
           </motion.button>
         )}
       </AnimatePresence>

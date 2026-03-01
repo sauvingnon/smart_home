@@ -479,3 +479,21 @@
     bottom: 5.5rem;
   }
 }
+
+.play-voice-btn {
+  position: absolute;
+  bottom: 7rem;
+  right: 1.25rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: var(--accent-orange);
+  color: white;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1001;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+}
