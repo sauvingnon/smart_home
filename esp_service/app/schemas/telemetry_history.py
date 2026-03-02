@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
 
@@ -66,11 +66,3 @@ class RawStats(BaseModel):
     avg_hum_out: Optional[float] = None
     min_hum_out: Optional[float] = None
     max_hum_out: Optional[float] = None
-    
-    @validator('*', pre=True)
-    def handle_null(cls, v):
-        """SQLite может вернуть None как 0 или пустую строку"""
-        if v == 0 and cls.current_field in ['avg_', 'min_', 'max_']:
-            # Проверяем, действительно ли это 0 или просто отсутствие данных
-            return None
-        return v
