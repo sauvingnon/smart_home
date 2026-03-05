@@ -47,9 +47,9 @@ class CommandExecutor:
         
         if success:
             self.current_settings = updated
-            logger.info(f"✅ Настройки обновлены: {updates}")
+            logger.info(f"Настройки обновлены: {updates}")
         else:
-            logger.error(f"❌ Ошибка обновления настроек: {updates}")
+            logger.error(f"Ошибка обновления настроек: {updates}")
         
         return success
     
@@ -67,68 +67,68 @@ class CommandExecutor:
             if cmd == "set_day_on":
                 h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"dayOnHour": h, "dayOnMinute": m})
-                return f"✅ Дневной свет будет включаться в {command['params']['time']}"
+                return f"Дневной свет будет включаться в {command['params']['time']}"
             
             elif cmd == "set_day_off":
                 h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"dayOffHour": h, "dayOffMinute": m})
-                return f"✅ Дневной свет будет выключаться в {command['params']['time']}"
+                return f"Дневной свет будет выключаться в {command['params']['time']}"
             
             elif cmd == "set_night_on":
                 h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"nightOnHour": h, "nightOnMinute": m})
-                return f"✅ Ночной свет будет включаться в {command['params']['time']}"
+                return f"Ночной свет будет включаться в {command['params']['time']}"
             
             elif cmd == "set_night_off":
                 h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"nightOffHour": h, "nightOffMinute": m})
-                return f"✅ Ночной свет будет выключаться в {command['params']['time']}"
+                return f"Ночной свет будет выключаться в {command['params']['time']}"
             
             elif cmd == "set_toilet_on":
                 h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"toiletOnHour": h, "toiletOnMinute": m})
-                return f"✅ Свет в уборной будет включаться в {command['params']['time']}"
+                return f"Свет в уборной будет включаться в {command['params']['time']}"
             
             elif cmd == "set_toilet_off":
                 h, m = self._parse_time(command["params"]["time"])
                 await self._save_settings({"toiletOffHour": h, "toiletOffMinute": m})
-                return f"✅ Свет в уборной будет выключаться в {command['params']['time']}"
+                return f"Свет в уборной будет выключаться в {command['params']['time']}"
             
             # Режимы реле
             elif cmd == "set_relay_auto":
                 await self._save_settings({"relayMode": False})
-                return "✅ Реле переведены в автоматический режим"
+                return "Реле переведены в автоматический режим"
             
             elif cmd == "set_relay_manual":
                 await self._save_settings({"relayMode": True})
-                return "✅ Реле переведены в ручной режим"
+                return "Реле переведены в ручной режим"
             
             # Ручное управление
             elif cmd == "set_manual_day_on":
                 await self._save_settings({"manualDayState": True, "relayMode": True})
-                return "✅ Дневной свет включен вручную"
+                return "Дневной свет включен вручную"
             
             elif cmd == "set_manual_day_off":
                 await self._save_settings({"manualDayState": False, "relayMode": True})
-                return "✅ Дневной свет выключен"
+                return "Дневной свет выключен"
             
             elif cmd == "set_manual_night_on":
                 await self._save_settings({"manualNightState": True, "relayMode": True})
-                return "✅ Ночной свет включен вручную"
+                return "Ночной свет включен вручную"
             
             elif cmd == "set_manual_night_off":
                 await self._save_settings({"manualNightState": False, "relayMode": True})
-                return "✅ Ночной свет выключен"
+                return "Ночной свет выключен"
             
             # Вентилятор
             elif cmd == "set_silent_mode_on":
                 await self._save_settings({"silentMode": True})
-                return "✅ Режим тишины активирован"
+                return "Режим тишины активирован"
             
             elif cmd == "start_fan":
                 minutes = int(command["params"]["minutes"])
                 await self._save_settings({"forcedVentilationTimeout": minutes})
-                return f"✅ Вентилятор включен на {minutes} минут"
+                return f"Вентилятор включен на {minutes} минут"
             
             elif cmd == "get_current_data":
                 return await self.get_current_telemetry()
@@ -140,8 +140,8 @@ class CommandExecutor:
                 return await self.get_ai_weekly_report()
             
             else:
-                return f"❌ Неизвестная команда: {cmd}"
+                return f"Неизвестная команда: {cmd}"
         
         except Exception as e:
             logger.exception(f"Ошибка выполнения команды: {e}")
-            return f"❌ Ошибка: {str(e)}"
+            return f"Что-то пошло не так: {str(e)}"

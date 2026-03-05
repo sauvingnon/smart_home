@@ -273,7 +273,7 @@ class WeatherBackgroundWorker:
                     logger.info("🔄 Получаем свежие данные погоды...")
                     # Получаем свежие данные
                     adapter = await asyncio.to_thread(
-                        lambda: self.service.get_forecast(56.8526, 53.2047)
+                        lambda: self.service.get_forecast(56.7945, 53.1797)
                     )
                     
                     if adapter:

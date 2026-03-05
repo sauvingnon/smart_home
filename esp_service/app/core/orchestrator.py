@@ -28,11 +28,6 @@ async def handle_text_command(request: str) -> str:
             return command_result
         
         logger.info("Низкая точность LLM.")
-        # matcher = CommandMatcher()
-        # mather_result = await matcher.match(clean_text)
-
-        # if mather_result is not None:
-        #     return await executor.execute(mather_result)
 
         return "Намерение не распознано. Повторите попытку."
     except:
