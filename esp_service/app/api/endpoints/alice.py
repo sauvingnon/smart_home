@@ -4,6 +4,7 @@ from logger import logger
 from app.core.command_triagram_matcher import matcher
 from app.core.command_executor import CommandExecutor
 from app.core.worker import WeatherBackgroundWorker
+import asyncio
 
 router = APIRouter(
     prefix="/esp_service",
@@ -22,6 +23,21 @@ async def alice_webhook(request: Request):
     user_text = body.get("request", {}).get("command", "").lower().strip()
     session = body.get("session", {})
     version = body.get("version", "1.0")
+    is_new_session = session.get("new", False)
+
+    if is_new_session and not user_text:
+        logger.info("🎯 Обнаружен пинг при запуске навыка, запускаю фоновую прегенерацию отчётов")
+        
+        # Запускаем фоновую прегенерацию (не ждём результат)
+        asyncio.create_task(_precache_reports())
+        
+        # Отвечаем как обычно
+        return await _alice_response(
+            session=session,
+            version=version,
+            text="Умный дом вас слушает.",
+            end_session=False
+        )
     
     # Если пустая команда — быстрый ответ
     if not user_text:
@@ -37,6 +53,27 @@ async def alice_webhook(request: Request):
         text=result["message"],
         end_session=False  # Сессию не закрываем
     )
+
+async def _precache_reports():
+    """
+    Фоновая прегенерация всех отчётов при первом запуске навыка.
+    Запускается после пинга, чтобы следующие запросы были мгновенными.
+    """
+    try:
+        logger.info("🔄 Начинаю фоновую прегенерацию отчётов")
+
+        worker = WeatherBackgroundWorker.get_instance()
+        
+        # Запускаем параллельно
+        await asyncio.gather(
+            worker.get_daily_report(),
+            worker.get_weekly_report(),
+            return_exceptions=True
+        )
+        
+        logger.info("✅ Все отчёты успешно сгенерированы и закешированы")
+    except Exception as e:
+        logger.exception(f"❌ Ошибка при прегенерации отчётов: {e}")
 
 async def _handle_command(text: str) -> dict:
     """
