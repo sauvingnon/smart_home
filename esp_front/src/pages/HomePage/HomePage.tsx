@@ -11,6 +11,7 @@ import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import AIReport from '../../components/AIReport/AIReport'
 import AIVoiceChat from '../../components/AIVoiceChat/AIVoiceChat'
+import CameraStream from '../../components/StreamCamera/StreamCamera'
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {
@@ -299,6 +300,22 @@ export default function HomePage() {
 
           {/* Новый блок с ИИ отчётами */}
           <AIReport theme={theme} />
+
+          {/* Live Camera Stream */}
+          <motion.div variants={itemVar} className="camera-card">
+            <div className="camera-card-header">
+              <div className="camera-card-title">
+                <span className="live-indicator"></span>
+                <h3>Камера</h3>
+              </div>
+            </div>
+            
+            <CameraStream 
+              cameraId="cam1" 
+              fps={5}
+              className="camera-stream"
+            />
+          </motion.div>
 
         </motion.div>
       </div>

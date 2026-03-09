@@ -17,6 +17,21 @@ class ApiClient {
     this.accessKey = key;
   }
 
+  async fetchRaw(endpoint: string, options: RequestInit = {}) {
+    const headers: HeadersInit = {
+      ...options.headers,
+    };
+
+    if (this.accessKey) {
+      headers['X-Access-Key'] = this.accessKey;
+    }
+
+    return fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  }
+
   async fetch(endpoint: string, options: RequestInit = {}) {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',

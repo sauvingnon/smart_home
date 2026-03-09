@@ -6,3 +6,5 @@ requests
 aiomqtt
 pytz
 openai
+numpy
+opencv-python-headless
