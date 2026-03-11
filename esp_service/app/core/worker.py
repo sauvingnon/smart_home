@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional
-from fastapi import Request, HTTPException
+from fastapi import Request, HTTPException, WebSocket
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from app.services.redis.cache_manager import CacheManager
 from app.services.weather_service.yandex_weather import WeatherService
@@ -764,6 +764,26 @@ class WeatherBackgroundWorker:
         logger.info(f"🌤️ Плата {device_id} запросила погоду")
         
         await self.send_to_board_weather_from_cache()
+
+    async def verify_websocket_key(self, websocket: WebSocket) -> Optional[int]:
+        """Проверяет ключ для WebSocket соединения"""
+        
+        # Просто получаем ключ из subprotocols
+        access_key = None
+        sec_protocol = websocket.headers.get("sec-websocket-protocol")
+        
+        if sec_protocol:
+            protocols = [p.strip() for p in sec_protocol.split(',')]
+            if len(protocols) >= 2 and protocols[0] == "access_key":
+                access_key = protocols[1]
+                logger.info(f"Found key for user")
+        
+        if not access_key:
+            logger.warning("No access key found")
+            return None
+        
+        user_id = await self.cache.validate_key(access_key)
+        return user_id
 
     async def verify_access_key(
         self,

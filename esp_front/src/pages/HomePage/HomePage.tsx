@@ -310,11 +310,7 @@ export default function HomePage() {
               </div>
             </div>
             
-            <CameraStream 
-              cameraId="cam1" 
-              fps={5}
-              className="camera-stream"
-            />
+            <CameraStream cameraId="cam1" />
           </motion.div>
 
         </motion.div>

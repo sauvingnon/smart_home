@@ -1,47 +1,243 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { apiClient } from '../../api/client';
 
-export const CameraStream = ({ cameraId = 'cam1', className = 'camera-stream' }) => {
-  const [imageUrl, setImageUrl] = useState(null);
-  const [error, setError] = useState(false);
+interface CameraStreamProps {
+  cameraId?: string;
+  className?: string;
+  fps?: number;
+}
+
+type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error';
+
+export const CameraStream = ({ 
+  cameraId = 'cam1', 
+  className = 'camera-stream',
+  fps = 5 
+}: CameraStreamProps) => {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const wsRef = useRef<WebSocket | null>(null);
+  const mountedRef = useRef(true);
+  const lastFrameTimeRef = useRef(Date.now());
 
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
     
-    const fetchFrame = async () => {
-      try {
-        // Используем last_frame вместо stream
-        const response = await apiClient.fetchRaw(`/esp_service/last_frame/${cameraId}`);
-        const blob = await response.blob();
+    const ws = apiClient.createCameraWebSocket(cameraId, {
+      fps,
+      
+      onOpen: () => {
+        if (mountedRef.current) {
+          setConnectionState('connected');
+          setErrorMessage('');
+          setReconnectAttempt(0);
+          lastFrameTimeRef.current = Date.now();
+        }
+      },
+      
+      onFrame: (blob) => {
+        if (!mountedRef.current) return;
+        const url = URL.createObjectURL(blob);
+        setImageUrl(prev => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
+        lastFrameTimeRef.current = Date.now();
+      },
+      
+      onClose: (code, reason) => {
+        if (!mountedRef.current) return;
         
-        if (mounted) {
+        if (code === 1006) {
+          setConnectionState('disconnected');
+          setErrorMessage('Соединение потеряно');
+        } else if (code === 1008) {
+          setConnectionState('error');
+          setErrorMessage('Неверный ключ доступа');
+        } else {
+          setConnectionState('disconnected');
+          setErrorMessage(`Отключено (код ${code})`);
+        }
+      },
+      
+      onError: (error) => {
+        if (mountedRef.current) {
+          setConnectionState('error');
+          setErrorMessage('Ошибка соединения');
+        }
+      }
+    });
+    
+    wsRef.current = ws;
+    
+    return () => {
+      mountedRef.current = false;
+      apiClient.closeCameraWebSocket(cameraId);
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+  }, [cameraId, fps]);
+
+  // Отслеживаем попытки переподключения
+  useEffect(() => {
+    if (connectionState === 'reconnecting' || connectionState === 'disconnected') {
+      const timer = setTimeout(() => {
+        setReconnectAttempt(prev => prev + 1);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [connectionState]);
+
+  const reconnect = () => {
+    setConnectionState('reconnecting');
+    setReconnectAttempt(0);
+    apiClient.closeCameraWebSocket(cameraId);
+    
+    // Перезагружаем компонент через useEffect
+    setTimeout(() => {
+      const ws = apiClient.createCameraWebSocket(cameraId, {
+        fps,
+        onOpen: () => {
+          if (mountedRef.current) {
+            setConnectionState('connected');
+            setErrorMessage('');
+            setReconnectAttempt(0);
+          }
+        },
+        onFrame: (blob) => {
+          if (!mountedRef.current) return;
           const url = URL.createObjectURL(blob);
           setImageUrl(prev => {
             if (prev) URL.revokeObjectURL(prev);
             return url;
           });
-          setError(false);
+          lastFrameTimeRef.current = Date.now();
+        },
+        onClose: (code) => {
+          if (mountedRef.current) {
+            setConnectionState('disconnected');
+            setErrorMessage(`Отключено (код ${code})`);
+          }
+        },
+        onError: () => {
+          if (mountedRef.current) {
+            setConnectionState('error');
+            setErrorMessage('Ошибка соединения');
+          }
         }
-      } catch (err) {
-        console.error('Camera error:', err);
-        if (mounted) setError(true);
+      });
+      wsRef.current = ws;
+    }, 500);
+  };
+
+  // Проверяем, получали ли мы фреймы в последние 5 секунд
+  useEffect(() => {
+    const checkFrameTimeout = setInterval(() => {
+      if (connectionState === 'connected' && Date.now() - lastFrameTimeRef.current > 5000) {
+        setConnectionState('disconnected');
+        setErrorMessage('Нет данных от камеры');
       }
-    };
+    }, 2000);
+    
+    return () => clearInterval(checkFrameTimeout);
+  }, [connectionState]);
 
-    fetchFrame();
-    const interval = setInterval(fetchFrame, 200); // 5 fps
+  // Состояние: Загрузка
+  if (connectionState === 'connecting') {
+    return (
+      <div className="camera-container camera-loading">
+        <div className="camera-spinner">
+          <div className="spinner-ring"></div>
+          <div className="spinner-ring"></div>
+          <div className="spinner-ring"></div>
+        </div>
+        <p className="camera-status-text">⏳ Подключение...</p>
+      </div>
+    );
+  }
 
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
-    };
-  }, [cameraId]);
+  // Состояние: Переподключение
+  if (connectionState === 'reconnecting') {
+    return (
+      <div className="camera-container camera-reconnecting">
+        <div className="camera-spinner">
+          <div className="spinner-ring"></div>
+          <div className="spinner-ring"></div>
+          <div className="spinner-ring"></div>
+        </div>
+        <p className="camera-status-text">🔄 Переподключение... ({reconnectAttempt + 1}/5)</p>
+      </div>
+    );
+  }
 
-  if (error) return <div>❌ Камера не работает</div>;
-  if (!imageUrl) return <div>⏳ Загрузка...</div>;
+  // Состояние: Ошибка
+  if (connectionState === 'error') {
+    return (
+      <div className="camera-container camera-error">
+        <div className="camera-error-content">
+          <div className="error-icon">⚠️</div>
+          <p className="error-title">Ошибка подключения</p>
+          <p className="error-message">{errorMessage}</p>
+          <button className="btn-reconnect" onClick={reconnect}>
+            Попробовать снова
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-  return <img src={imageUrl} className={className} alt="camera" />;
+  // Состояние: Отключено
+  if (connectionState === 'disconnected' && !imageUrl) {
+    return (
+      <div className="camera-container camera-disconnected">
+        <div className="camera-error-content">
+          <div className="error-icon">🔌</div>
+          <p className="error-title">Камера отключена</p>
+          <p className="error-message">{errorMessage}</p>
+          <button className="btn-reconnect" onClick={reconnect}>
+            Переподключиться
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Состояние: Активное с изображением
+  return (
+    <div className="camera-container camera-active">
+      {imageUrl && (
+        <img 
+          src={imageUrl} 
+          className={`camera-stream ${className}`} 
+          alt="Camera stream"
+          loading="lazy"
+        />
+      )}
+      
+      <div className="camera-overlay">
+        <div className={`camera-status-badge ${connectionState}`}>
+          <span className="status-indicator"></span>
+          <span className="status-text">
+            {connectionState === 'connected' && 'В сети'}
+            {connectionState === 'disconnected' && 'Отключено'}
+          </span>
+        </div>
+        
+        <div className="camera-info">
+          <span className="fps-badge">{fps} fps</span>
+        </div>
+      </div>
+
+      {connectionState === 'disconnected' && (
+        <div className="camera-disconnected-overlay">
+          <button className="btn-reconnect-small" onClick={reconnect}>
+            ↻ Переподключиться
+          </button>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default CameraStream;

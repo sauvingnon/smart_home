@@ -40,8 +40,6 @@ services:
     # Порт нужен наружу для ESP, и стоит авторизация по паролю
     # Переменные авторизации в .env и ставяться через скрипт
       - "1883:1883"
-    # Мы не используем WebSocket. У нас TCP
-      # - "9001:9001"
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
       - ./mosquitto/data:/mosquitto/data
@@ -64,9 +62,6 @@ services:
   esp_loki:
     image: grafana/loki:3.0.0
     container_name: esp_loki
-    # ports:
-      # Не нужен извне, графана и так с ним в контейнерной сети
-      # - "3100:3100"
     mem_limit: 200m
     mem_reservation: 100m
     cpus: "0.5"
@@ -100,6 +95,8 @@ services:
     ports:
     # Даем Web API, но оно доступно только на localhost, а оттуда его подхватит nginx и переведет на https
       - "127.0.0.1:8005:8005"
+    # ports:
+    #   - "8005:8005"
     volumes:
       - ./esp_service/data:/app/data
     mem_limit: 200m
