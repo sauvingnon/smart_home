@@ -83,7 +83,7 @@ class ApiClient {
       console.log(`📤 Will send protocols: ['access_key', '${this.accessKey}']`);
       
       const ws = new WebSocket(wsUrl, ['access_key', this.accessKey]);
-      ws.binaryType = 'blob';
+      ws.binaryType = 'arraybuffer';
       
       let reconnectAttempts = 0;
       const maxReconnectAttempts = 5;
@@ -116,7 +116,9 @@ class ApiClient {
                   console.log(`📨 WS text from ${cameraId}:`, event.data);
                   options.onMessage?.(event.data);
               } else {
-                  options.onFrame?.(event.data);
+                  // event.data - это ArrayBuffer
+                  const blob = new Blob([event.data], { type: 'image/jpeg' });
+                  options.onFrame?.(blob);
               }
           };
           

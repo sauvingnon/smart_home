@@ -39,6 +39,26 @@ export const CameraStream = ({
       
       onFrame: (blob) => {
         if (!mountedRef.current) return;
+        
+        // 1. Логируем размер
+        console.log(`📸 Frame received: ${blob.size} bytes`);
+        
+        // 2. Проверяем первые 4 байта (JPEG signature)
+        const reader = new FileReader();
+        reader.onload = () => {
+          const arr = new Uint8Array(reader.result);
+          console.log('First 4 bytes:', Array.from(arr.slice(0, 4)).map(b => '0x' + b.toString(16)).join(' '));
+          // Должно быть: 0xFF 0xD8 0xFF 0xE0 или 0xFF 0xD8 0xFF 0xDB и т.д.
+        };
+        reader.readAsArrayBuffer(blob);
+        
+        // 3. Пробуем загрузить изображение явно
+        const testImg = new Image();
+        testImg.onload = () => console.log('✅ Image loaded successfully');
+        testImg.onerror = (err) => console.error('❌ Image failed to load', err);
+        testImg.src = URL.createObjectURL(blob);
+        
+        // 4. Если всё ок, обновляем состояние
         const url = URL.createObjectURL(blob);
         setImageUrl(prev => {
           if (prev) URL.revokeObjectURL(prev);
