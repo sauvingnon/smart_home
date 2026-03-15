@@ -11,7 +11,7 @@ import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import AIReport from '../../components/AIReport/AIReport'
 import AIVoiceChat from '../../components/AIVoiceChat/AIVoiceChat'
-import CameraStream from '../../components/StreamCamera/StreamCamera'
+import { CameraStream } from '../../components/StreamCamera';
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {

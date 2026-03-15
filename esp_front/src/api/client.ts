@@ -67,6 +67,33 @@ class ApiClient {
     return response.json();
   }
 
+  async setCameraResolution(cameraId: string, resolution: 'QVGA' | 'VGA' | 'HD'): Promise<any> {
+    console.log('🎯 setCameraResolution called:', { cameraId, resolution, accessKey: this.accessKey });
+    
+    if (!this.accessKey) {
+      console.error('❌ No access key available');
+      throw new AuthError('No access key available');
+    }
+    
+    // 👇 Используем fetch с ключом в headers, а не в URL
+    return this.fetch(`/esp_service/camera/${cameraId}/resolution`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution }) // тело запроса
+    });
+  }
+
+  async getCameraStatus(cameraId: string): Promise<any> {
+    if (!this.accessKey) {
+      console.error('❌ No access key available');
+      throw new AuthError('No access key available');
+    }
+    
+    // GET запрос с ключом в headers
+    return this.fetch(`/esp_service/camera/${cameraId}/status`, {
+      method: 'GET'
+    });
+  }
+
     // 👇 НОВЫЙ МЕТОД: создание WebSocket подключения к камере с ключом в заголовках
   createCameraWebSocket(cameraId: string, options: any = {}) {
       if (!this.accessKey) {
