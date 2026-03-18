@@ -3,14 +3,14 @@
 #include <WebSocketsClient_Generic.h>
 
 // ===== НАСТРОЙКИ =====
-const char* ssid = "TP-Link_8343";
-const char* password = "64826424";
-const char* websocket_host = "tgapp.dotnetdon.ru";
-const uint16_t websocket_port = 4444;
-// const char* ssid = "TP-Link_297F";
-// const char* password = "23598126";
-// const char* websocket_host = "192.168.1.102";
-// const uint16_t websocket_port = 8005;
+// const char* ssid = "TP-Link_8343";
+// const char* password = "64826424";
+// const char* websocket_host = "tgapp.dotnetdon.ru";
+// const uint16_t websocket_port = 4444;
+const char* ssid = "TP-Link_297F";
+const char* password = "23598126";
+const char* websocket_host = "192.168.1.102";
+const uint16_t websocket_port = 8005;
 const char* camera_id = "cam1";
 const char* access_key = "12345678";
 // =====================
@@ -41,6 +41,9 @@ bool isAuthenticated = false;
 static unsigned long frameCount = 0;
 static unsigned long lastFpsLog = 0;
 
+// Качество изображения
+static int currentQualityMode = 0;
+
 // --- Прототипы функций (как в примере) ---
 void startWebSocketClient();
 void webSocketTask(void * pvParameters);
@@ -51,9 +54,18 @@ bool setFrameSize(String size) {
   if (!s) return false;
 
   framesize_t fs;
-  if (size == "QVGA") fs = FRAMESIZE_QVGA;   // 320x240 (быстрый)
-  else if (size == "VGA") fs = FRAMESIZE_VGA; // 640x480 (базовый)
-  else if (size == "HD") fs = FRAMESIZE_HD;   // 1280x720 (качественный)
+  if (size == "QVGA") {
+    fs = FRAMESIZE_QVGA;   // 320x240 (быстрый)
+    currentQualityMode = 0;
+  }
+  else if (size == "VGA") { 
+    fs = FRAMESIZE_VGA; // 640x480 (базовый)
+    currentQualityMode = 1;
+  }
+  else if (size == "HD") {
+    fs = FRAMESIZE_HD;   // 1280x720 (качественный)
+    currentQualityMode = 2;
+  }
   else return false;
 
   return s->set_framesize(s, fs) == 0;
@@ -97,7 +109,8 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
 
 // --- Функция запуска WebSocket клиента (аналог startCameraServer) ---
 void startWebSocketClient() {
-  webSocket.beginSSL(websocket_host, websocket_port, "/esp_service/ws/camera");
+  webSocket.begin(websocket_host, websocket_port, "/esp_service/ws/camera");
+  // webSocket.beginSSL(websocket_host, websocket_port, "/esp_service/ws/camera");
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(2000);
   webSocket.enableHeartbeat(15000, 3000, 2);
@@ -133,7 +146,7 @@ void webSocketTask(void * pvParameters) {
      // Отправка FPS раз в 5 секунд
     if (millis() - lastFpsLog > 5000) {
       if (isConnected && isAuthenticated) {
-        String fpsMsg = "fps:" + String(frameCount / 5);
+        String fpsMsg = "fps:" + String(frameCount / 5) + ";quality_mode:" + String(currentQualityMode);
         webSocket.sendTXT(fpsMsg);
         Serial.printf("📊 FPS report: %d fps\n", frameCount / 5);
       }
@@ -172,7 +185,7 @@ void setup() {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
+  config.xclk_freq_hz = 10000000;
   config.frame_size = FRAMESIZE_UXGA;      // Максимальное разрешение для старта
   config.pixel_format = PIXFORMAT_JPEG;    // для стриминга
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY; // КАК В ПРИМЕРЕ

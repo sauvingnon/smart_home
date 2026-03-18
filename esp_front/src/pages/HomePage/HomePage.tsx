@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-  Thermometer, Droplets, Bluetooth, Gauge, Clock, AlertCircle,
+  Thermometer, Droplets, Bluetooth, Gauge, Camera, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow, CloudLightning, CloudDrizzle, Sparkles, 
   Sunrise, Sunset, Moon, Settings2, RefreshCw, Wind, Zap
 } from 'lucide-react'
@@ -11,7 +11,7 @@ import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import AIReport from '../../components/AIReport/AIReport'
 import AIVoiceChat from '../../components/AIVoiceChat/AIVoiceChat'
-import { CameraStream } from '../../components/StreamCamera';
+import { CameraPage } from '../CameraPage/CameraPage'
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {
@@ -61,6 +61,7 @@ export default function HomePage() {
   const [isStale, setIsStale] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showAIChat, setShowAIChat] = useState(false)
+  const [showCamera, setShowCamera] = useState(false)
 
   const fetchData = async () => {
     try {
@@ -99,6 +100,14 @@ export default function HomePage() {
     />
   )
 
+  if (showCamera) return (
+    <CameraPage 
+    onClose={() => setShowCamera(false)}
+      theme={theme}
+      cameraId="cam1"
+    />
+  )
+
   return (
     <div className={`home-container ${theme}`}>
       
@@ -126,6 +135,17 @@ export default function HomePage() {
           </div>
           
           <div className="header-actions">
+
+             {/* Кнопка камеры */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowCamera(true)}
+              className="settings-button"
+              title="Камера"
+            >
+              <Camera size={20} />
+            </motion.button>
 
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -300,18 +320,6 @@ export default function HomePage() {
 
           {/* Новый блок с ИИ отчётами */}
           <AIReport theme={theme} />
-
-          {/* Live Camera Stream */}
-          <motion.div variants={itemVar} className="camera-card">
-            <div className="camera-card-header">
-              <div className="camera-card-title">
-                <span className="live-indicator"></span>
-                <h3>Камера</h3>
-              </div>
-            </div>
-            
-            <CameraStream cameraId="cam1" />
-          </motion.div>
 
         </motion.div>
       </div>

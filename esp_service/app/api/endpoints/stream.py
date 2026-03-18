@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Header
 from pydantic import BaseModel
 from logger import logger
@@ -11,12 +13,91 @@ router = APIRouter(prefix="/esp_service", tags=["esp_service"])
 # Хранилище последних кадров
 cameras: Dict[str, dict] = {}
 
+camera_modes: Dict[str, dict] = {}  # режимы работы камер
+DEFAULT_RECORD_DURATION = 30  # секунд
+
 # Вебсокет соединения
 esp_connections: Dict[str, WebSocket] = {}
 viewer_connections: Dict[str, Set[WebSocket]] = {}
 
 # Access keys
 VALID_ACCESS_KEYS = {"cam1": "12345678"}
+
+@router.post("/camera/{camera_id}/trigger")
+async def trigger_camera(camera_id: str, access_key: str, duration: int = 30):
+    """Запустить камеру по триггеру (движение)"""
+    if VALID_ACCESS_KEYS.get(camera_id) != access_key:
+        return {"error": "Invalid key"}, 403
+    
+    if camera_id not in esp_connections:
+        return {"error": "Camera not connected"}, 404
+    
+    # Устанавливаем режим "триггер" с таймером
+    camera_modes[camera_id] = {
+        "mode": "trigger",
+        "start_time": datetime.now(),
+        "duration": duration,
+        "active": True
+    }
+    
+    # Отправляем команду камере
+    try:
+        ws = esp_connections[camera_id]
+        await ws.send_text(f"trigger:{duration}")
+        logger.info(f"🎯 Camera {camera_id} triggered for {duration}s")
+        
+        return {
+            "status": "triggered", 
+            "camera": camera_id, 
+            "duration": duration
+        }
+    except Exception as e:
+        logger.error(f"Failed to trigger camera {camera_id}: {e}")
+        return {"error": str(e)}, 500
+
+@router.get("/camera/{camera_id}/should_wake")
+async def camera_should_wake(camera_id: str, access_key: str):
+    """Проверка - должна ли камера работать (опрос от камеры)"""
+    if VALID_ACCESS_KEYS.get(camera_id) != access_key:
+        return {"error": "Invalid key"}, 403
+    
+    # Проверяем наличие зрителей
+    has_viewers = len(viewer_connections.get(camera_id, set())) > 0
+    
+    # Проверяем наличие активного триггера
+    trigger_active = False
+    remaining = 0
+    
+    if camera_id in camera_modes:
+        mode_info = camera_modes[camera_id]
+        if mode_info["mode"] == "trigger" and mode_info["active"]:
+            elapsed = (datetime.now() - mode_info["start_time"]).seconds
+            if elapsed < mode_info["duration"]:
+                trigger_active = True
+                remaining = mode_info["duration"] - elapsed
+            else:
+                # Триггер истек
+                camera_modes[camera_id]["active"] = False
+    
+    # Логика: камера работает если есть зрители ИЛИ активный триггер
+    should_wake = has_viewers or trigger_active
+    
+    # Если есть зрители, но нет триггера - отслеживаем аномалии
+    anomaly = False
+    if has_viewers and not trigger_active:
+        # Тут можно добавить логику проверки "аномально долгого просмотра"
+        # Например, хранить время первого подключения
+        pass
+    
+    logger.info(f"⏰ Camera {camera_id} wake check: viewers={has_viewers}, trigger={trigger_active}, wake={should_wake}")
+    
+    return {
+        "should_wake": should_wake,
+        "has_viewers": has_viewers,
+        "trigger_active": trigger_active,
+        "remaining_seconds": remaining,
+        "anomaly": anomaly
+    }
 
 @router.websocket("/ws/camera")
 async def websocket_camera(websocket: WebSocket):
@@ -97,13 +178,29 @@ async def websocket_camera(websocket: WebSocket):
                     text = message['text']
                     logger.info(f"📨 Received text from {camera_id}: {text}")
                     
-                    # Обрабатываем FPS отчет
+                    # Обрабатываем отчет
                     if text.startswith("fps:"):
                         try:
-                            fps_value = int(text.split(":")[1])
-                            logger.info(f"📊 Camera {camera_id} FPS: {fps_value}")
+
+                            # Разбираем строку формата "fps:12;size:2543"
+                            parts = text.split(';')
+
+                            # Парсим FPS
+                            fps_part = parts[0]  # "fps:12"
+                            fps_value = int(fps_part.split(':')[1])
+
+                            # Парсим режим качества кадра
+                            frame_size = None
+                            if len(parts) > 1 and parts[1].startswith("quality_mode:"):
+                                size_part = parts[1]
+                                frame_size = int(size_part.split(':')[1])
+
+                            logger.info(f"📊 Camera {camera_id} FPS: {fps_value}, Quality mode: {frame_size}")
+
                             if camera_id in cameras:
                                 cameras[camera_id]["reported_fps"] = fps_value
+                                cameras[camera_id]["quality_mode"] = frame_size
+                                
                         except:
                             pass
                     
@@ -297,6 +394,7 @@ async def get_camera_status(
     return {
         "fps": cam.get("fps", 0),
         "reported_fps": cam.get("reported_fps", 0),
+        "quality_mode": cam.get("quality_mode", 1),
         "viewers": len(viewer_connections.get(camera_id, set())),
         "last_frame_size": len(cam["last_frame"]) if cam["last_frame"] else 0,
         "connected": camera_id in esp_connections

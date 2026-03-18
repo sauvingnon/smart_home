@@ -1,0 +1,682 @@
+/* CameraPage.css */
+
+/* Импортируем переменные (если их нет в глобальном CSS) */
+:root, .light {
+  --glass-bg: rgba(255, 255, 255, 0.4);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+  --text-primary: #1e293b;
+  --text-secondary: #334155;
+  --text-tertiary: #64748b;
+  --accent-cyan: #06b6d4;
+  --accent-blue: #3b82f6;
+  --accent-indigo: #6366f1;
+  --accent-purple: #a855f7;
+  --accent-amber: #f97316;
+  --accent-emerald: #10b981;
+  --accent-red: #ef4444;
+  --accent-green: #22c55e;
+  --accent-sky: #0ea5e9;
+  --bg-gradient-from: #e0f2fe;
+  --bg-gradient-to: #f0f9ff;
+}
+
+.dark {
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-tertiary: rgba(255, 255, 255, 0.3);
+  --accent-cyan: #22d3ee;
+  --accent-blue: #3b82f6;
+  --accent-indigo: #818cf8;
+  --accent-purple: #a78bfa;
+  --accent-amber: #fbbf24;
+  --accent-emerald: #34d399;
+  --accent-red: #f87171;
+  --accent-green: #4ade80;
+  --accent-sky: #0ea5e9;
+  --bg-gradient-from: #0f172a;
+  --bg-gradient-to: #1e1b4b;
+}
+
+/* Базовые стили */
+.camera-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, var(--bg-gradient-from), var(--bg-gradient-to));
+  color: var(--text-primary);
+  position: relative;
+  overflow-x: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Фоновые пятна (как в HomePage) */
+.background-spot {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.spot-1 {
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  width: 500px;
+  height: 500px;
+  background: rgba(249, 115, 22, 0.15);
+  border-radius: 50%;
+  filter: blur(120px);
+  mix-blend-mode: overlay;
+  animation: pulse 8s infinite;
+}
+
+.spot-2 {
+  position: absolute;
+  top: 20%;
+  right: -10%;
+  width: 400px;
+  height: 400px;
+  background: rgba(14, 165, 233, 0.15);
+  border-radius: 50%;
+  filter: blur(100px);
+  mix-blend-mode: overlay;
+}
+
+.spot-3 {
+  position: absolute;
+  bottom: -10%;
+  left: 20%;
+  width: 600px;
+  height: 600px;
+  background: rgba(139, 92, 246, 0.1);
+  border-radius: 50%;
+  filter: blur(130px);
+  mix-blend-mode: overlay;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+/* Контейнер */
+.camera-page-container {
+  position: relative;
+  z-index: 10;
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+/* Glass-карточка */
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 2rem;
+  box-shadow: var(--glass-shadow);
+}
+
+/* Хедер */
+.camera-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.back-button {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.back-button:hover {
+  transform: scale(1.1);
+  border-color: var(--accent-sky);
+  color: var(--accent-sky);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+}
+
+.camera-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.title-icon {
+  color: var(--accent-sky);
+}
+
+.camera-title h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(to right, var(--accent-sky), var(--accent-amber));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.header-action-btn {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.header-action-btn:hover {
+  transform: scale(1.1);
+  border-color: var(--accent-sky);
+  color: var(--accent-sky);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+}
+
+/* Основной контент */
+.camera-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Видеопоток */
+.camera-stream-wrapper {
+  padding: 0.5rem;
+}
+
+.camera-stream-wrapper .camera-container {
+  border-radius: 1.5rem;
+}
+
+/* Статистика */
+.camera-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.stat-icon {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stat-icon.wifi {
+  background: rgba(14, 165, 233, 0.15);
+  color: var(--accent-sky);
+}
+
+.stat-icon.fps {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--accent-green);
+}
+
+.stat-icon.viewers {
+  background: rgba(168, 85, 247, 0.15);
+  color: var(--accent-purple);
+}
+
+.stat-icon.size {
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--accent-amber);
+}
+
+.stat-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-label {
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.stat-value.connected {
+  color: var(--accent-green);
+}
+
+.stat-value.disconnected {
+  color: var(--accent-red);
+}
+
+/* Информационная секция */
+.camera-info-section {
+  padding: 1.5rem;
+}
+
+.camera-info-section h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 1rem 0;
+  color: var(--text-primary);
+}
+
+.info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  color: var(--text-tertiary);
+  font-size: 0.9375rem;
+}
+
+.info-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+/* Загрузка */
+.loading-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.loading-card {
+  padding: 2rem;
+  text-align: center;
+  max-width: 20rem;
+  width: 100%;
+}
+
+.spinner {
+  width: 3rem;
+  height: 3rem;
+  border: 3px solid var(--glass-border);
+  border-top-color: var(--accent-sky);
+  border-radius: 50%;
+  margin: 0 auto 1rem;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Адаптивность */
+@media (max-width: 640px) {
+  .camera-page-container {
+    padding: 1rem;
+  }
+
+  .camera-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .camera-title h1 {
+    font-size: 1.25rem;
+  }
+
+  .header-action-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .back-button {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .camera-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+
+  .stat-card {
+    padding: 1rem;
+  }
+
+  .stat-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .stat-value {
+    font-size: 1.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .camera-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .info-row {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .info-label {
+    font-size: 0.8125rem;
+  }
+
+  .info-value {
+    font-size: 0.875rem;
+  }
+}
+
+/* Resolution section */
+.resolution-section {
+  padding: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.section-header h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.section-icon {
+  color: var(--accent-sky);
+}
+
+.resolution-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.resolution-card {
+  position: relative;
+  padding: 1.25rem 1rem;
+  background: var(--glass-bg);
+  border: 2px solid var(--glass-border);
+  border-radius: 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.resolution-card:hover:not(:disabled) {
+  border-color: var(--accent-sky);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(14, 165, 233, 0.15);
+}
+
+.resolution-card.active {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(249, 115, 22, 0.15));
+  border-color: var(--accent-sky);
+  color: var(--text-primary);
+}
+
+.resolution-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.resolution-check {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: var(--accent-sky);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+.resolution-label {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: currentColor;
+}
+
+.resolution-description {
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+}
+
+.changing-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  border-top: 1px solid var(--glass-border);
+  margin-top: 0.5rem;
+}
+
+.spinner-small {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--glass-border);
+  border-top-color: var(--accent-sky);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Адаптивность */
+@media (max-width: 640px) {
+  .resolution-grid {
+    gap: 0.75rem;
+  }
+
+  .resolution-card {
+    padding: 1rem 0.75rem;
+  }
+
+  .resolution-label {
+    font-size: 1rem;
+  }
+
+  .resolution-description {
+    font-size: 0.75rem;
+  }
+
+  .resolution-check {
+    width: 1.25rem;
+    height: 1.25rem;
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .resolution-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .resolution-card {
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 1rem;
+  }
+
+  .resolution-label {
+    font-size: 1.125rem;
+  }
+
+  .resolution-description {
+    font-size: 0.875rem;
+  }
+}
+
+/* Стили для полноэкранного режима */
+.camera-stream-wrapper:fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f0f0f;
+  padding: 0;
+  border-radius: 0;
+}
+
+.camera-stream-wrapper:fullscreen .camera-container {
+  border-radius: 0;
+  max-width: 100vw;
+  max-height: 100vh;
+  aspect-ratio: auto; /* Убираем фиксированное соотношение */
+}
+
+.camera-stream-wrapper:fullscreen .camera-viewport {
+  height: 100vh;
+  width: 100vw;
+}
+
+.camera-stream-wrapper:fullscreen .camera-image {
+  object-fit: contain;  /* Сохраняем пропорции */
+}
+
+/* Область для тапа на видео */
+.video-tap-area {
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+/* Подсказка для мобильных */
+.mobile-exit-hint {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 40px;
+  font-size: 14px;
+  z-index: 10000;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+/* Анимация появления/исчезновения подсказки */
+@keyframes hintFade {
+  0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  90% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+}
+
+.mobile-exit-hint {
+  animation: hintFade 3s ease-in-out forwards;
+}
+
+/* Стили для полноэкранного режима */
+.camera-stream-wrapper:fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f0f0f;
+  padding: 0;
+  border-radius: 0;
+}
+
+.camera-stream-wrapper:fullscreen .camera-container {
+  border-radius: 0;
+  max-width: 100vw;
+  max-height: 100vh;
+  aspect-ratio: auto;
+}
+
+.camera-stream-wrapper:fullscreen .camera-viewport {
+  height: 100vh;
+  width: 100vw;
+}
+
+.camera-stream-wrapper:fullscreen .camera-image {
+  object-fit: contain;
+}
+
+/* Убираем подсказку на десктопе */
+@media (min-width: 769px) {
+  .mobile-exit-hint {
+    display: none;
+  }
+}
+
+/* Адаптация для очень маленьких экранов */
+@media (max-width: 480px) {
+  .mobile-exit-hint {
+    font-size: 12px;
+    padding: 10px 20px;
+    bottom: 20px;
+  }
+}

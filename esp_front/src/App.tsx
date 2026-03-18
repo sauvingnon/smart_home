@@ -16,7 +16,7 @@ function App() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setMinTimePassed(true);
-    }, 3000); // 👈 3 секунды, можешь менять
+    }, 1000); // 👈 3 секунды, можешь менять
     
     return () => clearTimeout(timer);
   }, []);

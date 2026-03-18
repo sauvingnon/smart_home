@@ -1,18 +1,20 @@
 import React, { useRef, useEffect } from 'react';
 import { useCamera } from '../../hooks/useCamera';
 import type { Resolution } from '../../api/camera';
-import './styles.css';
+import './StreamCamera.css';
 
 interface CameraStreamProps {
   cameraId?: string;
   className?: string;
   showControls?: boolean;
+  hideInfo?: boolean;
 }
 
 export const CameraStream: React.FC<CameraStreamProps> = ({
   cameraId = 'cam1',
   className = '',
-  showControls = true
+  showControls = true,
+  hideInfo = false
 }) => {
   const {
     frameBlob,
@@ -73,8 +75,8 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
         )}
       </div>
 
-      {/* Информация (только когда есть сигнал) */}
-      {connectionState === 'connected' && status && (
+      {/* Информация скрывается через проп */}
+      {!hideInfo && connectionState === 'connected' && status && (
         <div className="camera-info">
           <span className="info-dot">●</span>
           <span className="info-text">Live</span>
@@ -89,21 +91,20 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
         </div>
       )}
 
-      {/* Управление */}
+      {/* Управление тоже можно скрыть, но мы его не используем на странице */}
       {showControls && connectionState === 'connected' && (
         <div className="camera-controls">
           <div className="controls-group">
-            {resolutions.map(({ value, label }) => (
+            {(['QVGA', 'VGA', 'HD'] as Resolution[]).map((res) => (
               <button
-                key={value}
+                key={res}
                 className={`control-btn ${isChangingResolution ? 'disabled' : ''}`}
-                onClick={() => {
-                  console.log('🖱️ Button clicked:', value);
-                  setResolution(value);
-                }}
+                onClick={() => setResolution(res)}
                 disabled={isChangingResolution}
               >
-                {label}
+                {res === 'QVGA' && 'Быстро'}
+                {res === 'VGA' && 'Средне'}
+                {res === 'HD' && 'Качественно'}
               </button>
             ))}
           </div>
