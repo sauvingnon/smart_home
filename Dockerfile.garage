@@ -1,0 +1,33 @@
+# Dockerfile.garage
+FROM alpine:3.19
+
+RUN apk update && apk add --no-cache bash openssl wget
+
+# Скачиваем бинарник Garage v2.1.0 для x86_64
+RUN wget -q "https://garagehq.deuxfleurs.fr/_releases/v2.1.0/x86_64-unknown-linux-musl/garage" \
+    && chmod +x garage \
+    && mv garage /usr/local/bin/garage
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && \
+    dos2unix /entrypoint.sh 2>/dev/null || true
+
+# Добавляем garage в PATH в .bashrc и глобально
+RUN echo 'export PATH="/usr/local/bin:$PATH"' >> /etc/profile \
+    && echo 'export PATH="/usr/local/bin:$PATH"' >> /root/.bashrc
+
+# Создаем символическую ссылку для гарантии
+RUN ln -sf /usr/local/bin/garage /bin/garage 2>/dev/null || true
+
+# Создаем директории и пользователя
+RUN mkdir -p /var/lib/garage \
+    && adduser -D -s /bin/bash garage \
+    && chown -R garage:garage /var/lib/garage
+
+USER garage
+WORKDIR /home/garage
+
+# Добавляем в PATH для пользователя garage
+ENV PATH="/usr/local/bin:$PATH"
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -7,21 +7,22 @@ import asyncio
 from datetime import datetime, timedelta
 from logger import logger
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
+from app.services.s3_service.s3_manager import S3Manager
 from app.schemas.telemetry import TelemetryData
 from app.schemas.weather_data import WeatherData
 from app.schemas.settings import SettingsData
 from app.schemas.device_status import DeviceStatus
-import pytz
+from app.services.video_service.video_service import VideoService
 from app.services.monitor_db.telemetry_storage import TelemetryStorage
 from app.services.ai_api.deepseek_client import ai_message_request
-
-IZHEVSK_TZ = pytz.timezone('Europe/Samara')
+from app.utils.time import _get_izhevsk_time
 
 # Константы и тайминги по умолчанию
 DEFAULT_WEATHER_UPDATE_INTERVAL = 1800  # 30 минут (в секундах)
 DEFAULT_TIME_UPDATE_INTERVAL = 43200  # 12 часов
 DEFAULT_HEARTBEAT_INTERVAL = 60
 DEFAULT_DEVICE_ID = "greenhouse_01"
+DEFAULT_SENSOR_ID = "sensor_door_pir"
 
 # =================== ФОНОВЫЙ ВОРКЕР ===================
 class WeatherBackgroundWorker:
@@ -35,7 +36,8 @@ class WeatherBackgroundWorker:
             cache_manager: CacheManager, 
             weather_service: WeatherService,
             mqtt_service: MQTTService,
-            storage: TelemetryStorage
+            storage: TelemetryStorage,
+            s3_storage: S3Manager
             ):
         if WeatherBackgroundWorker._instance is not None:
             raise RuntimeError("Используйте WeatherBackgroundWorker.get_instance()")
@@ -44,15 +46,24 @@ class WeatherBackgroundWorker:
         self.mqtt_service = mqtt_service
         self.service = weather_service
         self.storage = storage
+        self.s3_storage = s3_storage
         self.is_running = False
-        self.update_board_weather_interval = DEFAULT_WEATHER_UPDATE_INTERVAL
+        self.update_board_weather_interval = DEFAULT_WEATHER_UPDATE_INTERVAL 
         self.update_time_interval = DEFAULT_TIME_UPDATE_INTERVAL
         self.heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL
         self.device_id = DEFAULT_DEVICE_ID
+        self.sensor_id = DEFAULT_SENSOR_ID
         self.current_telemetry: Optional[TelemetryData] = None
         self.last_activity_timestamp: Optional[datetime] = None  # Любое сообщение от платы
         self.device_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
+        self.last_activity_timestamp_sensor: Optional[datetime] = None  # Любое сообщение от дверного датчика
+        self.sensor_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
         self.counter_for_telemetry = 0
+        self._initialization_complete = False  # Флаг: сервис полностью инициализирован
+
+        self.video_service = VideoService()
+
+        self.video_service.set_s3_manager(s3_storage)
         
     @classmethod
     def get_instance(
@@ -60,14 +71,15 @@ class WeatherBackgroundWorker:
         cache_manager: Optional[CacheManager] = None,
         weather_service: Optional[WeatherService] = None,
         mqtt_service: Optional[MQTTService] = None,
-        storage: Optional[TelemetryStorage] = None
+        storage: Optional[TelemetryStorage] = None,
+        s3_storage: S3Manager = None
     ) -> 'WeatherBackgroundWorker':
         """Получить единственный экземпляр воркера"""
         if cls._instance is None:
             if cache_manager is None or weather_service is None or mqtt_service is None:
                 raise ValueError("При первом создании нужно передать все зависимости")
             
-            cls._instance = cls(cache_manager, weather_service, mqtt_service, storage)
+            cls._instance = cls(cache_manager, weather_service, mqtt_service, storage, s3_storage)
         return cls._instance
     
     @classmethod
@@ -76,11 +88,23 @@ class WeatherBackgroundWorker:
         cache_manager: Optional[CacheManager] = None,
         weather_service: Optional[WeatherService] = None,
         mqtt_service: Optional[MQTTService] = None,
-        storage: Optional[TelemetryStorage] = None
+        storage: Optional[TelemetryStorage] = None,
+        s3_storage: S3Manager = None
     ) -> 'WeatherBackgroundWorker':
         """Асинхронная версия получения инстанса (с блокировкой)"""
         async with cls._lock:
-            return cls.get_instance(cache_manager, weather_service, mqtt_service, storage)
+            return cls.get_instance(cache_manager, weather_service, mqtt_service, storage, s3_storage)
+    
+    async def initialize_services(self):
+        """Инициализирует асинхронные сервисы (вызывается ПОСЛЕ создания worker)"""
+        logger.info("🎬 Инициализирую асинхронные сервисы...")
+        
+        # Запускаем VideoService observer loop в фоне
+        asyncio.create_task(self.video_service.start())
+        logger.info("✅ VideoService инициализирован (observer loop запущен)")
+        
+        # Готовимся к приему MQTT сообщений (будет в start())
+        self._initialization_complete = True
         
     async def start(self):
         """Запуск фонового воркера"""
@@ -89,24 +113,30 @@ class WeatherBackgroundWorker:
 
         self.mqtt_service.set_telemetry_callback(self.handle_telemetry)
         self.mqtt_service.set_weather_request_callback(self.handle_weather_request)
+        self.mqtt_service.set_door_motion_callback(self.handle_door_event)
+        self.mqtt_service.set_heartbeat_sensor_callback(self.handle_sensor_healthcheck)
         logger.info("Установлены обработчики сообщений от платы.")
+        
+        # 🔧 РАЗРЕШАЕМ ОБРАБОТКУ РЕАЛЬНЫХ СООБЩЕНИЙ (не retained)
+        self._initialization_complete = True
+        logger.info("✅ Инициализация завершена, обработка реальных событий включена")
         
         # Запускаем три задачи параллельно
         await asyncio.gather(
             # Запускаем цикл обновления данных погоды.
             self._update_weather_loop(),
-            # Запускаем цикл слежения за телеметрией платы.
+            # Запускаем цикл слежения за состоянием плат.
             self._check_heartbeat_esp_loop(),
             # Запускаем цикл синхронизации времени.
             self._check_time_update_loop()
         )
 
     def _update_device_status(self) -> DeviceStatus:
-        """Обновление статуса устройства на основе активности (любые сообщения от платы)"""
+        """Обновление статуса центральной платы на основе последней активности."""
         if self.last_activity_timestamp is None:
             new_status = DeviceStatus.NEVER_CONNECTED
         else:
-            seconds_ago = (self._get_izhevsk_time() - self.last_activity_timestamp).total_seconds()
+            seconds_ago = (_get_izhevsk_time() - self.last_activity_timestamp).total_seconds()
             
             if seconds_ago < 120:  # < 2 минут
                 new_status = DeviceStatus.ONLINE
@@ -117,10 +147,31 @@ class WeatherBackgroundWorker:
         
         # Логируем изменение статуса
         if new_status != self.device_status:
-            logger.info(f"📱 Статус устройства изменился: {self.device_status.value} → {new_status.value}")
+            logger.info(f"📱 Статус центральной платы изменился: {self.device_status.value} → {new_status.value}")
             self.device_status = new_status
         
         return self.device_status
+    
+    def _update_sensor_status(self) -> DeviceStatus:
+        """Обновление статуса датчика двери на основе активности (любые сообщения от платы)"""
+        if self.last_activity_timestamp_sensor is None:
+            new_status = DeviceStatus.NEVER_CONNECTED
+        else:
+            seconds_ago = (_get_izhevsk_time() - self.last_activity_timestamp_sensor).total_seconds()
+            
+            if seconds_ago < 600:  # < 10 минут
+                new_status = DeviceStatus.ONLINE
+            elif seconds_ago < 1200:  # 20 минут
+                new_status = DeviceStatus.OFFLINE
+            else:  # > 5 минут
+                new_status = DeviceStatus.DEAD
+        
+        # Логируем изменение статуса
+        if new_status != self.sensor_status:
+            logger.info(f"📱 Статус устройства изменился: {self.sensor_status.value} → {new_status.value}")
+            self.sensor_status = new_status
+        
+        return self.sensor_status
 
     async def _check_time_update_loop(self, timeout: float = 30.0):
         """
@@ -168,7 +219,7 @@ class WeatherBackgroundWorker:
                 self.mqtt_service.set_time_callback(on_time_sync_response)
                 
                 # 3. Получаем текущее время Ижевска
-                now = self._get_izhevsk_time()
+                now = _get_izhevsk_time()
                 
                 # 4. Формируем данные для ESP
                 time_data = {
@@ -220,29 +271,43 @@ class WeatherBackgroundWorker:
         return self.device_status == DeviceStatus.ONLINE
 
     def _record_device_activity(self, activity_name: str = ""):
-        """Запимать активность устройства (любое сообщение)"""
-        self.last_activity_timestamp = self._get_izhevsk_time()
+        """Запиcать активность устройства (любое сообщение)"""
+        self.last_activity_timestamp = _get_izhevsk_time()
         self.device_status = self._update_device_status()
         if activity_name:
             logger.debug(f"📍 Активность: {activity_name}. Статус устройства {self.device_status.value}")
 
     async def _check_heartbeat_esp_loop(self):
-        """Периодическая проверка статуса устройства"""
-        logger.info("👁️ Начинаем мониторинг устройства")
+        """Периодическая проверка статусов устройств"""
+        logger.info("👁️ Начинаем мониторинг центральной платы и датчика двери.")
         
         while self.is_running:
             try:
+                # Проверим центральную плату
                 old_status = self.device_status
                 new_status = self._update_device_status()
                 
                 # Логируем критические состояния
                 if new_status == DeviceStatus.DEAD and self.current_telemetry:
-                    seconds_ago = (self._get_izhevsk_time() - self.current_telemetry.timestamp).total_seconds()
+                    seconds_ago = (_get_izhevsk_time() - self.current_telemetry.timestamp).total_seconds()
                     minutes_ago = int(seconds_ago / 60)
-                    logger.error(f"🚨 Устройство МЕРТВО {minutes_ago} минут!")
+                    logger.error(f"🚨 Центральная плата МЕРТВА {minutes_ago} минут!")
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     # Только что подключился
-                    logger.info(f"✅ Устройство ОНЛАЙН")
+                    logger.info(f"✅ Центральная плата ОНЛАЙН")
+
+                # Проверяем входной датчик
+                old_status = self.sensor_status
+                new_status = self._update_sensor_status()
+
+                # Логируем критические состояния
+                if new_status == DeviceStatus.DEAD:
+                    seconds_ago = (_get_izhevsk_time() - self.last_activity_timestamp_sensor).total_seconds()
+                    minutes_ago = int(seconds_ago / 60)
+                    logger.error(f"🚨 Датчик двери МЕРТВ {minutes_ago} минут!")
+                elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
+                    # Только что подключился
+                    logger.info(f"✅ Датчик двери ОНЛАЙН")
                 
             except Exception as e:
                 logger.exception(f"❌ Ошибка в проверке heartbeat: {e}")
@@ -289,7 +354,7 @@ class WeatherBackgroundWorker:
                             night_temp=adapter.night_temp,
                             morning_temp=adapter.tomorrow_temp,
                             day_temp=adapter.current_temp,
-                            timestamp=self._get_izhevsk_time(),
+                            timestamp=_get_izhevsk_time(),
                             expires_at=datetime.now() + timedelta(minutes=60),
                             api_calls_today=api_calls + 1
                         )
@@ -306,7 +371,7 @@ class WeatherBackgroundWorker:
                 await self.storage.save_weather_reading(
                     temp=cached.current_temp,
                     hum=cached.humidity,
-                    timestamp=self._get_izhevsk_time()
+                    timestamp=_get_izhevsk_time()
                 )
             
             except Exception as e:
@@ -432,7 +497,7 @@ class WeatherBackgroundWorker:
         Берем прошлый день 00:00-23:59 относительно текущей даты.
         Выполняем запрос на анализ с оптимальным кол-вом точек.
         """
-        now = self._get_izhevsk_time()
+        now = _get_izhevsk_time()
         yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Проверим кеш
@@ -567,7 +632,7 @@ class WeatherBackgroundWorker:
         Получить ИИ анализ данных телеметрии за последние 7 дней.
         Берем неделю, заканчивающуюся вчера (00:00-23:59 каждого дня).
         """
-        now = self._get_izhevsk_time()
+        now = _get_izhevsk_time()
         last_day = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Проверим кеш.
@@ -720,6 +785,24 @@ class WeatherBackgroundWorker:
         
         return "\n".join(lines)
 
+    async def handle_door_event(self, device_id: str, data: dict):
+        """Обработчик события открытия двери от платы"""
+        # 🔧 ИГНОРИРУЕМ RETAINED MESSAGES ПРИ СТАРТЕ
+        if not self._initialization_complete:
+            logger.debug(f"🚪 [ВЫБРОШЕНО] Retained message от {device_id} (инициализация еще идет)")
+            return
+        
+        self.last_activity_timestamp_sensor = _get_izhevsk_time()
+            
+        # Нужно включить камеру и начать запись.
+        # Дверь открылась → запись уже идет (30 сек таймер молчания)
+        await self.video_service.start_recording(camera_id="cam1", max_duration=30)
+        logger.info(f"🚪 Плата {device_id} сообщила об открытии двери")
+
+    async def handle_sensor_healthcheck(self, sensor_id: str, data: dict):
+        """Проверка датчика, что он в порядке."""
+        self.last_activity_timestamp_sensor = _get_izhevsk_time()
+
     async def handle_telemetry(self, device_id: str, data: dict):
         """Обработчик телеметрии от платы"""
         try:
@@ -733,7 +816,7 @@ class WeatherBackgroundWorker:
                 humidity=data.get('humidity'),
                 free_memory=data.get('free_memory'),
                 uptime=data.get('uptime'),
-                timestamp=self._get_izhevsk_time(),
+                timestamp=_get_izhevsk_time(),
                 bluetooth_is_active=data.get('bluetooth_is_active')
             )
             
@@ -748,7 +831,7 @@ class WeatherBackgroundWorker:
                 await self.storage.save_esp_reading(
                     temp=telemetry.temperature,
                     hum=telemetry.humidity,
-                    timestamp=self._get_izhevsk_time(),
+                    timestamp=_get_izhevsk_time(),
                     device_id=self.device_id
                 )
             
@@ -807,10 +890,6 @@ class WeatherBackgroundWorker:
             )
         
         return user_id
-
-    def _get_izhevsk_time(self) -> datetime:
-        """Текущее время в Ижевске"""
-        return datetime.now(IZHEVSK_TZ)  # ВСЁ! Одна строка!
     
     def _format_time_short(self, dt: datetime) -> str:
         """Форматируем время как '14:38'"""

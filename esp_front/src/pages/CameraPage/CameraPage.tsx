@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  ChevronLeft, 
+import { useNavigate, useParams } from 'react-router-dom'
+import {
+  ChevronLeft,
   Camera as CameraIcon,
   Wifi,
   WifiOff,
@@ -19,9 +20,7 @@ import type { Resolution } from '../../api/camera';
 import './CameraPage.css'
 
 interface CameraPageProps {
-  onClose?: () => void
   theme?: 'light' | 'dark'
-  cameraId?: string
 }
 
 const containerVar = {
@@ -35,10 +34,10 @@ const itemVar = {
 }
 
 export const CameraPage: React.FC<CameraPageProps> = ({
-  onClose,
-  theme = 'light',
-  cameraId = 'cam1'
+  theme = 'light'
 }) => {
+  const navigate = useNavigate()
+  const { cameraId } = useParams<{ cameraId: string }>()
   const [fullscreen, setFullscreen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [cameraStatus, setCameraStatus] = useState<any>(null)
@@ -46,6 +45,12 @@ export const CameraPage: React.FC<CameraPageProps> = ({
   const [isChangingResolution, setIsChangingResolution] = useState(false)
   // 👇 Добавляем локальный стейт для разрешения
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('VGA')
+  const [isCameraOn, setIsCameraOn] = useState(false)
+  const [isCameraLoading, setIsCameraLoading] = useState(false)
+
+  const handleClose = () => {
+    navigate('/')
+  }
 
   const videoContainerRef = useRef<HTMLDivElement>(null)
 
@@ -191,7 +196,7 @@ export const CameraPage: React.FC<CameraPageProps> = ({
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
         >
-          <button onClick={onClose} className="back-button">
+          <button onClick={handleClose} className="back-button">
             <ChevronLeft size={24} />
           </button>
           
@@ -296,9 +301,55 @@ export const CameraPage: React.FC<CameraPageProps> = ({
             )}
           </motion.div>
 
-          {/* Статистика камеры */}
+           {/* Статистика камеры */}
           <motion.div variants={itemVar} className="camera-stats-grid">
-            {/* ... остальные карточки ... */}
+            <div className="stat-card glass-card">
+              <div className="stat-icon wifi">
+                {cameraStatus?.connected ? <Wifi size={24} /> : <WifiOff size={24} />}
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Статус</span>
+                <span className={`stat-value ${cameraStatus?.connected ? 'connected' : 'disconnected'}`}>
+                  {cameraStatus?.connected ? 'В сети' : 'Не в сети'}
+                </span>
+              </div>
+            </div>
+
+            <div className="stat-card glass-card">
+              <div className="stat-icon fps">
+                <Activity size={24} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">FPS</span>
+                <span className="stat-value">
+                  {cameraStatus?.reported_fps || cameraStatus?.fps || 0}
+                </span>
+              </div>
+            </div>
+
+            <div className="stat-card glass-card">
+              <div className="stat-icon viewers">
+                <Users size={24} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Зрители</span>
+                <span className="stat-value">{cameraStatus?.viewers || 0}</span>
+              </div>
+            </div>
+
+            {cameraStatus?.last_frame_size && (
+              <div className="stat-card glass-card">
+                <div className="stat-icon size">
+                  <Activity size={24} />
+                </div>
+                <div className="stat-info">
+                  <span className="stat-label">Размер кадра</span>
+                  <span className="stat-value">
+                    {Math.round(cameraStatus.last_frame_size / 1024)} KB
+                  </span>
+                </div>
+              </div>
+            )}
           </motion.div>
 
           {/* Информация о камере */}

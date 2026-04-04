@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Clock, Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud, 
+import { useNavigate } from 'react-router-dom'
+import {
+  Clock, Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
   Settings2, AlertCircle, ChevronLeft, Save, Calendar,
   Sunrise, Sunset, Wind, Droplets, Power, VolumeX, Gauge
 } from 'lucide-react'
@@ -9,9 +10,7 @@ import { apiClient } from '../../api/client'
 import './SettingsPage.css'
 
 type SettingsPageProps = {
-  onClose?: () => void
   theme?: 'light' | 'dark'
-  onThemeToggle?: () => void
 }
 
 type Settings = {
@@ -236,12 +235,17 @@ const itemVar = {
   visible: { y: 0, opacity: 1 }
 }
 
-export default function SettingsPage({ onClose, theme, onThemeToggle }: SettingsPageProps) {
+export default function SettingsPage({ theme = 'light' }: SettingsPageProps) {
+  const navigate = useNavigate()
   const [settings, setSettings] = useState<Settings>(defaultSettings)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('schedule')
   const [showSuccess, setShowSuccess] = useState(false)
+
+  const handleClose = () => {
+    navigate('/')
+  }
 
   useEffect(() => {
     let mounted = true
@@ -323,7 +327,7 @@ export default function SettingsPage({ onClose, theme, onThemeToggle }: Settings
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
         >
-          <button onClick={onClose} className="back-button">
+          <button onClick={handleClose} className="back-button">
             <ChevronLeft size={24} />
           </button>
           

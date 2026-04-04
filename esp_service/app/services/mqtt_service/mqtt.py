@@ -31,6 +31,10 @@ class MQTTService:
         self.is_connected = False
         self._listening_task: Optional[asyncio.Task] = None
         self.device_id = "greenhouse_01"
+        self.sensor_id = "sensor_door"
+
+        self._startup_time = None
+        self._startup_ignore_seconds = 3
 
         # Топики
         self.topics = {
@@ -39,6 +43,8 @@ class MQTTService:
             "config_update": f"{self.device_id}/config/update", # плата изменила настройки
             "weather_request": f"{self.device_id}/weather/request", # запрос погоды
             "time_ready": f"{self.device_id}/time/ready", # плата пингует что время установлено
+            "motion_detected": f"{self.sensor_id}/door/state", # датчик движения на двери
+            "sensor_telemetry": f"{self.sensor_id}/door/heartbeat", # датчик heartbeat
 
             # от бекенда к плате
             "weather_send": f"{self.device_id}/weather",  # погода
@@ -52,7 +58,9 @@ class MQTTService:
             "time_ready": None,
             "telemetry": None,
             "config_update": None,
-            "weather_request": None
+            "weather_request": None,
+            "door_motion": None,
+            "sensor_telemetry": None
         }
 
         # Тайминги последних сообщений
@@ -96,10 +104,12 @@ class MQTTService:
             return
         
         topics_to_subscribe = [
-            (f"{self.device_id}/telemetry", 1),  # телеметрия от всех устройств
-            (f"{self.device_id}/weather/request", 1),  # запросы погоды от всех устройств
+            (f"{self.device_id}/telemetry", 1),  # heartbeat от центральной платы
+            (f"{self.device_id}/weather/request", 1),  # запросы погоды от центральной платы
             (f"{self.device_id}/config/update", 1), # запрос текущих настроек а это ответ платы
-            (f"{self.device_id}/time/ready", 1)
+            (f"{self.device_id}/time/ready", 1), # уведомление от платы что время установлено
+            (f"{self.sensor_id}/door/state", 1), # уведомление от датчика двери
+            (f"{self.sensor_id}/door/heartbeat", 1), # heartbeat от датчика двери
         ]
         
         for topic, qos in topics_to_subscribe:
@@ -110,6 +120,13 @@ class MQTTService:
     async def _handle_message(self, message: Message):
         """Обработка входящих сообщений"""
         try:
+            # Игнорируем сообщения при старте
+            if self._startup_time:
+                elapsed = (datetime.now() - self._startup_time).total_seconds()
+                if elapsed < self._startup_ignore_seconds:
+                    logger.debug(f"⏳ Игнорируем сообщение при старте ({elapsed:.1f}s): {message.topic}")
+                    return
+    
             payload_str = message.payload.decode()
             payload = json.loads(payload_str)
             topic = str(message.topic)
@@ -150,6 +167,16 @@ class MQTTService:
 
             if topic_type == "time/ready" and self.callbacks["time_ready"]:
                 await self.callbacks["time_ready"](device_id, payload)
+                return
+            if topic_type == "door/state" and self.callbacks["door_motion"]:
+                logger.info(f"🚪 Движение на двери обнаружено от {device_id}!")
+                # Здесь можно вызвать колбэк для обработки события движения, если нужно
+                await self.callbacks["door_motion"](device_id, payload)
+                return
+            
+            if topic_type == "door/heartbeat" and self.callbacks["sensor_telemetry"]:
+                logger.info("Датчик двери прислал heartbeat")
+                await self.callbacks["sensor_telemetry"](device_id, payload)
                 return
 
             logger.debug(f"📨 Необработанный топик: {topic_type}")
@@ -215,6 +242,16 @@ class MQTTService:
         self.callbacks["time_ready"] = None
         logger.debug("✅ Удален обработчик времени")
 
+    def set_door_motion_callback(self, callback: Callable):
+        """Установить обработчик движения на двери."""
+        self.callbacks["door_motion"] = callback
+        logger.debug("✅ Установлен обработчик движения на двери.")
+    
+    def remove_door_motion_callback(self):
+        """Удалить обработчик движения на двери."""
+        self.callbacks["door_motion"] = None
+        logger.debug("✅ Удален обработчик движения на двери.")
+
     def set_settings_callback(self, callback: Callable):
         """Установить обработчик настроек от платы."""
         self.callbacks["config_update"] = callback
@@ -235,6 +272,11 @@ class MQTTService:
         self.callbacks["weather_request"] = callback
         logger.debug("✅ Установлен обработчик запроса погоды")
 
+    def set_heartbeat_sensor_callback(self, callback: Callable):
+        """Установить обработчик heartbeat для сенсора"""
+        self.callbacks["sensor_telemetry"] = callback
+        logger.debug("✅ Установлен обработчик heartbeat для сенсора")
+
     # ========== УПРАВЛЕНИЕ ЖИЗНЕННЫМ ЦИКЛОМ ==========
 
     async def start(self):
@@ -243,6 +285,8 @@ class MQTTService:
             if not await self.connect():
                 logger.error("❌ Не удалось подключиться к MQTT брокеру")
                 return False
+            
+            self._startup_time = datetime.now()
             
             # Запускаем прослушивание в фоне
             self._listening_task = asyncio.create_task(self.start_listening())

@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
+import { useNavigate } from 'react-router-dom'
+import {
   Thermometer, Droplets, Bluetooth, Gauge, Camera, AlertCircle,
-  Sun, Cloud, CloudRain, CloudSnow, CloudLightning, CloudDrizzle, Sparkles, 
+  Sun, Cloud, CloudRain, CloudSnow, Video,
   Sunrise, Sunset, Moon, Settings2, RefreshCw, Wind, Zap
 } from 'lucide-react'
-import SettingsPage from '../SettingsPage/SettingsPage'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import AIReport from '../../components/AIReport/AIReport'
 import AIVoiceChat from '../../components/AIVoiceChat/AIVoiceChat'
-import { CameraPage } from '../CameraPage/CameraPage'
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {
@@ -54,14 +53,12 @@ const itemVar = {
 }
 
 export default function HomePage() {
+  const navigate = useNavigate()
   const [theme, setTheme] = useState<'dark' | 'light'>('light')
   const [data, setData] = useState<Telemetry | null>(null)
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
   const [isStale, setIsStale] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [showAIChat, setShowAIChat] = useState(false)
-  const [showCamera, setShowCamera] = useState(false)
 
   const fetchData = async () => {
     try {
@@ -77,36 +74,25 @@ export default function HomePage() {
   useEffect(() => {
     const hour = new Date().getHours()
     setTheme(hour >= 6 && hour < 18 ? 'light' : 'dark')
-    fetchData(); 
-    fetchWeather(); 
+    fetchData();
+    fetchWeather();
   }, [])
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light')
   }
 
- if (showSettings) return (
-    <SettingsPage 
-      onClose={() => setShowSettings(false)} 
-      theme={theme}
-      onThemeToggle={toggleTheme}
-    />
-  )
+  const handleCameraClick = () => {
+    navigate('/camera/cam1')
+  }
 
-  if (showAIChat) return (
-    <AIVoiceChat 
-      theme={theme} 
-      onClose={() => setShowAIChat(false)} 
-    />
-  )
+  const handleVideosClick = () => {
+    navigate('/videos')
+  }
 
-  if (showCamera) return (
-    <CameraPage 
-    onClose={() => setShowCamera(false)}
-      theme={theme}
-      cameraId="cam1"
-    />
-  )
+  const handleSettingsClick = () => {
+    navigate('/settings')
+  }
 
   return (
     <div className={`home-container ${theme}`}>
@@ -140,14 +126,14 @@ export default function HomePage() {
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setShowCamera(true)}
+              onClick={handleCameraClick}
               className="settings-button"
               title="Камера"
             >
               <Camera size={20} />
             </motion.button>
 
-            <motion.button
+            {/* <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setShowAIChat(true)}
@@ -155,6 +141,16 @@ export default function HomePage() {
               title="AI Ассистент"
             >
               <Sparkles size={20} />
+            </motion.button> */}
+
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleVideosClick}
+              className="settings-button"
+              title="Видеозаписи"
+            >
+              <Video size={20} />
             </motion.button>
 
             {/* Кнопка переключения темы */}
@@ -169,10 +165,10 @@ export default function HomePage() {
             </motion.button>
 
             {/* Кнопка настроек */}
-            <motion.button 
+            <motion.button
               whileHover={{ rotate: 90 }}
               whileTap={{ scale: 0.9 }}
-              onClick={() => setShowSettings(true)}
+              onClick={handleSettingsClick}
               className="settings-button"
             >
               <Settings2 size={20} />

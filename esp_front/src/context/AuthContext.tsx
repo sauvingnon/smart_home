@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { apiClient } from '../api/client';
 
 interface AuthContextType {
   accessKey: string | null;
@@ -25,6 +26,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Ключ из URL - сохраняем и чистим URL
       localStorage.setItem('esp_access_key', urlKey);
       setAccessKey(urlKey);
+      apiClient.setAccessKey(urlKey);
       
       // Чистим URL от ключа (безопасность и эстетика)
       window.history.replaceState({}, '', '/');
@@ -32,6 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else if (storedKey) {
       // Ключ из localStorage
       setAccessKey(storedKey);
+      apiClient.setAccessKey(storedKey);
     }
     
     setIsLoading(false);
@@ -40,11 +43,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleSetKey = (key: string) => {
     localStorage.setItem('esp_access_key', key);
     setAccessKey(key);
+    apiClient.setAccessKey(key);
   };
 
   const clearAccessKey = () => {
     localStorage.removeItem('esp_access_key');
     setAccessKey(null);
+    apiClient.setAccessKey(null);
+
   };
 
   return (

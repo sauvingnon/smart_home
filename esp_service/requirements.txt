@@ -4,7 +4,8 @@ uvicorn[standard]
 redis
 requests
 aiomqtt
-pytz
 openai
 numpy
 opencv-python-headless
+ffmpeg
+aiobotocore

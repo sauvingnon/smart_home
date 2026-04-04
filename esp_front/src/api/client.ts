@@ -1,6 +1,6 @@
 import { useAuth } from '../context/AuthContext';
 // Прод?
-export const API_BASE_URL = true 
+export const API_BASE_URL = false 
   ? 'https://tgapp.dotnetdon.ru:4444'
   : 'http://localhost:8005';
 
@@ -92,6 +92,41 @@ class ApiClient {
     return this.fetch(`/esp_service/camera/${cameraId}/status`, {
       method: 'GET'
     });
+  }
+
+  async getVideos(params?: {
+    camera_id?: string;
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    
+    if (params?.camera_id) queryParams.append('camera_id', params.camera_id);
+    
+    const queryString = queryParams.toString();
+    const endpoint = `/esp_service/videos${queryString ? `?${queryString}` : ''}`;
+    
+    console.log('🔍 GET Videos request:', `${API_BASE_URL}${endpoint}`);
+    console.log('🔑 Access key present:', !!this.accessKey);
+    
+    const response = await this.fetch(endpoint);
+    
+    console.log('📦 Raw videos response:', response);
+    console.log('📊 Response type:', typeof response);
+    console.log('📈 Is array?', Array.isArray(response));
+    console.log('🔢 Length:', response?.length);
+    
+    return response;
+  }
+
+  getVideoStreamUrl(key: string): string {
+    return `${API_BASE_URL}/esp_service/videos/stream?key=${encodeURIComponent(key)}`;
+  }
+
+  async getVideoDownloadUrl(key: string): Promise<{ url: string; key: string }> {
+    return this.fetch(`/esp_service/videos/download?key=${encodeURIComponent(key)}`);
+  }
+
+  getVideoThumbnailUrl(cameraId: string, timestamp: number): string {
+    return `${API_BASE_URL}/esp_service/videos/thumbnail?camera_id=${encodeURIComponent(cameraId)}&timestamp=${timestamp}`;
   }
 
     // 👇 НОВЫЙ МЕТОД: создание WebSocket подключения к камере с ключом в заголовках

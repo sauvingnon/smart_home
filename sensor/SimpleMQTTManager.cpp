@@ -29,7 +29,7 @@ bool SimpleMQTTManager::begin() {
   mqttClient->setServer(mqttServer.c_str(), mqttPort);
   mqttClient->setKeepAlive(60);
   
-  mqttClient->setBufferSize(1024);
+  mqttClient->setBufferSize(512);
   
   mqttClient->setCallback([this](char* topic, byte* payload, unsigned int length) {
     String topicStr = String(topic);

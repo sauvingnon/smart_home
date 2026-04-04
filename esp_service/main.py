@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from app.services.redis.cache_manager import CacheManager
 from app.services.weather_service.yandex_weather import WeatherService
 from app.services.monitor_db.telemetry_storage import get_telemetry_storage
+from app.services.s3_service.s3_manager import S3Manager
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.core.worker import WeatherBackgroundWorker
 from config import YANDEX_WEATHER_API_KEY, REDIS_URL, MQTT_BROKER_HOST, MQTT_BROKER_PORT
@@ -41,6 +42,21 @@ async def lifespan(app: FastAPI):
 
         # 4. База данных
         storage = get_telemetry_storage()
+
+        # 5. S3 хранилище
+        s3_manager = S3Manager(
+            endpoint_url="http://garage:3900",
+            access_key="GK39eb72624df14cf0b66afa79",
+            secret_key="b607bde5e96a7f99175f9945441bd059d366e404655394e44f4bbc835b5accd7",
+            bucket_name="video-bucket"
+        )
+
+        s3_started = await s3_manager.connect()
+        if not s3_started:
+            logger.warning("Не удалось запустить s3 хранилище, продолжаем без него.")
+        else:
+            logger.info("✅ S3 хранилище запущено.")
+        app.state.s3_manager = s3_manager
         
         # Запускаем MQTT (подключение + прослушивание)
         mqtt_started = await mqtt_service.start()
@@ -55,10 +71,14 @@ async def lifespan(app: FastAPI):
             cache_manager=cache_manager,
             weather_service=weather_service,
             mqtt_service=mqtt_service,
-            storage=storage
+            storage=storage,
+            s3_storage=s3_manager
         )
 
         app.state.worker = worker
+        
+        # 4a. Инициализируем асинхронные сервисы ПЕРЕД запуском worker
+        await worker.initialize_services()
         
         # 5. Запускаем воркер в фоне
         worker_task = asyncio.create_task(worker.start())
@@ -105,6 +125,12 @@ async def lifespan(app: FastAPI):
                 await app.state.cache_manager.disconnect()
         except Exception as e:
             stop_errors.append(f"cache_manager: {e}")
+        
+        try:
+            if hasattr(app.state, 's3_manager'):
+                await app.state.s3_manager.disconnect()
+        except Exception as e:
+            stop_errors.append(f"s3_manager: {e}")
         
         if stop_errors:
             logger.error(f"Ошибки при остановке: {stop_errors}")
