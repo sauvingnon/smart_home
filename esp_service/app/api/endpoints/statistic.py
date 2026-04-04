@@ -1,7 +1,7 @@
 # api/routes/esp_service.py
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
-from app.core.worker import WeatherBackgroundWorker
+from app.core.worker import BackgroundWorker
 from app.schemas.telemetry_history import (
     HistoryResponse,
     StatsResponse,
@@ -23,7 +23,7 @@ async def get_history_endpoint(
     """
     Получить историю телеметрии за последние N часо
     """
-    worker = WeatherBackgroundWorker.get_instance()
+    worker = BackgroundWorker.get_instance()
     records = await worker.storage.get_history(
         end_time=worker._get_izhevsk_time(),
         hours=hours,
@@ -49,7 +49,7 @@ async def get_stats_endpoint(
     user_id: int = Depends(get_current_user_id)
 ):
     """Получить статистику за период"""
-    worker = WeatherBackgroundWorker.get_instance()
+    worker = BackgroundWorker.get_instance()
     stats = await worker.storage.get_stats(hours, worker.device_id)
     
     return stats

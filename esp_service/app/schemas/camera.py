@@ -24,6 +24,7 @@ class CameraState(BaseModel):
     fps: int = 0
     reported_fps: int = 0
     quality_mode: Optional[int] = None
+    temperature: Optional[float] = None
     last_time: float = 0.0  # Время последнего обновления FPS
     frame_count: int = 0     # Счетчик кадров за период
 

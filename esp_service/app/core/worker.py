@@ -25,28 +25,30 @@ DEFAULT_DEVICE_ID = "greenhouse_01"
 DEFAULT_SENSOR_ID = "sensor_door_pir"
 
 # =================== ФОНОВЫЙ ВОРКЕР ===================
-class WeatherBackgroundWorker:
+class BackgroundWorker:
     """Фоновый воркер для взаимодействия с платой"""
     
-    _instance: Optional['WeatherBackgroundWorker'] = None
+    _instance: Optional['BackgroundWorker'] = None
     _lock = asyncio.Lock()
     
     def __init__(
             self, 
             cache_manager: CacheManager, 
             weather_service: WeatherService,
+            video_service: VideoService,
             mqtt_service: MQTTService,
             storage: TelemetryStorage,
             s3_storage: S3Manager
             ):
-        if WeatherBackgroundWorker._instance is not None:
-            raise RuntimeError("Используйте WeatherBackgroundWorker.get_instance()")
+        if BackgroundWorker._instance is not None:
+            raise RuntimeError("Используйте BackgroundWorker.get_instance()")
         
         self.cache = cache_manager
         self.mqtt_service = mqtt_service
         self.service = weather_service
         self.storage = storage
         self.s3_storage = s3_storage
+        self.video_service = video_service
         self.is_running = False
         self.update_board_weather_interval = DEFAULT_WEATHER_UPDATE_INTERVAL 
         self.update_time_interval = DEFAULT_TIME_UPDATE_INTERVAL
@@ -60,40 +62,38 @@ class WeatherBackgroundWorker:
         self.sensor_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
         self.counter_for_telemetry = 0
         self._initialization_complete = False  # Флаг: сервис полностью инициализирован
-
-        self.video_service = VideoService()
-
-        self.video_service.set_s3_manager(s3_storage)
         
     @classmethod
     def get_instance(
         cls,
-        cache_manager: Optional[CacheManager] = None,
-        weather_service: Optional[WeatherService] = None,
-        mqtt_service: Optional[MQTTService] = None,
-        storage: Optional[TelemetryStorage] = None,
-        s3_storage: S3Manager = None
-    ) -> 'WeatherBackgroundWorker':
+        cache_manager: CacheManager = None,
+        weather_service: WeatherService = None,
+        mqtt_service: MQTTService = None,
+        storage: TelemetryStorage = None,
+        s3_storage: S3Manager = None,
+        video_service: VideoService = None
+    ) -> 'BackgroundWorker':
         """Получить единственный экземпляр воркера"""
         if cls._instance is None:
-            if cache_manager is None or weather_service is None or mqtt_service is None:
+            if cache_manager is None or weather_service is None or mqtt_service is None or storage is None or s3_storage is None or video_service is None:
                 raise ValueError("При первом создании нужно передать все зависимости")
             
-            cls._instance = cls(cache_manager, weather_service, mqtt_service, storage, s3_storage)
+            cls._instance = cls(cache_manager, weather_service, mqtt_service, storage, s3_storage, video_service)
         return cls._instance
     
     @classmethod
     async def get_instance_async(
         cls,
-        cache_manager: Optional[CacheManager] = None,
-        weather_service: Optional[WeatherService] = None,
-        mqtt_service: Optional[MQTTService] = None,
-        storage: Optional[TelemetryStorage] = None,
-        s3_storage: S3Manager = None
-    ) -> 'WeatherBackgroundWorker':
+        cache_manager: CacheManager = None,
+        weather_service: WeatherService = None,
+        mqtt_service: MQTTService = None,
+        storage: TelemetryStorage = None,
+        s3_storage: S3Manager = None,
+        video_service: VideoService = None
+    ) -> 'BackgroundWorker':
         """Асинхронная версия получения инстанса (с блокировкой)"""
         async with cls._lock:
-            return cls.get_instance(cache_manager, weather_service, mqtt_service, storage, s3_storage)
+            return cls.get_instance(cache_manager, weather_service, mqtt_service, storage, s3_storage, video_service)
     
     async def initialize_services(self):
         """Инициализирует асинхронные сервисы (вызывается ПОСЛЕ создания worker)"""
@@ -796,7 +796,7 @@ class WeatherBackgroundWorker:
             
         # Нужно включить камеру и начать запись.
         # Дверь открылась → запись уже идет (30 сек таймер молчания)
-        await self.video_service.start_recording(camera_id="cam1", max_duration=30)
+        await self.video_service.start_recording(camera_id="cam1", max_duration=15)
         logger.info(f"🚪 Плата {device_id} сообщила об открытии двери")
 
     async def handle_sensor_healthcheck(self, sensor_id: str, data: dict):

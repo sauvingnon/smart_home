@@ -121,7 +121,13 @@ fi
 # Останавливаем сервер
 echo "Останавливаем сервер..."
 kill $SERVER_PID 2>/dev/null || true
-sleep 2
+wait $SERVER_PID 2>/dev/null || true
+
+echo "Ждем освобождения порта 3900..."
+while timeout 1 bash -c '</dev/tcp/127.0.0.1/3900' 2>/dev/null; do
+    echo "Порт 3900 ещё занят, ждем..."
+    sleep 1
+done
 
 # Перезапускаем в foreground режиме
 echo "Запускаем Garage в foreground режиме..."

@@ -23,7 +23,7 @@ from app.utils.time import _get_izhevsk_time
 class VideoService:
     """Сервис управления видеопотоками"""
     
-    def __init__(self):
+    def __init__(self, s3_manager: S3Manager = None):
         # Полное состояние всех камер (вместо camera_modes + cameras)
         # Dict[camera_id] -> CameraState содержит режим (active, mode) + статистику (fps, last_frame и т.д.)
         self.cameras: Dict[str, CameraState] = {}
@@ -39,7 +39,6 @@ class VideoService:
         self._viewer_connected_at: Dict[str, Dict[str, float]] = {}
         
         # Настройки
-        self.default_record_duration = 30
         self.valid_access_keys = {"cam1": "12345678"}
 
         # Активные видеозаписи (Dict[camera_id] -> VideoRecorder)
@@ -60,10 +59,6 @@ class VideoService:
         # Флаг для управления cleanup loop (удаление видео старше 7 дней)
         self._cleanup_running = False
         self._cleanup_interval = 86400  # 24 часа в секундах
-        
-    def set_s3_manager(self, s3_manager: S3Manager):
-        """Установить S3 менеджер для записи видео"""
-        self._s3_manager = s3_manager
     
     # ========== УПРАВЛЕНИЕ КАМЕРОЙ ==========
 
@@ -459,9 +454,6 @@ class VideoService:
                         await self._handle_camera_frame(camera_id, frame_data)
                         
                 except asyncio.TimeoutError:
-                    # if time.time() - last_frame_time > 60:
-                    #     logger.warning(f"⏱️ Нет кадров от {camera_id} более 60 сек")
-                    #     break
                     
                     if time.time() - last_ping > 10:
                         try:
@@ -470,47 +462,52 @@ class VideoService:
                         except:
                             break
                     continue
-                # except RuntimeError as e:
-                #     # Обработаем ошибку "Cannot call receive once a disconnect message has been received"
-                #     if "disconnect" in str(e).lower():
-                #         logger.info(f"📤 [{camera_id}] Соединение разорвано (disconnect)")
-                #         break
-                #     else:
-                #         raise
-                    
         except Exception as e:
-            logger.error(f"❌ Ошибка при обработке рок от {camera_id}: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка при обработке соединения от {camera_id}: {e}", exc_info=True)
         finally:
             if camera_id and camera_id in self.esp_connections:
                 del self.esp_connections[camera_id]
                 logger.info(f"Камера {camera_id} отключена")
     
     async def _handle_camera_text(self, camera_id: str, text: str):
-        """Обработка текстовых сообщений от камеры (метаданные, ошибки и т.д.)"""
-        logger.debug(f"📨 Text from {camera_id}: {text}")
+        """Обработка текстовых сообщений от камеры"""
+        logger.debug(f"📨 Текст от {camera_id}: {text}")
         
+        # Обработка FPS метрик
         if text.startswith("fps:"):
-            # Парсим сообщение формата: "fps:30;quality_mode:2"
             try:
-                parts = text.split(';')
-                fps_part = parts[0]
-                fps_value = int(fps_part.split(':')[1])
-                
-                quality_mode = None
-                if len(parts) > 1 and parts[1].startswith("quality_mode:"):
-                    quality_mode = int(parts[1].split(':')[1])
+                # Разбираем fps:30;quality_mode:2;tmp:45.5
+                data = {}
+                for part in text.split(';'):
+                    key, val = part.split(':', 1)
+                    data[key] = val
                 
                 if camera_id in self.cameras:
-                    self.cameras[camera_id].reported_fps = fps_value
-                    self.cameras[camera_id].quality_mode = quality_mode
-                    logger.debug(f"📊 [{camera_id}] FPS reported: {fps_value}")
+                    cam = self.cameras[camera_id]
+                    cam.reported_fps = int(data.get('fps', 0))
+                    cam.quality_mode = int(data.get('quality_mode', 1))
+                    cam.temperature = float(data.get('tmp', 0))
+                    
+                    logger.info(f"📊 [{camera_id}] {cam.reported_fps} fps | "
+                            f"Качество: {cam.quality_mode} | "
+                            f"Температура: {cam.temperature:.1f}°C")
             except Exception as e:
-                logger.error(f"⚠️ Ошибка парсинга FPS: {e}")
+                logger.error(f"❌ [{camera_id}] Ошибка: {e}")
+            return
         
-        elif text == "size:ok":
-            logger.info(f"✅ [{camera_id}] Разрешение изменено успешно")
-        elif text == "size:error":
-            logger.error(f"❌ [{camera_id}] Ошибка изменения разрешения")
+        # Простые команды
+        commands = {
+            "size:ok": f"✅ Разрешение изменено",
+            "size:error": f"❌ Ошибка изменения разрешения",
+            "stream_state:ok": f"🎥 Стрим переключен",
+            "fan:ok": f"🌀 Вентилятор переключен",
+        }
+        
+        if text in commands:
+            logger.info(f"[{camera_id}] {commands[text]}")
+            return
+        
+        logger.warning(f"⚠️ [{camera_id}] Неизвестно: {text}")
     
     async def _handle_camera_frame(self, camera_id: str, frame_data: bytes):
         """Обработка видеокадра от камеры: обновляем статистику и рассылаем зрителям"""
@@ -693,7 +690,7 @@ class VideoService:
     
     # ========== ЗАПИСЬ ВИДЕО ==========
     
-    async def start_recording(self, camera_id: str, max_duration: int = 30):
+    async def start_recording(self, camera_id: str, max_duration: int = 15):
         """
         Начать или продлить запись видео.
         

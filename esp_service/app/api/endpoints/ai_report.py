@@ -1,6 +1,6 @@
 # api/routes/esp_service.py
 from fastapi import APIRouter, HTTPException, Depends, Query
-from app.core.worker import WeatherBackgroundWorker
+from app.core.worker import BackgroundWorker
 from app.api.endpoints.auth import get_current_user_id
 
 router = APIRouter(
@@ -15,7 +15,7 @@ async def ai_report_daily_endpoint(
     """
     Получить аналитический обзор показателей с помощью истории и ИИ
     """
-    worker = WeatherBackgroundWorker.get_instance()
+    worker = BackgroundWorker.get_instance()
 
     response = await worker.get_daily_report()
 
@@ -34,7 +34,7 @@ async def ai_report_weekly_endpoint(
     """
     Получить аналитический обзор показателей с помощью истории и ИИ
     """
-    worker = WeatherBackgroundWorker.get_instance()
+    worker = BackgroundWorker.get_instance()
 
     response = await worker.get_weekly_report()
 

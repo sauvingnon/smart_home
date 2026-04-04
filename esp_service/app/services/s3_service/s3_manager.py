@@ -90,7 +90,9 @@ class S3Manager:
                 # Входим в контекст и получаем клиента
                 self._client = await self._context.__aenter__()
                 
-                # ✅ НЕ проверяем bucket! Он уже создан.
+                # Проверяем, что Garage отвечает и bucket доступен
+                await self._client.head_bucket(Bucket=self.bucket_name)
+                
                 self._is_connected = True
                 logger.info(f"✅ Подключен к Garage (bucket: {self.bucket_name})")
                 return True
@@ -98,11 +100,11 @@ class S3Manager:
             except Exception as e:
                 logger.error(f"❌ Ошибка подключения: {e}")
                 
-                # Закрываем клиент при ошибке
-                if self._client:
+                # Закрываем контекст при ошибке
+                if self._context:
                     try:
-                        await self._client.__aexit__(None, None, None)
-                    except:
+                        await self._context.__aexit__(None, None, None)
+                    except Exception:
                         pass
                     self._client = None
                     self._context = None
@@ -119,13 +121,13 @@ class S3Manager:
 
     async def disconnect(self):
         """Корректное отключение"""
-        if self._client:
+        if self._context:
             try:
-                await self._client.__aexit__(None, None, None)
+                await self._context.__aexit__(None, None, None)
             except Exception as e:
                 logger.warning(f"Ошибка при закрытии клиента: {e}")
-            self._client = None
-            self._context = None
+        self._client = None
+        self._context = None
         self._is_connected = False
         logger.info("✅ Garage соединение закрыто")
     
@@ -302,6 +304,22 @@ class S3Manager:
             
         except Exception as e:
             logger.exception(f"❌ Ошибка сохранения: {e}")
+            
+            # Если соединение упало, пробуем восстановиться и повторно сохранить.
+            await self.disconnect()
+            if await self._ensure_connection():
+                try:
+                    await self._client.put_object(
+                        Bucket=self.bucket_name,
+                        Key=key,
+                        Body=video_data,
+                        ContentType='video/mp4',
+                        Metadata=s3_metadata
+                    )
+                    logger.info(f"💾 Видео сохранено после переподключения: {key}")
+                    return key
+                except Exception as e2:
+                    logger.exception(f"❌ Повторная ошибка сохранения: {e2}")
             return None
     
     async def get_video(self, key: str) -> Optional[bytes]:

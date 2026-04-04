@@ -1,6 +1,6 @@
 # api/routes/esp_service.py
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.worker import WeatherBackgroundWorker
+from app.core.worker import BackgroundWorker
 from app.schemas.weather_data import WeatherData
 from app.api.endpoints.auth import get_current_user_id
 
@@ -16,7 +16,7 @@ async def get_current_weather_endpoint(
     """
     Получить данные о погоде.
     """
-    worker = WeatherBackgroundWorker.get_instance()
+    worker = BackgroundWorker.get_instance()
     weather = await worker.get_weather()
     
     if weather is None:

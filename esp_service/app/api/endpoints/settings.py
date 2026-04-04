@@ -1,6 +1,6 @@
 # api/routes/esp_service.py
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.worker import WeatherBackgroundWorker
+from app.core.worker import BackgroundWorker
 from app.schemas.settings import SettingsData
 from typing import List
 from app.api.endpoints.auth import get_current_user_id
@@ -19,7 +19,7 @@ async def get_current_setttings_endpoint(
     
     Возвращает настройки ESP устройства.
     """
-    worker = WeatherBackgroundWorker.get_instance()
+    worker = BackgroundWorker.get_instance()
     settings = await worker.get_current_config()
     
     if settings is None:
@@ -44,5 +44,5 @@ async def update_settings_endpoint(
     2. Отправляет на ESP устройство
     3. Возвращает статус операции
     """
-    worker = WeatherBackgroundWorker.get_instance()
+    worker = BackgroundWorker.get_instance()
     await worker.send_to_board_settings(settings)

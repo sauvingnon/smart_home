@@ -1,6 +1,6 @@
 # api/routes/esp_service.py
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.worker import WeatherBackgroundWorker
+from app.core.worker import BackgroundWorker
 from app.schemas.telemetry import TelemetryData
 from typing import List
 from app.api.endpoints.auth import get_current_user_id
@@ -19,7 +19,7 @@ async def get_current_telemetry_endpoint(
     
     Возвращает последние полученные данные от ESP устройства.
     """
-    worker = WeatherBackgroundWorker.get_instance()
+    worker = BackgroundWorker.get_instance()
     telemetry = worker.get_current_telemetry()
     
     if telemetry is None:

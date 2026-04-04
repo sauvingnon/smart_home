@@ -8,11 +8,12 @@ from app.services.redis.cache_manager import CacheManager
 from app.services.weather_service.yandex_weather import WeatherService
 from app.services.monitor_db.telemetry_storage import get_telemetry_storage
 from app.services.s3_service.s3_manager import S3Manager
+from app.services.video_service.video_service import VideoService
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
-from app.core.worker import WeatherBackgroundWorker
+from app.core.worker import BackgroundWorker
 from config import YANDEX_WEATHER_API_KEY, REDIS_URL, MQTT_BROKER_HOST, MQTT_BROKER_PORT
 import os
-from app.api.endpoints import telemetry, settings, weather, auth, statistic, ai_report, ai_command, alice, stream
+from app.api.endpoints import telemetry, settings, weather, auth, statistic, ai_report, stream
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -65,19 +66,22 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("✅ MQTT сервис запущен")
         app.state.mqtt_service = mqtt_service
+
+        video_service = VideoService(s3_manager)
         
         # 4. Worker
-        worker = WeatherBackgroundWorker.get_instance(
+        worker = BackgroundWorker.get_instance(
             cache_manager=cache_manager,
             weather_service=weather_service,
             mqtt_service=mqtt_service,
             storage=storage,
-            s3_storage=s3_manager
+            s3_storage=s3_manager,
+            video_service=video_service
         )
 
         app.state.worker = worker
         
-        # 4a. Инициализируем асинхронные сервисы ПЕРЕД запуском worker
+        # 4. Инициализируем асинхронные сервисы ПЕРЕД запуском worker
         await worker.initialize_services()
         
         # 5. Запускаем воркер в фоне
@@ -161,6 +165,4 @@ app.include_router(weather.router)
 app.include_router(auth.router)
 app.include_router(statistic.router)
 app.include_router(ai_report.router)
-app.include_router(ai_command.router)
-app.include_router(alice.router)
 app.include_router(stream.router)
