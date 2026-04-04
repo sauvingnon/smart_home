@@ -73,10 +73,9 @@ async def lifespan(app: FastAPI):
         worker = BackgroundWorker.get_instance(
             cache_manager=cache_manager,
             weather_service=weather_service,
+            video_service=video_service,
             mqtt_service=mqtt_service,
-            storage=storage,
-            s3_storage=s3_manager,
-            video_service=video_service
+            storage=storage
         )
 
         app.state.worker = worker

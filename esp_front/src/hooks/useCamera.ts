@@ -10,12 +10,20 @@ export function useCamera(cameraId: string) {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<any>(null);
   const [isChangingResolution, setIsChangingResolution] = useState(false);
+  
+  // Используем ref для хранения WebSocket, чтобы можно было закрыть при размонтировании
+  const wsRef = useRef<WebSocket | null>(null);
+  const intervalRef = useRef<number | null>(null); // 👈 number вместо NodeJS.Timeout
 
   useEffect(() => {
     setConnectionState('connecting');
+    setError(null);
+    
+    console.log(`📹 useCamera: Mounting/updating for camera ${cameraId}`);
     
     const ws = apiClient.createCameraWebSocket(cameraId, {
       onOpen: () => {
+        console.log(`✅ WebSocket opened for camera ${cameraId}`);
         setConnectionState('connected');
         setError(null);
       },
@@ -23,24 +31,53 @@ export function useCamera(cameraId: string) {
         setFrameBlob(blob);
       },
       onError: (err: any) => {
+        console.error(`❌ WebSocket error for camera ${cameraId}:`, err);
         setConnectionState('error');
         setError('Connection error');
       },
-      onClose: () => {
+      onClose: (code: number, reason: string) => {
+        console.log(`🔌 WebSocket closed for camera ${cameraId}: code=${code}, reason=${reason}`);
         setConnectionState('disconnected');
       }
     });
+    
+    wsRef.current = ws;
 
-    const interval = setInterval(async () => {
+    // Статус обновляем раз в 5 секунд
+    const interval = window.setInterval(async () => { // 👈 явно используем window.setInterval
       try {
         const status = await apiClient.getCameraStatus(cameraId);
         setStatus(status);
-      } catch (e) {}
+      } catch (e) {
+        console.error('Failed to fetch status:', e);
+      }
     }, 5000);
+    
+    intervalRef.current = interval;
 
+    // ✅ КЛЮЧЕВОЙ МОМЕНТ: cleanup при размонтировании
     return () => {
-      apiClient.closeCameraWebSocket(cameraId);
-      clearInterval(interval);
+      console.log(`🧹 useCamera: Cleaning up for camera ${cameraId} - closing WebSocket and stopping intervals`);
+      
+      // Останавливаем интервал статуса
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      
+      // Закрываем WebSocket соединение
+      if (wsRef.current) {
+        // Проверяем, что сокет еще открыт
+        if (wsRef.current.readyState === WebSocket.OPEN || 
+            wsRef.current.readyState === WebSocket.CONNECTING) {
+          console.log(`🔌 Actively closing WebSocket for camera ${cameraId}`);
+          apiClient.closeCameraWebSocket(cameraId);
+        }
+        wsRef.current = null;
+      }
+      
+      setFrameBlob(null);
+      setConnectionState('disconnected');
     };
   }, [cameraId]);
 
@@ -54,18 +91,20 @@ export function useCamera(cameraId: string) {
         console.log('✅ apiClient.setCameraResolution completed');
         
         setTimeout(async () => {
-        try {
+          try {
             const status = await apiClient.getCameraStatus(cameraId);
             setStatus(status);
-        } catch (e) {}
-        setIsChangingResolution(false);
+          } catch (e) {
+            console.error('Failed to update status after resolution change:', e);
+          }
+          setIsChangingResolution(false);
         }, 1000);
     } catch (e) {
         console.error('❌ Failed to change resolution:', e);
         setError('Failed to change resolution');
         setIsChangingResolution(false);
     }
-    };
+  };
 
   return { 
     frameBlob, 

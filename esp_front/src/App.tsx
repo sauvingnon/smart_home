@@ -8,6 +8,7 @@ import { apiClient, AuthError } from './api/client';
 import SettingsPage from './pages/SettingsPage/SettingsPage';
 import { CameraPage } from './pages/CameraPage/CameraPage';
 import { VideosPage } from './pages/VideoPage/VideoPage';
+import { ThemeProvider } from './context/ThemeContext';
 
 function App() {
   const { accessKey, isLoading, clearAccessKey } = useAuth();
@@ -68,15 +69,17 @@ function App() {
   }
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/camera/:cameraId?" element={<CameraPage />} />
-        <Route path="/videos" element={<VideosPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
+    <ThemeProvider>
+      <Router>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/camera/:cameraId?" element={<CameraPage />} />
+          <Route path="/videos" element={<VideosPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
+    </ThemeProvider>
   );
 }
 

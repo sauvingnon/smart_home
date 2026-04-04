@@ -465,7 +465,7 @@ class VideoService:
         except Exception as e:
             logger.error(f"❌ Ошибка при обработке соединения от {camera_id}: {e}", exc_info=True)
         finally:
-            if camera_id and camera_id in self.esp_connections:
+            if camera_id and self.esp_connections.get(camera_id) == websocket:
                 del self.esp_connections[camera_id]
                 logger.info(f"Камера {camera_id} отключена")
     
@@ -497,10 +497,10 @@ class VideoService:
         
         # Простые команды
         commands = {
-            "size:ok": f"✅ Разрешение изменено",
-            "size:error": f"❌ Ошибка изменения разрешения",
-            "stream_state:ok": f"🎥 Стрим переключен",
-            "fan:ok": f"🌀 Вентилятор переключен",
+            "size:ok": f"✅ Разрешение стрима изменено",
+            "size:error": f"❌ Ошибка изменения разрешения стрима",
+            "stream_state:ok": f"🎥 Стрим переключен успешно",
+            "fan:ok": f"🌀 Вентилятор переключен успешно",
         }
         
         if text in commands:
@@ -619,7 +619,7 @@ class VideoService:
                     break
                     
         except Exception as e:
-            logger.error(f"❌ Ошибка처리 зрителя для {camera_id}: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка зрителя для {camera_id}: {e}", exc_info=True)
         finally:
             # Отключаемся и даём observer loop решить выключать ли камеру
             if camera_id in self.viewer_connections:

@@ -37,8 +37,7 @@ class BackgroundWorker:
             weather_service: WeatherService,
             video_service: VideoService,
             mqtt_service: MQTTService,
-            storage: TelemetryStorage,
-            s3_storage: S3Manager
+            storage: TelemetryStorage
             ):
         if BackgroundWorker._instance is not None:
             raise RuntimeError("Используйте BackgroundWorker.get_instance()")
@@ -47,7 +46,6 @@ class BackgroundWorker:
         self.mqtt_service = mqtt_service
         self.service = weather_service
         self.storage = storage
-        self.s3_storage = s3_storage
         self.video_service = video_service
         self.is_running = False
         self.update_board_weather_interval = DEFAULT_WEATHER_UPDATE_INTERVAL 
@@ -68,17 +66,16 @@ class BackgroundWorker:
         cls,
         cache_manager: CacheManager = None,
         weather_service: WeatherService = None,
+        video_service: VideoService = None,
         mqtt_service: MQTTService = None,
         storage: TelemetryStorage = None,
-        s3_storage: S3Manager = None,
-        video_service: VideoService = None
     ) -> 'BackgroundWorker':
         """Получить единственный экземпляр воркера"""
         if cls._instance is None:
-            if cache_manager is None or weather_service is None or mqtt_service is None or storage is None or s3_storage is None or video_service is None:
+            if cache_manager is None or weather_service is None or mqtt_service is None or storage is None or video_service is None:
                 raise ValueError("При первом создании нужно передать все зависимости")
             
-            cls._instance = cls(cache_manager, weather_service, mqtt_service, storage, s3_storage, video_service)
+            cls._instance = cls(cache_manager, weather_service, video_service, mqtt_service, storage)
         return cls._instance
     
     @classmethod
@@ -86,14 +83,13 @@ class BackgroundWorker:
         cls,
         cache_manager: CacheManager = None,
         weather_service: WeatherService = None,
+        video_service: VideoService = None,
         mqtt_service: MQTTService = None,
-        storage: TelemetryStorage = None,
-        s3_storage: S3Manager = None,
-        video_service: VideoService = None
+        storage: TelemetryStorage = None
     ) -> 'BackgroundWorker':
         """Асинхронная версия получения инстанса (с блокировкой)"""
         async with cls._lock:
-            return cls.get_instance(cache_manager, weather_service, mqtt_service, storage, s3_storage, video_service)
+            return cls.get_instance(cache_manager, weather_service, video_service, mqtt_service, storage)
     
     async def initialize_services(self):
         """Инициализирует асинхронные сервисы (вызывается ПОСЛЕ создания worker)"""

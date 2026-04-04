@@ -154,6 +154,7 @@ class ApiClient {
           ws.onopen = () => {
               console.log(`🟢 WebSocket connected for camera ${cameraId}`);
               reconnectAttempts = 0;
+              (ws as any).isManualClose = false;
               
               // Отправляем ping сразу
               ws.send('ping');
@@ -191,9 +192,11 @@ class ApiClient {
           };
           
           ws.onclose = (event) => {
+              const isManual = (ws as any).isManualClose;
               console.log(`🔌 WebSocket closed for camera ${cameraId}:`);
               console.log(`  Code: ${event.code}, Reason: ${event.reason}`);
               console.log(`  Was clean: ${event.wasClean}`);
+              console.log(`  Is manual close: ${isManual}`);
               
               if ((ws as any).pingInterval) {
                   clearInterval((ws as any).pingInterval);
@@ -203,7 +206,7 @@ class ApiClient {
               options.onClose?.(event.code, event.reason);
               
               // Пробуем переподключиться
-              if (reconnectAttempts < maxReconnectAttempts) {
+              if (!isManual && reconnectAttempts < maxReconnectAttempts) {
                   reconnectAttempts++;
                   console.log(`🔄 Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} for ${cameraId}`);
                   setTimeout(() => {
@@ -225,8 +228,31 @@ class ApiClient {
   closeCameraWebSocket(cameraId: string) {
     const ws = this.wsConnections.get(cameraId);
     if (ws) {
-      ws.close(1000, 'Closed by client');
+      console.log(`🔌 Closing WebSocket for camera ${cameraId}, current state: ${ws.readyState}`);
+      
+      // Убираем слушатели событий, чтобы избежать утечек
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      
+      // Помечаем как ручное закрытие
+      (ws as any).isManualClose = true;
+      
+      // Останавливаем ping интервал
+      if ((ws as any).pingInterval) {
+        clearInterval((ws as any).pingInterval);
+      }
+      
+      // Закрываем соединение, если оно не закрыто
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000, 'Closed by client');
+      }
+      
       this.wsConnections.delete(cameraId);
+      console.log(`✅ WebSocket for camera ${cameraId} closed and removed from Map`);
+    } else {
+      console.log(`ℹ️ No active WebSocket found for camera ${cameraId}`);
     }
   }
 

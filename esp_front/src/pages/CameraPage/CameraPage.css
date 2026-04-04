@@ -1,13 +1,21 @@
 /* CameraPage.css */
 
-/* Импортируем переменные (если их нет в глобальном CSS) */
-:root, .light {
-  --glass-bg: rgba(255, 255, 255, 0.4);
-  --glass-border: rgba(255, 255, 255, 0.5);
-  --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
-  --text-primary: #1e293b;
-  --text-secondary: #334155;
-  --text-tertiary: #64748b;
+/* Импортируем переменные */
+:root {
+  --glass-bg-light: rgba(255, 255, 255, 0.4);
+  --glass-border-light: rgba(255, 255, 255, 0.5);
+  --glass-shadow-light: 0 8px 32px rgba(31, 38, 135, 0.15);
+  --text-primary-light: #1e293b;
+  --text-secondary-light: #334155;
+  --text-tertiary-light: #64748b;
+  
+  --glass-bg-dark: rgba(255, 255, 255, 0.05);
+  --glass-border-dark: rgba(255, 255, 255, 0.1);
+  --glass-shadow-dark: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --text-primary-dark: #ffffff;
+  --text-secondary-dark: rgba(255, 255, 255, 0.6);
+  --text-tertiary-dark: rgba(255, 255, 255, 0.3);
+  
   --accent-cyan: #06b6d4;
   --accent-blue: #3b82f6;
   --accent-indigo: #6366f1;
@@ -17,26 +25,28 @@
   --accent-red: #ef4444;
   --accent-green: #22c55e;
   --accent-sky: #0ea5e9;
+}
+
+/* Светлая тема (по умолчанию) */
+.camera-page.light {
+  --glass-bg: var(--glass-bg-light);
+  --glass-border: var(--glass-border-light);
+  --glass-shadow: var(--glass-shadow-light);
+  --text-primary: var(--text-primary-light);
+  --text-secondary: var(--text-secondary-light);
+  --text-tertiary: var(--text-tertiary-light);
   --bg-gradient-from: #e0f2fe;
   --bg-gradient-to: #f0f9ff;
 }
 
-.dark {
-  --glass-bg: rgba(255, 255, 255, 0.05);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.6);
-  --text-tertiary: rgba(255, 255, 255, 0.3);
-  --accent-cyan: #22d3ee;
-  --accent-blue: #3b82f6;
-  --accent-indigo: #818cf8;
-  --accent-purple: #a78bfa;
-  --accent-amber: #fbbf24;
-  --accent-emerald: #34d399;
-  --accent-red: #f87171;
-  --accent-green: #4ade80;
-  --accent-sky: #0ea5e9;
+/* Темная тема */
+.camera-page.dark {
+  --glass-bg: var(--glass-bg-dark);
+  --glass-border: var(--glass-border-dark);
+  --glass-shadow: var(--glass-shadow-dark);
+  --text-primary: var(--text-primary-dark);
+  --text-secondary: var(--text-secondary-dark);
+  --text-tertiary: var(--text-tertiary-dark);
   --bg-gradient-from: #0f172a;
   --bg-gradient-to: #1e1b4b;
 }
@@ -51,7 +61,7 @@
   font-family: system-ui, -apple-system, sans-serif;
 }
 
-/* Фоновые пятна (как в HomePage) */
+/* Остальные стили остаются без изменений... */
 .background-spot {
   position: fixed;
   inset: 0;
@@ -121,7 +131,7 @@
   box-shadow: var(--glass-shadow);
 }
 
-/* Хедер */
+/* Остальные стили (хедер, статистика, видео и т.д.) остаются такими же как у вас */
 .camera-header {
   display: flex;
   align-items: center;
@@ -322,103 +332,6 @@
   font-size: 0.9375rem;
 }
 
-/* Загрузка */
-.loading-container {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-}
-
-.loading-card {
-  padding: 2rem;
-  text-align: center;
-  max-width: 20rem;
-  width: 100%;
-}
-
-.spinner {
-  width: 3rem;
-  height: 3rem;
-  border: 3px solid var(--glass-border);
-  border-top-color: var(--accent-sky);
-  border-radius: 50%;
-  margin: 0 auto 1rem;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-text {
-  color: var(--text-secondary);
-  margin: 0;
-}
-
-/* Адаптивность */
-@media (max-width: 640px) {
-  .camera-page-container {
-    padding: 1rem;
-  }
-
-  .camera-header {
-    padding: 0.75rem 1rem;
-  }
-
-  .camera-title h1 {
-    font-size: 1.25rem;
-  }
-
-  .header-action-btn {
-    width: 2.5rem;
-    height: 2.5rem;
-  }
-
-  .back-button {
-    width: 2.5rem;
-    height: 2.5rem;
-  }
-
-  .camera-stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.75rem;
-  }
-
-  .stat-card {
-    padding: 1rem;
-  }
-
-  .stat-icon {
-    width: 2.5rem;
-    height: 2.5rem;
-  }
-
-  .stat-value {
-    font-size: 1.25rem;
-  }
-}
-
-@media (max-width: 480px) {
-  .camera-stats-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .info-row {
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .info-label {
-    font-size: 0.8125rem;
-  }
-
-  .info-value {
-    font-size: 0.875rem;
-  }
-}
-
 /* Resolution section */
 .resolution-section {
   padding: 1.5rem;
@@ -529,117 +442,42 @@
   animation: spin 0.8s linear infinite;
 }
 
-/* Адаптивность */
-@media (max-width: 640px) {
-  .resolution-grid {
-    gap: 0.75rem;
-  }
-
-  .resolution-card {
-    padding: 1rem 0.75rem;
-  }
-
-  .resolution-label {
-    font-size: 1rem;
-  }
-
-  .resolution-description {
-    font-size: 0.75rem;
-  }
-
-  .resolution-check {
-    width: 1.25rem;
-    height: 1.25rem;
-    top: 0.5rem;
-    right: 0.5rem;
-  }
-}
-
-@media (max-width: 480px) {
-  .resolution-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .resolution-card {
-    flex-direction: row;
-    justify-content: space-between;
-    padding: 1rem;
-  }
-
-  .resolution-label {
-    font-size: 1.125rem;
-  }
-
-  .resolution-description {
-    font-size: 0.875rem;
-  }
-}
-
-/* Стили для полноэкранного режима */
-.camera-stream-wrapper:fullscreen {
+/* Загрузка */
+.loading-container {
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0f0f0f;
-  padding: 0;
-  border-radius: 0;
+  padding: 1rem;
 }
 
-.camera-stream-wrapper:fullscreen .camera-container {
-  border-radius: 0;
-  max-width: 100vw;
-  max-height: 100vh;
-  aspect-ratio: auto; /* Убираем фиксированное соотношение */
-}
-
-.camera-stream-wrapper:fullscreen .camera-viewport {
-  height: 100vh;
-  width: 100vw;
-}
-
-.camera-stream-wrapper:fullscreen .camera-image {
-  object-fit: contain;  /* Сохраняем пропорции */
-}
-
-/* Область для тапа на видео */
-.video-tap-area {
+.loading-card {
+  padding: 2rem;
+  text-align: center;
+  max-width: 20rem;
   width: 100%;
-  height: 100%;
-  cursor: pointer;
 }
 
-/* Подсказка для мобильных */
-.mobile-exit-hint {
-  position: fixed;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(8px);
-  color: white;
-  padding: 12px 24px;
-  border-radius: 40px;
-  font-size: 14px;
-  z-index: 10000;
-  pointer-events: none;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  white-space: nowrap;
+.spinner {
+  width: 3rem;
+  height: 3rem;
+  border: 3px solid var(--glass-border);
+  border-top-color: var(--accent-sky);
+  border-radius: 50%;
+  margin: 0 auto 1rem;
+  animation: spin 1s linear infinite;
 }
 
-/* Анимация появления/исчезновения подсказки */
-@keyframes hintFade {
-  0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
-  10% { opacity: 1; transform: translateX(-50%) translateY(0); }
-  90% { opacity: 1; transform: translateX(-50%) translateY(0); }
-  100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
-.mobile-exit-hint {
-  animation: hintFade 3s ease-in-out forwards;
+.loading-text {
+  color: var(--text-secondary);
+  margin: 0;
 }
 
-/* Стили для полноэкранного режима */
+/* Полноэкранный режим */
 .camera-stream-wrapper:fullscreen {
   display: flex;
   align-items: center;
@@ -665,118 +503,107 @@
   object-fit: contain;
 }
 
-/* Убираем подсказку на десктопе */
+.video-tap-area {
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.mobile-exit-hint {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 40px;
+  font-size: 14px;
+  z-index: 10000;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  animation: hintFade 3s ease-in-out forwards;
+}
+
+@keyframes hintFade {
+  0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  90% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+}
+
 @media (min-width: 769px) {
   .mobile-exit-hint {
     display: none;
   }
 }
 
-/* Адаптация для очень маленьких экранов */
+@media (max-width: 640px) {
+  .camera-page-container {
+    padding: 1rem;
+  }
+
+  .camera-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .camera-title h1 {
+    font-size: 1.25rem;
+  }
+
+  .header-action-btn,
+  .back-button {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .camera-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+
+  .stat-card {
+    padding: 1rem;
+  }
+
+  .stat-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .stat-value {
+    font-size: 1.25rem;
+  }
+
+  .resolution-grid {
+    gap: 0.75rem;
+  }
+
+  .resolution-card {
+    padding: 1rem 0.75rem;
+  }
+}
+
 @media (max-width: 480px) {
-  .mobile-exit-hint {
-    font-size: 12px;
-    padding: 10px 20px;
-    bottom: 20px;
+  .camera-stats-grid {
+    grid-template-columns: 1fr;
   }
-}
 
-/* Ручное управление */
-.camera-control-section {
-  margin-top: 20px;
-  padding: 20px;
-}
-
-.control-buttons {
-  display: flex;
-  gap: 15px;
-  margin-top: 15px;
-}
-
-.control-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 12px 24px;
-  border: none;
-  border-radius: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.control-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.start-btn {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
-}
-
-.start-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-}
-
-.stop-btn {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  color: white;
-}
-
-.stop-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
-}
-
-.camera-active-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 15px;
-  padding: 10px;
-  background: rgba(16, 185, 129, 0.1);
-  border-radius: 8px;
-  color: #10b981;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.pulse-dot {
-  width: 8px;
-  height: 8px;
-  background-color: #10b981;
-  border-radius: 50%;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
+  .info-row {
+    flex-direction: column;
+    gap: 0.25rem;
   }
-  50% {
-    opacity: 0.5;
-    transform: scale(1.2);
+
+  .resolution-grid {
+    grid-template-columns: 1fr;
   }
-}
 
-.spinner-small {
-  width: 20px;
-  height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+  .resolution-card {
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 1rem;
   }
 }

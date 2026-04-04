@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
+import { useTheme } from '../../context/ThemeContext'
 
 interface VideoItem {
   key: string
@@ -25,10 +26,6 @@ interface VideoItem {
   url?: string // URL для воспроизведения
 }
 
-interface VideosPageProps {
-  theme?: 'light' | 'dark'
-}
-
 const containerVar = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
@@ -39,10 +36,9 @@ const itemVar = {
   visible: { y: 0, opacity: 1 }
 }
 
-export const VideosPage: React.FC<VideosPageProps> = ({
-  theme = 'light'
-}) => {
+export const VideosPage = () => {
   const navigate = useNavigate()
+  const { theme } = useTheme()
   const [videos, setVideos] = useState<VideoItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)

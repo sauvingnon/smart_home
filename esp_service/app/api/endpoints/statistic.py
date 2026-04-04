@@ -8,6 +8,7 @@ from app.schemas.telemetry_history import (
     TelemetryRecord
 )
 from app.api.endpoints.auth import get_current_user_id
+from app.utils.time import _get_izhevsk_time
 
 router = APIRouter(
     prefix="/esp_service",
@@ -25,7 +26,7 @@ async def get_history_endpoint(
     """
     worker = BackgroundWorker.get_instance()
     records = await worker.storage.get_history(
-        end_time=worker._get_izhevsk_time(),
+        end_time=_get_izhevsk_time(),
         hours=hours,
         device_id=worker.device_id,
         max_points=max_points

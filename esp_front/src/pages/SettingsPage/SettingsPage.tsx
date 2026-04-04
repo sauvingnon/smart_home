@@ -8,10 +8,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './SettingsPage.css'
-
-type SettingsPageProps = {
-  theme?: 'light' | 'dark'
-}
+import { useTheme } from '../../context/ThemeContext'
 
 type Settings = {
   displayMode: number
@@ -235,8 +232,9 @@ const itemVar = {
   visible: { y: 0, opacity: 1 }
 }
 
-export default function SettingsPage({ theme = 'light' }: SettingsPageProps) {
+export default function SettingsPage() {
   const navigate = useNavigate()
+  const { theme } = useTheme()
   const [settings, setSettings] = useState<Settings>(defaultSettings)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

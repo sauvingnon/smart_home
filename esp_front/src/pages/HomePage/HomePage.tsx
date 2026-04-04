@@ -10,7 +10,7 @@ import { apiClient } from '../../api/client'
 import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import AIReport from '../../components/AIReport/AIReport'
-import AIVoiceChat from '../../components/AIVoiceChat/AIVoiceChat'
+import { useTheme } from '../../context/ThemeContext'
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {
@@ -54,7 +54,7 @@ const itemVar = {
 
 export default function HomePage() {
   const navigate = useNavigate()
-  const [theme, setTheme] = useState<'dark' | 'light'>('light')
+  const { theme, toggleTheme } = useTheme()
   const [data, setData] = useState<Telemetry | null>(null)
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -72,15 +72,9 @@ export default function HomePage() {
     try { const res = await apiClient.fetch('/esp_service/weather'); setWeather(res); } catch {}
   }
   useEffect(() => {
-    const hour = new Date().getHours()
-    setTheme(hour >= 6 && hour < 18 ? 'light' : 'dark')
     fetchData();
     fetchWeather();
   }, [])
-
-  const toggleTheme = () => {
-    setTheme(prev => prev === 'light' ? 'dark' : 'light')
-  }
 
   const handleCameraClick = () => {
     navigate('/camera/cam1')
@@ -132,16 +126,6 @@ export default function HomePage() {
             >
               <Camera size={20} />
             </motion.button>
-
-            {/* <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setShowAIChat(true)}
-              className="settings-button"
-              title="AI Ассистент"
-            >
-              <Sparkles size={20} />
-            </motion.button> */}
 
             <motion.button
               whileHover={{ scale: 1.05 }}

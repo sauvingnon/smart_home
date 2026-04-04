@@ -18,10 +18,7 @@ import { CameraStream } from '../../components/StreamCamera/StreamCamera'
 import { apiClient } from '../../api/client'
 import type { Resolution } from '../../api/camera';
 import './CameraPage.css'
-
-interface CameraPageProps {
-  theme?: 'light' | 'dark'
-}
+import { useTheme } from '../../context/ThemeContext'
 
 const containerVar = {
   hidden: { opacity: 0 },
@@ -33,10 +30,9 @@ const itemVar = {
   visible: { y: 0, opacity: 1 }
 }
 
-export const CameraPage: React.FC<CameraPageProps> = ({
-  theme = 'light'
-}) => {
+export const CameraPage: React.FC = () => {
   const navigate = useNavigate()
+  const { theme } = useTheme()
   const { cameraId } = useParams<{ cameraId: string }>()
   const [fullscreen, setFullscreen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
@@ -45,8 +41,6 @@ export const CameraPage: React.FC<CameraPageProps> = ({
   const [isChangingResolution, setIsChangingResolution] = useState(false)
   // 👇 Добавляем локальный стейт для разрешения
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('VGA')
-  const [isCameraOn, setIsCameraOn] = useState(false)
-  const [isCameraLoading, setIsCameraLoading] = useState(false)
 
   const handleClose = () => {
     navigate('/')
