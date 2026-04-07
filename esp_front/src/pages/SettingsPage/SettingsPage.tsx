@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
 import {
-  Clock, Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
-  Settings2, AlertCircle, ChevronLeft, Save, Calendar,
-  Sunrise, Sunset, Wind, Droplets, Power, VolumeX, Gauge
+  Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
+  Settings2, AlertCircle, Save, Calendar, Power, VolumeX
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './SettingsPage.css'
@@ -37,18 +35,6 @@ type Settings = {
   showTempScreen: boolean
   silentMode: boolean
   forcedVentilationTimeout: number
-}
-
-const defaultSettings: Settings = {
-  displayMode: 1,
-  dayOnHour: 8, dayOnMinute: 0, dayOffHour: 22, dayOffMinute: 0,
-  nightOnHour: 22, nightOnMinute: 0, nightOffHour: 8, nightOffMinute: 0,
-  toiletOnHour: 8, toiletOnMinute: 0, toiletOffHour: 20, toiletOffMinute: 0,
-  relayMode: false, manualDayState: false, manualNightState: false,
-  displayTimeout: 30, displayChangeModeTimeout: 20,
-  fanDelay: 60, fanDuration: 5,
-  offlineModeActive: false, showForecastScreen: true, showTempScreen: true,
-  silentMode: false, forcedVentilationTimeout: 0,
 }
 
 const TimeInput = ({ hour, minute, onHourChange, onMinuteChange }: any) => {
@@ -235,20 +221,28 @@ const itemVar = {
 
 export default function SettingsPage() {
   const { theme } = useTheme()
-  const [settings, setSettings] = useState<Settings>(defaultSettings)
+  const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('schedule')
   const [showSuccess, setShowSuccess] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
     const fetchSettings = async () => {
       try {
         const data = await apiClient.fetch('/esp_service/settings')
-        if (mounted) setSettings(data)
+        if (mounted) {
+          setSettings(data)
+          setError(null)
+        }
       } catch (e) {
         console.error('Settings fetch failed:', e)
+        if (mounted) {
+          setError('Нет связи с сервером.') // 👈 твой текст
+          setSettings(null)
+        }
       } finally {
         if (mounted) setLoading(false)
       }
@@ -257,11 +251,14 @@ export default function SettingsPage() {
     return () => { mounted = false }
   }, [])
 
-  const update = <K extends keyof Settings>(key: K, value: Settings[K]) => {
-    setSettings(prev => ({ ...prev, [key]: value }))
+   const update = <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    if (settings) {
+      setSettings(prev => prev ? { ...prev, [key]: value } : prev)
+    }
   }
 
   const saveSettings = async () => {
+    if (!settings) return
     setSaving(true)
     try {
       await apiClient.fetch('/esp_service/settings', {
@@ -284,6 +281,62 @@ export default function SettingsPage() {
     { id: 'display', label: 'Экран', icon: Monitor },
     { id: 'fan', label: 'Вентилятор', icon: Fan },
   ]
+
+  // Рендер ошибки
+  if (error) {
+    return (
+      <div className={`settings-page ${theme}`}>
+        <div className="background-spot">
+          <div className="spot-1"></div>
+          <div className="spot-2"></div>
+          <div className="spot-3"></div>
+        </div>
+        <div className="settings-container">
+          <div className="settings-header glass-card">
+            <h1 className="settings-title">Настройки</h1>
+          </div>
+          <div className="error-container">
+            <div className="error-card glass-card">
+              <AlertCircle size={48} className="error-icon" />
+              <h2 className="error-title">Ошибка подключения</h2>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="retry-button"
+              >
+                Попробовать снова
+              </button>
+            </div>
+          </div>
+        </div>
+        <BottomNavBar />
+      </div>
+    )
+  }
+
+  // Рендер загрузки
+  if (loading || !settings) {
+    return (
+      <div className={`settings-page ${theme}`}>
+        <div className="background-spot">
+          <div className="spot-1"></div>
+          <div className="spot-2"></div>
+          <div className="spot-3"></div>
+        </div>
+        <div className="settings-container">
+          <div className="settings-header glass-card">
+            <h1 className="settings-title">Настройки</h1>
+          </div>
+          <div className="loading-container">
+            <div className="loading-card glass-card">
+              <div className="spinner" />
+              <p className="loading-text">Загрузка настроек...</p>
+            </div>
+          </div>
+        </div>
+        <BottomNavBar />
+      </div>
+    )
+  }
 
   return (
     <div className={`settings-page ${theme}`}>
@@ -320,6 +373,7 @@ export default function SettingsPage() {
           </motion.button>
         </motion.div>
 
+        
         {loading ? (
           <div className="loading-container">
             <div className="loading-card glass-card">

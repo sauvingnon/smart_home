@@ -1,25 +1,36 @@
-// hooks/useCamera.ts
+// hooks/useCamera.ts - чистая версия ТОЛЬКО для видео
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../api/client';
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 
-export function useCamera(cameraId: string) {
+interface UseCameraOptions {
+  disabled?: boolean;
+  onResolutionChange?: () => void; // 👈 Колбэк для родителя
+}
+
+export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
+  const { disabled = false, onResolutionChange } = options;
+  
   const [frameBlob, setFrameBlob] = useState<Blob | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<any>(null);
   const [isChangingResolution, setIsChangingResolution] = useState(false);
   
-  // Используем ref для хранения WebSocket, чтобы можно было закрыть при размонтировании
   const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<number | null>(null); // 👈 number вместо NodeJS.Timeout
 
   useEffect(() => {
+    // Если disabled - даже не пытаемся подключиться
+    if (disabled) {
+      setConnectionState('disconnected');
+      setFrameBlob(null);
+      return;
+    }
+    
     setConnectionState('connecting');
     setError(null);
     
-    console.log(`📹 useCamera: Mounting/updating for camera ${cameraId}`);
+    console.log(`📹 useCamera: Connecting for camera ${cameraId}`);
     
     const ws = apiClient.createCameraWebSocket(cameraId, {
       onOpen: () => {
@@ -38,39 +49,18 @@ export function useCamera(cameraId: string) {
       onClose: (code: number, reason: string) => {
         console.log(`🔌 WebSocket closed for camera ${cameraId}: code=${code}, reason=${reason}`);
         setConnectionState('disconnected');
+        setFrameBlob(null);
       }
     });
     
     wsRef.current = ws;
 
-    // Статус обновляем раз в 5 секунд
-    const interval = window.setInterval(async () => { // 👈 явно используем window.setInterval
-      try {
-        const status = await apiClient.getCameraStatus(cameraId);
-        setStatus(status);
-      } catch (e) {
-        console.error('Failed to fetch status:', e);
-      }
-    }, 5000);
-    
-    intervalRef.current = interval;
-
-    // ✅ КЛЮЧЕВОЙ МОМЕНТ: cleanup при размонтировании
     return () => {
-      console.log(`🧹 useCamera: Cleaning up for camera ${cameraId} - closing WebSocket and stopping intervals`);
+      console.log(`🧹 useCamera: Cleaning up for camera ${cameraId}`);
       
-      // Останавливаем интервал статуса
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      
-      // Закрываем WebSocket соединение
       if (wsRef.current) {
-        // Проверяем, что сокет еще открыт
         if (wsRef.current.readyState === WebSocket.OPEN || 
             wsRef.current.readyState === WebSocket.CONNECTING) {
-          console.log(`🔌 Actively closing WebSocket for camera ${cameraId}`);
           apiClient.closeCameraWebSocket(cameraId);
         }
         wsRef.current = null;
@@ -79,30 +69,27 @@ export function useCamera(cameraId: string) {
       setFrameBlob(null);
       setConnectionState('disconnected');
     };
-  }, [cameraId]);
+  }, [cameraId, disabled]); // 👈 Добавили disabled в зависимости
 
   const setResolution = async (resolution: 'QVGA' | 'VGA' | 'HD') => {
     console.log('🎯 useCamera.setResolution called:', { resolution, cameraId });
     setIsChangingResolution(true);
     
     try {
-        console.log('📤 Calling apiClient.setCameraResolution...');
-        await apiClient.setCameraResolution(cameraId, resolution);
-        console.log('✅ apiClient.setCameraResolution completed');
-        
-        setTimeout(async () => {
-          try {
-            const status = await apiClient.getCameraStatus(cameraId);
-            setStatus(status);
-          } catch (e) {
-            console.error('Failed to update status after resolution change:', e);
-          }
-          setIsChangingResolution(false);
-        }, 1000);
-    } catch (e) {
-        console.error('❌ Failed to change resolution:', e);
-        setError('Failed to change resolution');
+      await apiClient.setCameraResolution(cameraId, resolution);
+      console.log('✅ Resolution changed successfully');
+      
+      // 👈 Просто вызываем колбэк, а не запрашиваем статус
+      onResolutionChange?.();
+      
+      setTimeout(() => {
         setIsChangingResolution(false);
+      }, 1000);
+      
+    } catch (e) {
+      console.error('❌ Failed to change resolution:', e);
+      setError('Failed to change resolution');
+      setIsChangingResolution(false);
     }
   };
 
@@ -110,7 +97,6 @@ export function useCamera(cameraId: string) {
     frameBlob, 
     connectionState, 
     error, 
-    status, 
     isChangingResolution, 
     setResolution 
   };

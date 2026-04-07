@@ -1,17 +1,12 @@
 # app/api/esp_service.py
 import io
-import os
-import tempfile
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, Depends
-from fastapi.responses import FileResponse, StreamingResponse
-from starlette.background import BackgroundTask
+from fastapi import APIRouter, HTTPException, Query, Response, WebSocket, Depends
+from fastapi.responses import StreamingResponse
 from app.core.worker import BackgroundWorker
 from app.api.endpoints.auth import get_current_user_id
 from pydantic import BaseModel
-from datetime import datetime
-from logger import logger
 
 router = APIRouter(prefix="/esp_service", tags=["esp_service"])
 
@@ -54,20 +49,16 @@ async def get_camera_status(camera_id: str):
 
 @router.get("/videos")
 async def list_videos(
-    camera_id: Optional[str] = Query(None, description="ID камеры"),
-    user_id: int = Depends(get_current_user_id)
+    camera_id: Optional[str] = Query(None, description="ID камеры")
+    # user_id: int = Depends(get_current_user_id)
 ) -> list[dict]:
     """Получить список видео."""
-    try:
+    worker = BackgroundWorker.get_instance()
 
-        worker = BackgroundWorker.get_instance()
-
-        videos = await worker.video_service.list_videos(
-            camera_id=camera_id
-        )
-        return videos
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    videos = await worker.video_service.list_videos(
+        camera_id=camera_id
+    )
+    return videos
 
 
 @router.get("/videos/stream")
@@ -107,12 +98,12 @@ async def download_video(
 @router.get("/videos/thumbnail")
 async def get_video_thumbnail(
     camera_id: str = Query(..., description="ID камеры"),
-    timestamp: int = Query(..., description="Unix timestamp начала записи"),
+    video_id: str = Query(..., description="UUID видео"),
 ):
-    """Получить thumbnail (превью) видео"""
+    """Получить thumbnail (превью) видео по video_id"""
     worker = BackgroundWorker.get_instance()
     
-    thumbnail_data = await worker.video_service.get_thumbnail(camera_id, timestamp)
+    thumbnail_data = await worker.video_service.get_thumbnail(camera_id, video_id)
     if not thumbnail_data:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
     

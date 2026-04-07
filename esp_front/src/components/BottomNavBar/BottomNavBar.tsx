@@ -5,7 +5,7 @@ import './BottomNavBar.css';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Главная' },
-  { path: '/camera', icon: Camera, label: 'Камера' },
+  { path: '/camera/cam1', icon: Camera, label: 'Камера' },
   { path: '/videos', icon: Video, label: 'Видео' },
   { path: '/settings', icon: Settings, label: 'Настройки' },
 ];

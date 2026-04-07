@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback  } from 'react'
 import { motion } from 'framer-motion'
-import { useNavigate, useParams } from 'react-router-dom'
 import {
   Camera as CameraIcon,
   Wifi,
@@ -15,6 +14,7 @@ import {
 } from 'lucide-react'
 import { CameraStream } from '../../components/StreamCamera/StreamCamera'
 import { apiClient } from '../../api/client'
+import { useParams } from 'react-router-dom'
 import type { Resolution } from '../../api/camera';
 import './CameraPage.css'
 import { useTheme } from '../../context/ThemeContext'
@@ -30,18 +30,31 @@ const itemVar = {
   visible: { y: 0, opacity: 1 }
 }
 
+interface CameraStatus {
+  connected?: boolean
+  quality_mode?: 0 | 1 | 2
+  reported_fps?: number
+  fps?: number
+  viewers?: number
+  last_frame_size?: number
+}
+
+const STATUS_UPDATE_INTERVAL = 5000
+const RESOLUTION_CHANGE_DELAY = 1000
+
 export const CameraPage: React.FC = () => {
   const { theme } = useTheme()
   const { cameraId } = useParams<{ cameraId: string }>()
   const [fullscreen, setFullscreen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const [cameraStatus, setCameraStatus] = useState<any>(null)
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [isChangingResolution, setIsChangingResolution] = useState(false)
   // 👇 Добавляем локальный стейт для разрешения
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('VGA')
 
   const videoContainerRef = useRef<HTMLDivElement>(null)
+  const timeoutRef = useRef<number>()
 
   // Маппинг числовых значений из бекенда в наши типы
   const qualityToResolution = (quality?: number): Resolution => {
@@ -80,8 +93,9 @@ export const CameraPage: React.FC = () => {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
+        if (!cameraId) return
         const status = await apiClient.getCameraStatus(cameraId)
-        console.log('📊 Camera status:', status)
+        // console.log('📊 Camera status:', status)
         setCameraStatus(status)
         // 👇 Устанавливаем разрешение из статуса при первой загрузке
         if (status?.quality_mode !== undefined) {
@@ -95,39 +109,58 @@ export const CameraPage: React.FC = () => {
     }
 
     fetchStatus()
-    const interval = setInterval(fetchStatus, 5000)
+    const interval = setInterval(fetchStatus, STATUS_UPDATE_INTERVAL)
     return () => clearInterval(interval)
   }, [cameraId])
 
-  // Обновляем selectedResolution когда приходит новый статус
-  useEffect(() => {
-    if (cameraStatus?.quality_mode !== undefined) {
-      setSelectedResolution(qualityToResolution(cameraStatus.quality_mode))
-    }
-  }, [cameraStatus?.quality_mode])
 
   const handleResolutionChange = async (resolution: Resolution) => {
+    if (isChangingResolution || !cameraId) return
+    
     setIsChangingResolution(true)
-    // 👇 Оптимистично обновляем UI
+    const previousResolution = selectedResolution
     setSelectedResolution(resolution)
+    
+    // Очищаем предыдущий таймаут
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
     
     try {
       await apiClient.setCameraResolution(cameraId, resolution)
-      // Ждем обновления статуса от сервера
-      setTimeout(async () => {
-        const status = await apiClient.getCameraStatus(cameraId)
-        setCameraStatus(status)
-        setIsChangingResolution(false)
-      }, 1000)
+      
+      // Таймаут с проверкой на размонтирование
+      timeoutRef.current = window.setTimeout(async () => {
+        try {
+          const status = await apiClient.getCameraStatus(cameraId)
+          // Проверяем, что компонент все еще жив
+          if (timeoutRef.current) {
+            setCameraStatus(status)
+            if (status?.quality_mode !== undefined) {
+              setSelectedResolution(qualityToResolution(status.quality_mode))
+            }
+          }
+        } finally {
+          setIsChangingResolution(false)
+          timeoutRef.current = undefined
+        }
+      }, RESOLUTION_CHANGE_DELAY)
+      
     } catch (e) {
       console.error('Failed to change resolution:', e)
-      // 👆 В случае ошибки возвращаем предыдущее значение из статуса
-      if (cameraStatus?.quality_mode !== undefined) {
-        setSelectedResolution(qualityToResolution(cameraStatus.quality_mode))
-      }
+      setSelectedResolution(previousResolution)
       setIsChangingResolution(false)
     }
   }
+
+  // Очистка таймаута при размонтировании
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
 
   const toggleFullscreen = () => {
     if (!videoContainerRef.current) return
@@ -214,6 +247,7 @@ export const CameraPage: React.FC = () => {
                 cameraId={cameraId}
                 showControls={false}
                 hideInfo={true}
+                disabled={!cameraStatus?.connected}
               />
             </div>
 
@@ -314,19 +348,19 @@ export const CameraPage: React.FC = () => {
               </div>
             </div>
 
-            {cameraStatus?.last_frame_size && (
-              <div className="stat-card glass-card">
-                <div className="stat-icon size">
-                  <Activity size={24} />
-                </div>
-                <div className="stat-info">
-                  <span className="stat-label">Размер кадра</span>
-                  <span className="stat-value">
-                    {Math.round(cameraStatus.last_frame_size / 1024)} KB
-                  </span>
-                </div>
+            <div className="stat-card glass-card">
+              <div className="stat-icon size">
+                <Activity size={24} />
               </div>
-            )}
+              <div className="stat-info">
+                <span className="stat-label">Размер кадра</span>
+                <span className="stat-value">
+                  {cameraStatus?.last_frame_size !== undefined && cameraStatus?.last_frame_size !== null
+                    ? `${Math.round(cameraStatus.last_frame_size / 1024)} KB`
+                    : '—'}
+                </span>
+              </div>
+            </div>
           </motion.div>
 
           {/* Информация о камере */}

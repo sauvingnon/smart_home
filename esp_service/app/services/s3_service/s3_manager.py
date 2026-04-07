@@ -10,7 +10,7 @@ import uuid
 import subprocess
 import json
 from logger import logger
-from app.utils.time import _get_izhevsk_time
+import uuid
 
 class S3Manager:
     def __init__(self, endpoint_url: str, access_key: str, secret_key: str, bucket_name: str, region: str = "us-east-1"):
@@ -189,7 +189,7 @@ class S3Manager:
         self, 
         camera_id: Optional[str] = None
     ) -> list:
-        """Получает список видео из Garage"""
+        """Получает список видео из S3"""
         if not await self._ensure_connection():
             return []
         
@@ -212,57 +212,78 @@ class S3Manager:
                     key = obj['Key']
                     last_modified = obj['LastModified']
                     
-                    # Пытаемся получить метаданные через head_object, потому что list_objects_v2 не возвращает user metadata
+                    # Извлекаем camera_id из ключа
+                    parts = key.split('/')
+                    camera_id_from_key = parts[1] if len(parts) > 1 else 'unknown'
+                    
+                    # Получаем метаданные через head_object
                     metadata = {}
                     duration_seconds = None
                     start_time = None
-                    camera_id_from_key = key.split('/')[1] if '/' in key else 'unknown'
+                    video_id = None
+                    
                     try:
-                        head = await self._client.head_object(Bucket=self.bucket_name, Key=key)
+                        head = await self._client.head_object(
+                            Bucket=self.bucket_name, 
+                            Key=key
+                        )
                         metadata = head.get('Metadata', {}) or {}
-                        logger.info(f"Metadata for {key}: {metadata}")
-                    except Exception as e:
-                        logger.info(f"Failed head_object for {key}: {e}")
-                    
-                    if 'duration' in metadata:
-                        try:
-                            duration_seconds = int(metadata['duration'])
-                            logger.info(f"Duration from metadata for {key}: {duration_seconds}")
-                        except (ValueError, TypeError):
-                            pass
-                    
-                    # Если duration не найден в metadata, пытаемся получить из видео файла
-                    if duration_seconds is None:
-                        logger.info(f"Getting duration from file for {key}")
-                        duration_seconds = await self._get_video_duration(key)
-                        logger.info(f"Duration for {key}: {duration_seconds}")
-                    
-                    if 'start-time' in metadata:
-                        try:
-                            start_time = datetime.fromisoformat(metadata['start-time'])
-                        except (ValueError, TypeError):
-                            pass
-                    
-                    if not start_time:
-                        basename = os.path.basename(key)
-                        timestamp_part = basename.split('_')[0]
-                        if timestamp_part.isdigit():
+                        
+                        # Получаем video_id из метаданных
+                        if 'video-id' in metadata:
+                            video_id = metadata['video-id']
+                        else:
+                            # Если video_id нет в метаданных, пытаемся извлечь из имени файла
+                            # Имя файла: {uuid}.mp4
+                            filename = os.path.basename(key)
+                            if filename.endswith('.mp4'):
+                                potential_uuid = filename[:-4]  # Убираем .mp4
+                                # Проверяем, похоже ли на UUID
+                                if len(potential_uuid) == 36 and potential_uuid.count('-') == 4:
+                                    video_id = potential_uuid
+                        
+                        # Получаем duration
+                        if 'duration' in metadata:
                             try:
-                                start_time = datetime.fromtimestamp(int(timestamp_part), tz=timezone.utc)
-                            except Exception:
-                                start_time = None
+                                duration_seconds = int(metadata['duration'])
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        # Получаем start_time из метаданных
+                        if 'start-time' in metadata:
+                            try:
+                                start_time = datetime.fromisoformat(metadata['start-time'])
+                            except (ValueError, TypeError):
+                                pass
+                        
+                    except Exception as e:
+                        logger.debug(f"Failed head_object for {key}: {e}")
                     
+                    # Формируем thumbnail URL используя video_id
                     thumbnail_url = None
-                    if start_time:
-                        thumbnail_url = f"/esp_service/videos/thumbnail?camera_id={camera_id or camera_id_from_key}&timestamp={int(start_time.timestamp())}"
+                    if video_id and camera_id_from_key:
+                        # Проверяем существует ли thumbnail
+                        thumb_key = f"thumbnails/{camera_id_from_key}/{video_id}.jpg"
+                        try:
+                            await self._client.head_object(
+                                Bucket=self.bucket_name, 
+                                Key=thumb_key
+                            )
+                            # Thumbnail существует, формируем URL с video_id
+                            thumbnail_url = f"/esp_service/videos/thumbnail?camera_id={camera_id_from_key}&video_id={video_id}"
+                        except Exception as e:
+                            # Thumbnail не найден
+                            logger.warning(f"❌ Thumbnail not found for video {video_id}: {e}")
+                            pass
                     
                     objects.append({
                         'key': key,
+                        'video_id': video_id,  # Добавляем video_id в ответ
                         'size_bytes': obj['Size'],
                         'last_modified': last_modified,
                         'camera_id': camera_id or camera_id_from_key,
                         'duration_seconds': duration_seconds,
-                        'start_time': start_time,
+                        'start_time': start_time.isoformat() if start_time else None,  # Возвращаем ISO строку
                         'thumbnail_url': thumbnail_url,
                     })
             
@@ -274,16 +295,27 @@ class S3Manager:
             return []
 
     async def save_video(self, camera_id: str, video_data: bytes, start_time: datetime, duration_seconds: int, metadata: dict = None) -> Optional[str]:
-        """Сохраняет видео"""
+        """Сохраняет видео с уникальным ID"""
         if not await self._ensure_connection():
             return None
         
         try:
-            key = self._generate_key(camera_id, start_time)
+            # Генерируем уникальный ID для видео
+            video_id = str(uuid.uuid4())
             
+            # Для организации по папкам используем даты
+            year = start_time.strftime("%Y")
+            month = start_time.strftime("%m")
+            day = start_time.strftime("%d")
+            
+            # Ключ: videos/{camera_id}/{год}/{месяц}/{день}/{uuid}.mp4
+            key = f"videos/{camera_id}/{year}/{month}/{day}/{video_id}.mp4"
+            
+            # Метаданные содержат локальное время для отображения
             s3_metadata = {
                 'camera-id': camera_id,
-                'start-time': start_time.isoformat(),
+                'video-id': video_id,  # Сохраняем ID в метаданных
+                'start-time': start_time.isoformat(),  # Локальное время как есть
                 'duration': str(duration_seconds),
                 'file-size': str(len(video_data))
             }
@@ -299,29 +331,36 @@ class S3Manager:
                 Metadata=s3_metadata
             )
             
-            logger.info(f"💾 Видео сохранено: {key}")
-            return key
+            logger.info(f"💾 Видео сохранено: {key} (ID: {video_id})")
+            return video_id  # Возвращаем ID, а не ключ
             
         except Exception as e:
             logger.exception(f"❌ Ошибка сохранения: {e}")
-            
-            # Если соединение упало, пробуем восстановиться и повторно сохранить.
-            await self.disconnect()
-            if await self._ensure_connection():
-                try:
-                    await self._client.put_object(
-                        Bucket=self.bucket_name,
-                        Key=key,
-                        Body=video_data,
-                        ContentType='video/mp4',
-                        Metadata=s3_metadata
-                    )
-                    logger.info(f"💾 Видео сохранено после переподключения: {key}")
-                    return key
-                except Exception as e2:
-                    logger.exception(f"❌ Повторная ошибка сохранения: {e2}")
             return None
     
+    async def save_thumbnail(self, camera_id: str, video_id: str, thumbnail_data: bytes):
+        """Сохранить thumbnail по UUID видео"""
+        if not await self._ensure_connection():
+            logger.error("❌ S3 connection failed for thumbnail")
+            return  # Лучше вернуть None, чем бросать исключение
+        
+        try:
+            thumb_key = f"thumbnails/{camera_id}/{video_id}.jpg"
+            await self._client.put_object(  # 🔧 _client, не client
+                Bucket=self.bucket_name,
+                Key=thumb_key,
+                Body=thumbnail_data,
+                ContentType="image/jpeg",
+                Metadata={
+                    "camera": camera_id,
+                    "video_id": video_id,
+                    "type": "thumbnail"
+                }
+            )
+            logger.debug(f"🖼️ [{camera_id}] Thumbnail saved: {thumb_key}")
+        except Exception as e:
+            logger.error(f"❌ Failed to save thumbnail: {e}")
+
     async def get_video(self, key: str) -> Optional[bytes]:
         """Получает видео"""
         if not await self._ensure_connection():
@@ -346,6 +385,34 @@ class S3Manager:
             logger.exception(f"❌ Ошибка: {e}")
             return None
     
+    async def get_thumbnail(self, camera_id: str, video_id: str) -> Optional[bytes]:
+        """Получить thumbnail по camera_id и video_id"""
+        if not await self._ensure_connection():
+            return None
+        
+        try:
+            thumb_key = f"thumbnails/{camera_id}/{video_id}.jpg"
+            
+            response = await self._client.get_object(
+                Bucket=self.bucket_name,
+                Key=thumb_key
+            )
+            
+            async with response['Body'] as stream:
+                thumbnail_data = await stream.read()
+                logger.debug(f"✅ Thumbnail found: {thumb_key}")
+                return thumbnail_data
+                
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.debug(f"Thumbnail not found: {thumb_key}")
+            else:
+                logger.error(f"Error getting thumbnail: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get thumbnail: {e}")
+            return None
+
     async def delete_video(self, key: str) -> bool:
         """Удаляет видео"""
         if not await self._ensure_connection():

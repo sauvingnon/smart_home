@@ -4,6 +4,7 @@ import time
 import gc
 from datetime import datetime, timedelta
 from typing import Dict, Set, Optional
+from aiohttp import ClientError
 from fastapi import WebSocket
 from logger import logger
 from app.services.s3_service.s3_manager import S3Manager
@@ -27,6 +28,8 @@ class VideoService:
         # Полное состояние всех камер (вместо camera_modes + cameras)
         # Dict[camera_id] -> CameraState содержит режим (active, mode) + статистику (fps, last_frame и т.д.)
         self.cameras: Dict[str, CameraState] = {}
+
+        self._s3_manager = s3_manager
         
         # WebSocket соединения камер (Dict[camera_id] -> WebSocket)
         self.esp_connections: Dict[str, WebSocket] = {}
@@ -46,9 +49,6 @@ class VideoService:
         
         # Отслеживание асинхронных задач для автостопа записи
         self._recording_tasks: Dict[str, asyncio.Task] = {}
-        
-        # S3 менеджер для сохранения видео (инициализируется позже)
-        self._s3_manager: S3Manager = None
         
         # Наблюдатель проверяет состояние камер каждые 30 секунд
         self._observer_interval = 30
@@ -267,7 +267,7 @@ class VideoService:
             except Exception as e:
                 logger.error(f"❌ Ошибка в cleanup цикле: {e}", exc_info=True)
                 await asyncio.sleep(self._cleanup_interval)
-    
+
     async def control_camera(self, camera_id: str, action: str) -> dict:
         """
         Управление камерой: start/stop.
@@ -471,7 +471,7 @@ class VideoService:
     
     async def _handle_camera_text(self, camera_id: str, text: str):
         """Обработка текстовых сообщений от камеры"""
-        logger.debug(f"📨 Текст от {camera_id}: {text}")
+        # logger.debug(f"📨 Текст от {camera_id}: {text}")
         
         # Обработка FPS метрик
         if text.startswith("fps:"):
@@ -488,9 +488,9 @@ class VideoService:
                     cam.quality_mode = int(data.get('quality_mode', 1))
                     cam.temperature = float(data.get('tmp', 0))
                     
-                    logger.info(f"📊 [{camera_id}] {cam.reported_fps} fps | "
-                            f"Качество: {cam.quality_mode} | "
-                            f"Температура: {cam.temperature:.1f}°C")
+                    # logger.info(f"📊 [{camera_id}] {cam.reported_fps} fps | "
+                    #         f"Качество: {cam.quality_mode} | "
+                    #         f"Температура: {cam.temperature:.1f}°C")
             except Exception as e:
                 logger.error(f"❌ [{camera_id}] Ошибка: {e}")
             return
@@ -510,7 +510,7 @@ class VideoService:
         logger.warning(f"⚠️ [{camera_id}] Неизвестно: {text}")
     
     async def _handle_camera_frame(self, camera_id: str, frame_data: bytes):
-        """Обработка видеокадра от камеры: обновляем статистику и рассылаем зрителям"""
+        """Обработка видеокадра от камеры"""
         camera = self.cameras[camera_id]
         
         # Обновляем статистику
@@ -524,14 +524,16 @@ class VideoService:
             camera.frame_count = 0
             camera.last_time = now
         
-        # Добавляем кадр в активную запись (если она идет)
+        # Добавляем кадр в активную запись с временной меткой
         if self._s3_manager and camera_id in self._video_recorders:
             recorder = self._video_recorders[camera_id]
             if recorder.is_recording:
-                recorder.buffer.append(frame_data)
+                # Сохраняем кадр с текущим временем
+                frame_time = _get_izhevsk_time().timestamp()
+                recorder.frames.append((frame_time, frame_data))
                 recorder.buffer_size_bytes += len(frame_data)
         
-        # Рассылаем кадр всем подключенным зрителям
+        # Рассылаем кадр зрителям (без изменений)
         if camera_id in self.viewer_connections:
             viewers = self.viewer_connections[camera_id]
             dead = set()
@@ -540,11 +542,9 @@ class VideoService:
                 try:
                     await viewer.send_bytes(frame_data)
                 except Exception as e:
-                    # Зритель отключился, удалим его
                     logger.debug(f"⚠️ Ошибка отправки кадра зрителю: {e}")
                     dead.add(viewer)
             
-            # Удаляем мертвые подключения
             if dead:
                 viewers -= dead
                 logger.debug(f"🗑️ [{camera_id}] Удалено {len(dead)} мертвых подключений")
@@ -669,7 +669,7 @@ class VideoService:
                 recording_info = RecordingInfo(
                     is_recording=True,
                     duration_seconds=int((_get_izhevsk_time() - recorder.start_time).total_seconds()),
-                    frames=len(recorder.buffer),
+                    frames=len(recorder.frames),
                     max_duration=recorder.max_duration
                 )
         
@@ -696,7 +696,7 @@ class VideoService:
         
         Если запись уже идет - продляет процесс обновляя last_activity_time.
         Максимальная длительность одной записи - 5 минут (300 секунд).
-        По истечении 30 секунд БЕЗ вызова start_recording - запись сохраняется автоматически.
+        По истечении 10 секунд БЕЗ вызова start_recording - запись сохраняется автоматически.
         """
         if not self._s3_manager:
             logger.warning("⚠️ S3 manager not configured")
@@ -731,7 +731,7 @@ class VideoService:
         # НОВАЯ ЗАПИСЬ - ВКЛЮЧАЕМ КАМЕРУ
         new_recorder = VideoRecorder(
             camera_id=camera_id,
-            buffer=[],
+            frames=[],
             buffer_size_bytes=0,
             start_time=_get_izhevsk_time(),
             is_recording=True,
@@ -777,89 +777,103 @@ class VideoService:
         end_time = _get_izhevsk_time()
         duration = (end_time - recorder.start_time).total_seconds()
         
-        if not recorder.buffer:
+        if not recorder.frames:
             logger.warning(f"⚠️ [{camera_id}] No frames, discarding")
-            # 🔧 ОЧИСТКА ПАМЯТИ ДАЖЕ ПРИ ПУСТОМ БУФЕРЕ
-            recorder.buffer.clear()
+            recorder.frames.clear()
             recorder.buffer_size_bytes = 0
             del self._video_recorders[camera_id]
             gc.collect()
             return None
         
-        logger.info(f"🔄 [{camera_id}] Converting {len(recorder.buffer)} frames ({recorder.buffer_size_bytes/1024/1024:.1f}MB)...")
+        logger.info(f"🔄 [{camera_id}] Converting {len(recorder.frames)} frames ({recorder.buffer_size_bytes/1024/1024:.1f}MB)...")
         temp_dir = tempfile.mkdtemp()
         
         try:
-            # Сохраняем JPEG кадры
-            for i, jpeg_data in enumerate(recorder.buffer):
-                with open(os.path.join(temp_dir, f"frame_{i:06d}.jpg"), "wb") as f:
-                    f.write(jpeg_data)
+            # Создаем concat файл с реальными длительностями кадров
+            concat_file = os.path.join(temp_dir, "concat.txt")
             
-            # Конвертируем в MP4
-            fps = len(recorder.buffer) / duration if duration > 0 else 15.0
-            fps = min(max(fps, 10), 30)
+            with open(concat_file, "w") as f:
+                for i in range(len(recorder.frames)):
+                    frame_time, jpeg_data = recorder.frames[i]
+                    
+                    # Сохраняем JPEG кадр
+                    frame_path = os.path.join(temp_dir, f"frame_{i:06d}.jpg")
+                    with open(frame_path, "wb") as jpg_f:
+                        jpg_f.write(jpeg_data)
+                    
+                    # Определяем длительность кадра
+                    if i < len(recorder.frames) - 1:
+                        next_frame_time = recorder.frames[i + 1][0]
+                        duration_seconds = next_frame_time - frame_time
+                        # Ограничиваем максимальную длительность кадра (например, 1 секунда)
+                        duration_seconds = min(duration_seconds, 1.0)
+                    else:
+                        # Последний кадр: используем среднюю длительность или 0.1 сек
+                        if len(recorder.frames) > 1:
+                            prev_frame_time = recorder.frames[i - 1][0]
+                            duration_seconds = frame_time - prev_frame_time
+                            duration_seconds = min(duration_seconds, 1.0)
+                        else:
+                            duration_seconds = 0.1
+                    
+                    f.write(f"file 'frame_{i:06d}.jpg'\n")
+                    f.write(f"duration {duration_seconds}\n")
+            
+            # Конвертируем через concat demuxer (сохраняет оригинальные тайминги)
             output_path = os.path.join(temp_dir, "output.mp4")
             
             subprocess.run([
-                "ffmpeg", "-framerate", str(fps),
-                "-i", f"{temp_dir}/frame_%06d.jpg",
+                "ffmpeg", "-f", "concat", "-safe", "0",
+                "-i", concat_file,
                 "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                "-preset", "fast", "-crf", "23", "-y", output_path
+                "-preset", "fast", "-crf", "23",
+                "-vsync", "vfr",  # Variable Frame Rate
+                "-y", output_path
             ], check=True, capture_output=True)
             
-            # 🔧 СОХРАНЯЕМ THUMBNAIL (кадр после ~1 сек)
-            thumbnail_frame_idx = int(fps) if fps > 0 else 0  # Примерно 1 сек
-            if thumbnail_frame_idx >= len(recorder.buffer):
-                thumbnail_frame_idx = len(recorder.buffer) // 2  # Середина если не хватает
-            if thumbnail_frame_idx >= len(recorder.buffer):
-                thumbnail_frame_idx = 0  # Первый кадр
+            # Выбираем кадр для thumbnail (кадр через 1 секунду)
+            target_time = recorder.start_time.timestamp() + 1.0
+            thumbnail_frame_idx = 0
+            for i, (frame_time, _) in enumerate(recorder.frames):
+                if frame_time >= target_time:
+                    thumbnail_frame_idx = i
+                    break
             
-            thumbnail_data = recorder.buffer[thumbnail_frame_idx]
+            thumbnail_data = recorder.frames[thumbnail_frame_idx][1]
             
-            # Читаем и сохраняем видео в S3
+            # Сохраняем видео в S3
             with open(output_path, "rb") as f:
-                await self._s3_manager.save_video(
+                video_id = await self._s3_manager.save_video(
                     camera_id, f.read(), recorder.start_time,
                     int(duration),
                     {
                         "end_time": end_time.isoformat(),
-                        "frames": len(recorder.buffer),
-                        "fps": round(fps, 1)
+                        "frames": len(recorder.frames),
+                        "fps_avg": len(recorder.frames) / duration if duration > 0 else 0
                     }
                 )
             
-            # 🔧 ОЧИЩАЕМ БУФЕР СРАЗУ ПОСЛЕ СОХРАНЕНИЯ В S3
-            buffer_size_mb = recorder.buffer_size_bytes / 1024 / 1024
-            recorder.buffer.clear()
-            recorder.buffer_size_bytes = 0
-            logger.debug(f"🧹 [{camera_id}] Buffer cleared after S3 save ({buffer_size_mb:.1f}MB freed)")
-            
-            # Сохраняем thumbnail как отдельный файл
-            # Формат: videos/{camera_id}/{YYYY}/{MM}/{DD}/{timestamp}_thumb.jpg
-            await self._save_thumbnail(camera_id, recorder.start_time, thumbnail_data)
-            
-            logger.info(f"💾 [{camera_id}] Saved {duration:.1f}s, {len(recorder.buffer)} frames + thumbnail")
-            
+            if video_id:
+                # Сохраняем thumbnail
+                await self._s3_manager.save_thumbnail(camera_id, video_id, thumbnail_data)
+                logger.info(f"💾 [{camera_id}] Saved video {video_id}: {duration:.1f}s, {len(recorder.frames)} frames")
+                return video_id
+            else:
+                logger.error(f"❌ [{camera_id}] Failed to save video")
+                return None
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ FFmpeg error: {e.stderr.decode() if e.stderr else 'unknown'}")
+            return None
         except Exception as e:
             logger.error(f"❌ Failed to save: {e}", exc_info=True)
             return None
         finally:
-            # 🔧 ЯВНАЯ ОЧИСТКА ПАМЯТИ
+            # Очистка
             if camera_id in self._video_recorders:
-                recorder = self._video_recorders[camera_id]
-                # Очищаем буфер кадров
-                recorder.buffer.clear()
-                recorder.buffer_size_bytes = 0
-                logger.debug(f"🧹 [{camera_id}] Buffer cleared ({len(recorder.buffer)} frames)")
-            
+                del self._video_recorders[camera_id]
             shutil.rmtree(temp_dir, ignore_errors=True)
-            del self._video_recorders[camera_id]
-            
-            # Принудительный сбор мусора для освобождения памяти
             gc.collect()
-            logger.debug(f"🗑️ [{camera_id}] Memory cleanup completed")
-        
-        return "ok"
     
     async def force_stop_recording(self, camera_id: str) -> Optional[str]:
         """Принудительно остановить запись (даже если она активна)"""
@@ -906,71 +920,13 @@ class VideoService:
         except asyncio.CancelledError:
             logger.debug(f"🔄 [{camera_id}] Recording watcher cancelled")
     
-    async def _save_thumbnail(self, camera_id: str, start_time: datetime, thumbnail_data: bytes):
-        """Сохранить thumbnail (превью кадр) в S3"""
+    async def get_thumbnail(self, camera_id: str, video_id: str) -> Optional[bytes]:
+        """Получить thumbnail из S3 по camera_id и video_id"""
         if not self._s3_manager:
-            logger.warning("⚠️ S3 manager не доступен для thumbnail")
-            return
-        
-        try:
-            # Формат файла: videos/{camera_id}/{YYYY}/{MM}/{DD}/{timestamp}_thumb.jpg
-            # Пример: videos/cam1/2026/03/27/1711533840_thumb.jpg
-            timestamp = int(start_time.timestamp())
-            year = start_time.strftime("%Y")
-            month = start_time.strftime("%m")
-            day = start_time.strftime("%d")
-            
-            # Используем boto3 напрямую (S3Manager должен предоставить client)
-            key = f"videos/{camera_id}/{year}/{month}/{day}/{timestamp}_thumb.jpg"
-            
-            # 🔧 БЕЗ AWAIT - это синхронная операция
-            # Выполняем в executor чтобы не блокировать event loop
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, lambda: self._s3_manager.client.put_object(
-                Bucket=self._s3_manager.bucket_name,
-                Key=key,
-                Body=thumbnail_data,
-                ContentType="image/jpeg",
-                Metadata={
-                    "camera": camera_id,
-                    "type": "thumbnail",
-                    "timestamp": str(timestamp)
-                }
-            ))
-            
-            logger.debug(f"🖼️ [{camera_id}] Thumbnail saved: {key}")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to save thumbnail: {e}")
-    
-    async def get_thumbnail(self, camera_id: str, timestamp: int) -> Optional[bytes]:
-        """Получить thumbnail по camera_id и timestamp видео"""
-        if not self._s3_manager:
+            logger.error("S3 manager not available")
             return None
         
-        try:
-            start_time = datetime.fromtimestamp(timestamp)
-            year = start_time.strftime("%Y")
-            month = start_time.strftime("%m")
-            day = start_time.strftime("%d")
-            
-            key = f"videos/{camera_id}/{year}/{month}/{day}/{timestamp}_thumb.jpg"
-            
-            # 🔧 БЕЗ AWAIT - это синхронная операция
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, lambda: self._s3_manager.client.get_object(
-                Bucket=self._s3_manager.bucket_name,
-                Key=key
-            ))
-            
-            # Читаем Body синхронно
-            thumbnail = response['Body'].read()
-            logger.debug(f"🖼️ Retrieved thumbnail: {key}")
-            return thumbnail
-            
-        except Exception as e:
-            logger.debug(f"⚠️ Thumbnail not found for {camera_id}/{timestamp}: {e}")
-            return None
+        return await self._s3_manager.get_thumbnail(camera_id, video_id)
 
     async def list_videos(
         self,

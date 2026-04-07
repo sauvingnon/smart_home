@@ -1,7 +1,7 @@
 """Схемы для управления камерами и видеозаписью"""
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 from enum import Enum
 
 
@@ -62,7 +62,7 @@ class RecordingMetadata(BaseModel):
 class VideoRecorder(BaseModel):
     """Состояние активной записи видео"""
     camera_id: str
-    buffer: List[bytes] = Field(default_factory=list)
+    frames: list
     buffer_size_bytes: int = 0  # Общий размер буфера в байтах
     start_time: datetime = Field(default_factory=datetime.now)
     is_recording: bool = False

@@ -67,6 +67,10 @@ class ApiClient {
     return response.json();
   }
 
+  getBaseUrl(): string {
+    return API_BASE_URL
+  }
+
   async setCameraResolution(cameraId: string, resolution: 'QVGA' | 'VGA' | 'HD'): Promise<any> {
     console.log('🎯 setCameraResolution called:', { cameraId, resolution, accessKey: this.accessKey });
     
@@ -125,8 +129,8 @@ class ApiClient {
     return this.fetch(`/esp_service/videos/download?key=${encodeURIComponent(key)}`);
   }
 
-  getVideoThumbnailUrl(cameraId: string, timestamp: number): string {
-    return `${API_BASE_URL}/esp_service/videos/thumbnail?camera_id=${encodeURIComponent(cameraId)}&timestamp=${timestamp}`;
+  getVideoThumbnailUrl(cameraId: string, videoId: string): string {
+      return `${API_BASE_URL}/esp_service/videos/thumbnail?camera_id=${encodeURIComponent(cameraId)}&video_id=${encodeURIComponent(videoId)}`;
   }
 
     // 👇 НОВЫЙ МЕТОД: создание WebSocket подключения к камере с ключом в заголовках
@@ -176,7 +180,7 @@ class ApiClient {
           
           ws.onmessage = (event) => {
               if (typeof event.data === 'string') {
-                  console.log(`📨 WS text from ${cameraId}:`, event.data);
+                  // console.log(`📨 WS text from ${cameraId}:`, event.data);
                   options.onMessage?.(event.data);
               } else {
                   // event.data - это ArrayBuffer

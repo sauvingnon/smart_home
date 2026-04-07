@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Bluetooth, Gauge, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, RefreshCw, Wind, Zap
+  Sunrise, Sunset, Moon, Wind, Zap
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'

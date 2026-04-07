@@ -839,3 +839,62 @@
 .stat-card .stat-icon.duration svg {
   color: #3b82f6;
 }
+
+.day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 1rem 1.25rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.25rem;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 1.25rem;
+  transition: all 0.2s ease;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.day-header:hover {
+  background: rgba(14, 165, 233, 0.1);
+  border-color: var(--accent-sky);
+  transform: translateX(4px);
+}
+
+.day-header-title {
+  background: linear-gradient(135deg, var(--accent-sky), var(--accent-amber));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.toggle-icon {
+  font-size: 1rem;
+  opacity: 0.8;
+  transition: transform 0.2s;
+  color: var(--accent-sky);
+}
+
+.day-header:hover .toggle-icon {
+  transform: scale(1.1);
+}
+
+/* Увеличим шрифт в карточках */
+.video-card-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.video-card-subtitle {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.video-duration {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}

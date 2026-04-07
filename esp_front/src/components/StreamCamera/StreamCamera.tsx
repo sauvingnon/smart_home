@@ -2,19 +2,22 @@ import React, { useRef, useEffect } from 'react';
 import { useCamera } from '../../hooks/useCamera';
 import type { Resolution } from '../../api/camera';
 import './StreamCamera.css';
+import { WifiOff } from 'lucide-react';
 
 interface CameraStreamProps {
   cameraId?: string;
   className?: string;
   showControls?: boolean;
   hideInfo?: boolean;
+  disabled?: boolean;
 }
 
 export const CameraStream: React.FC<CameraStreamProps> = ({
   cameraId = 'cam1',
   className = '',
   showControls = true,
-  hideInfo = false
+  hideInfo = false,
+  disabled = false
 }) => {
   const {
     frameBlob,
@@ -42,6 +45,20 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     { value: 'HD', label: 'Качественно' }
   ];
 
+  if (disabled) {
+    return (
+      <div className={`camera-container ${className}`}>
+        <div className="camera-viewport">
+          <div className="camera-state disabled">
+            <WifiOff size={48} strokeWidth={1.5} />
+            <span>Камера отключена</span>
+            <span className="disabled-hint">Проверьте подключение камеры</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`camera-container ${className}`}>
       {/* Видео */}
@@ -50,7 +67,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           <img
             ref={imgRef}
             className="camera-image"
-            alt="Camera stream"
+            alt="Поток с камеры"
           />
         )}
         

@@ -11,61 +11,74 @@ import { VideosPage } from './pages/VideoPage/VideoPage';
 import { ThemeProvider } from './context/ThemeContext';
 
 function App() {
-  const { accessKey, isLoading, clearAccessKey } = useAuth();
+  const { accessKey, isLoading: authLoading, clearAccessKey } = useAuth();
   const [appReady, setAppReady] = useState(false);
-  const [shouldShowLogin, setShouldShowLogin] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [minTimePassed, setMinTimePassed] = useState(false);
+  const [isValidating, setIsValidating] = useState(true);
 
-  // 👇 Засекаем минимальное время показа лаунча (1 секунда)
+  // Минимальное время показа LaunchScreen (1 секунда)
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setMinTimePassed(true);
-    }, 1000);
-
+    const timer = setTimeout(() => setMinTimePassed(true), 1000);
     return () => clearTimeout(timer);
   }, []);
 
+  // Валидация ключа: true – можно пускать, false – ключ неверный
+  const validateKey = async (key: string): Promise<boolean> => {
+    try {
+      apiClient.setAccessKey(key);
+      await apiClient.fetch('/esp_service/telemetry');
+      return true; // ключ валиден
+    } catch (error) {
+      if (error instanceof AuthError) {
+        // 401 – неверный ключ
+        clearAccessKey();
+        setAuthError('Неверный ключ доступа');
+        return false;
+      }
+      // Ошибка сети, сервер недоступен – не сбрасываем ключ, пропускаем в приложение
+      console.warn('Network error during key validation, assuming key is valid', error);
+      return true;
+    }
+  };
+
+  // Проверка ключа при загрузке или его изменении
   useEffect(() => {
-    const initializeApp = async () => {
-      // Ждем пока AuthContext загрузит ключ из localStorage
-      if (isLoading) return;
+    const validate = async () => {
+      if (authLoading) return;
+      setIsValidating(true);
 
-      // Если есть ключ - валидируем
       if (accessKey) {
-        apiClient.setAccessKey(accessKey);
-
-        try {
-          await apiClient.fetch('/esp_service/telemetry');
-          // Валидация успешна - покажем HomePage
-          setShouldShowLogin(false);
-        } catch (error) {
-          if (error instanceof AuthError) {
-            clearAccessKey();
-            setAuthError('Неверный ключ доступа');
-            setShouldShowLogin(true);
-          }
+        const isValid = await validateKey(accessKey);
+        setIsAuthenticated(isValid);
+        if (!isValid && !authError) {
+          setAuthError('Сессия истекла. Введите ключ заново.');
+        } else if (isValid) {
+          setAuthError(null);
         }
       } else {
-        // Нет ключа - покажем Login
-        setShouldShowLogin(true);
+        setIsAuthenticated(false);
       }
 
-      // Говорим что всё готово к показу
+      setIsValidating(false);
       setAppReady(true);
     };
 
-    initializeApp();
-  }, [accessKey, isLoading, clearAccessKey]);
+    validate();
+  }, [accessKey, authLoading]);
 
-  // Показываем LaunchScreen пока не прошло минимальное время или не готова инициализация
-  if (!minTimePassed || !appReady) {
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+    setAuthError(null);
+  };
+
+  if (!minTimePassed || !appReady || authLoading || isValidating) {
     return <LaunchScreen />;
   }
 
-  // Показываем Login если нет валидного ключа
-  if (shouldShowLogin) {
-    return <Login error={authError} />;
+  if (!isAuthenticated) {
+    return <Login error={authError} onLoginSuccess={handleLoginSuccess} />;
   }
 
   return (

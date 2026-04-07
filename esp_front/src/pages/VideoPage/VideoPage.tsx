@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { motion } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
-  ChevronLeft,
   Video,
   Clock,
   FileVideo,
@@ -14,17 +12,18 @@ import {
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
-import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
+import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar'
 
 interface VideoItem {
   key: string
+  video_id?: string
   size_bytes: number
   last_modified: string
   camera_id: string
   duration_seconds?: number
   start_time?: string
   thumbnail_url?: string
-  url?: string // URL для воспроизведения
+  url?: string
 }
 
 const containerVar = {
@@ -43,15 +42,26 @@ export const VideosPage = () => {
   const [loading, setLoading] = useState(true)
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
+
+  const toggleDay = (dayKey: string) => {
+    setExpandedDays(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(dayKey)) {
+        newSet.delete(dayKey)
+      } else {
+        newSet.add(dayKey)
+      }
+      return newSet
+    })
+  }
 
   useEffect(() => {
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
-        // Вышли из полноэкранного режима
         closeModal()
       }
     }
-
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
@@ -65,15 +75,20 @@ export const VideosPage = () => {
       console.log('Loading videos...')
       setLoading(true)
       const accessKey = apiClient.getAccessKey()
-      console.log('Access key:', accessKey ? 'present' : 'missing')
       if (!accessKey) {
         console.log('No access key, skipping video load')
         setLoading(false)
         return
       }
       const data = await apiClient.getVideos()
+      const videosWithFullUrl = data.map((video: any) => ({
+        ...video,
+        thumbnail_url: video.thumbnail_url
+          ? `${apiClient.getBaseUrl()}${video.thumbnail_url}`
+          : null
+      }))
       console.log('Videos loaded:', data.length)
-      setVideos(data)
+      setVideos(videosWithFullUrl)
     } catch (error) {
       console.error('Failed to load videos:', error)
     } finally {
@@ -86,7 +101,6 @@ export const VideosPage = () => {
     const hours = Math.floor(seconds / 3600)
     const mins = Math.floor((seconds % 3600) / 60)
     const secs = seconds % 60
-    
     if (hours > 0) {
       return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
     }
@@ -131,19 +145,16 @@ export const VideosPage = () => {
     return `${mb.toFixed(1)} MB`
   }
 
-  // Общая длительность всех видео
   const getTotalDuration = () => {
     const totalSeconds = videos.reduce((sum, video) => sum + (video.duration_seconds || 0), 0)
     const hours = Math.floor(totalSeconds / 3600)
     const minutes = Math.floor((totalSeconds % 3600) / 60)
-    
     if (hours > 0) {
       return `${hours} ч ${minutes} мин`
     }
     return totalSeconds > 0 ? `${minutes} мин` : '0 мин'
   }
 
-  // Общий размер всех видео
   const getTotalSize = () => {
     const totalBytes = videos.reduce((sum, video) => sum + video.size_bytes, 0)
     return formatSize(totalBytes)
@@ -164,7 +175,6 @@ export const VideosPage = () => {
       if (!response.ok) {
         throw new Error(`Download failed: ${response.status}`)
       }
-
       const blob = await response.blob()
       const downloadUrl = URL.createObjectURL(blob)
       const safeFileName = `${video.camera_id}_${new Date(video.last_modified).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.mp4`
@@ -174,7 +184,7 @@ export const VideosPage = () => {
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      URL.revokeObjectURL(downloadUrl) 
+      URL.revokeObjectURL(downloadUrl)
     } catch (error) {
       console.error('Failed to download video:', error)
     }
@@ -190,20 +200,19 @@ export const VideosPage = () => {
     setSelectedVideo(null)
   }
 
+  // Группировка видео по дням (по дате из start_time или last_modified)
   const groupedVideos = videos.reduce<Record<string, VideoItem[]>>((groups, video) => {
-    const dateKey = getVideoSortDate(video).slice(0, 10)
-    if (!groups[dateKey]) {
-      groups[dateKey] = []
-    }
+    const dateKey = getVideoSortDate(video).slice(0, 10) // YYYY-MM-DD
+    if (!groups[dateKey]) groups[dateKey] = []
     groups[dateKey].push(video)
     return groups
   }, {})
 
-  const sortedDayKeys = Object.keys(groupedVideos).sort((a, b) => a.localeCompare(b))
+  // Сортировка дней: от новых к старым
+  const sortedDayKeys = Object.keys(groupedVideos).sort((a, b) => b.localeCompare(a))
 
   return (
     <div className={`videos-page ${theme}`}>
-      {/* Фоновые пятна */}
       <div className="background-spot">
         <div className="spot-1"></div>
         <div className="spot-2"></div>
@@ -211,38 +220,29 @@ export const VideosPage = () => {
       </div>
 
       <div className="videos-page-container">
-        {/* Хедер */}
         <motion.div
           className="videos-header glass-card"
           variants={itemVar}
           initial="hidden"
           animate="visible"
         >
-
           <div className="videos-title">
             <Video size={24} className="title-icon" />
             <h1>Видеозаписи</h1>
           </div>
-
           <div className="header-actions">
-            <button
-              className="header-action-btn"
-              onClick={loadVideos}
-              title="Обновить"
-            >
+            <button className="header-action-btn" onClick={loadVideos} title="Обновить">
               <RefreshCw size={20} />
             </button>
           </div>
         </motion.div>
 
-        {/* Основной контент */}
         <motion.div
           className="videos-main"
           variants={containerVar}
           initial="hidden"
           animate="visible"
         >
-          {/* Список видео */}
           <motion.div variants={itemVar} className="videos-section glass-card">
             <div className="section-header">
               <Video size={20} className="section-icon" />
@@ -265,65 +265,89 @@ export const VideosPage = () => {
             ) : (
               <div className="videos-list">
                 {sortedDayKeys.map((dayKey) => {
-                  const dayVideos = groupedVideos[dayKey].slice().sort((a, b) =>
-                    getVideoSortDate(a).localeCompare(getVideoSortDate(b))
+                  // Сортировка видео внутри дня: от новых к старым
+                  const dayVideos = [...groupedVideos[dayKey]].sort((a, b) =>
+                    getVideoSortDate(b).localeCompare(getVideoSortDate(a))
                   )
+                  const isExpanded = expandedDays.has(dayKey)
+
                   return (
                     <div className="day-block" key={dayKey}>
-                      <div className="day-header">{formatDayHeader(dayKey)}</div>
-                      <div className="videos-grid">
-                        {dayVideos.map((video, index) => (
-                          <motion.div
-                            key={video.key}
-                            className="video-card"
-                            variants={itemVar}
-                            initial="hidden"
-                            animate="visible"
-                            transition={{ delay: index * 0.03 }}
-                            onClick={() => handleVideoClick(video)}
-                            whileHover={{ y: -2 }}
-                            whileTap={{ scale: 0.98 }}
-                          >
-                            <div className="video-preview">
-                              {video.thumbnail_url ? (
-                                <img
-                                  src={video.thumbnail_url}
-                                  alt="Превью видео"
-                                  className="thumbnail-image"
-                                />
-                              ) : (
-                                <div className="thumbnail-placeholder">
-                                  <FileVideo size={32} />
-                                </div>
-                              )}
-                              <div className="play-overlay">
-                                <Play size={24} className="play-icon" />
-                              </div>
-                              <div className="video-duration">
-                                {formatDuration(video.duration_seconds)}
-                              </div>
-                            </div>
+                      <button
+                        className="day-header"
+                        onClick={() => toggleDay(dayKey)}
+                        aria-expanded={isExpanded}
+                      >
+                        <span>{formatDayHeader(dayKey)}</span>
+                        <span className="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
+                      </button>
 
-                            <div className="video-card-content">
-                              <div className="video-card-title">
-                                {formatTime(video.start_time || video.last_modified)}
-                              </div>
-                              <div className="video-card-footer">
-                                <div className="video-card-subtitle">
-                                  {formatDate(video.last_modified)}
-                                </div>
-                                <button
-                                  className="download-btn small"
-                                  onClick={(e) => handleDownload(video, e)}
-                                  title="Скачать"
+                      <AnimatePresence initial={false}>
+                        {isExpanded && (
+                          <motion.div
+                            key="grid"
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            style={{ overflow: 'hidden' }}
+                          >
+                            <div className="videos-grid">
+                              {dayVideos.map((video, index) => (
+                                <motion.div
+                                  key={video.key}
+                                  className="video-card"
+                                  variants={itemVar}
+                                  initial="hidden"
+                                  animate="visible"
+                                  transition={{ delay: index * 0.03 }}
+                                  onClick={() => handleVideoClick(video)}
+                                  whileHover={{ y: -2 }}
+                                  whileTap={{ scale: 0.98 }}
                                 >
-                                  <Download size={18} />
-                                </button>
-                              </div>
+                                  <div className="video-preview">
+                                    {video.thumbnail_url ? (
+                                      <img
+                                        src={video.thumbnail_url}
+                                        alt="Превью видео"
+                                        className="thumbnail-image"
+                                      />
+                                    ) : (
+                                      <div className="thumbnail-placeholder">
+                                        <FileVideo size={32} />
+                                      </div>
+                                    )}
+                                    <div className="play-overlay">
+                                      <Play size={24} className="play-icon" />
+                                    </div>
+                                    <div className="video-duration">
+                                      {formatDuration(video.duration_seconds)}
+                                    </div>
+                                  </div>
+
+                                  <div className="video-card-content">
+                                    <div className="video-card-title">
+                                      {formatTime(video.start_time || video.last_modified)}
+                                    </div>
+                                    <div className="video-card-footer">
+                                      <div className="video-card-subtitle">
+                                        {formatDate(video.last_modified)}
+                                      </div>
+                                      <button
+                                        className="download-btn small"
+                                        onClick={(e) => handleDownload(video, e)}
+                                        title="Скачать"
+                                      >
+                                        <Download size={18} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              ))}
                             </div>
                           </motion.div>
-                        ))}
-                      </div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )
                 })}
@@ -343,7 +367,6 @@ export const VideosPage = () => {
                   <span className="stat-value">{videos.length}</span>
                 </div>
               </div>
-
               <div className="stat-card glass-card">
                 <div className="stat-icon duration">
                   <Clock size={24} />
@@ -353,7 +376,6 @@ export const VideosPage = () => {
                   <span className="stat-value">{getTotalDuration()}</span>
                 </div>
               </div>
-
               <div className="stat-card glass-card">
                 <div className="stat-icon size">
                   <HardDrive size={24} />
@@ -384,10 +406,11 @@ export const VideosPage = () => {
               onLoadedData={() => console.log('Video loaded data')}
               onError={(e) => console.error('Video error:', e)}
               onCanPlay={() => {
-                console.log('Video can play');
-                // Автоматически переходим в полноэкранный режим при готовности видео
+                console.log('Video can play')
                 if (videoRef.current) {
-                  videoRef.current.requestFullscreen().catch(err => console.error('Failed to enter fullscreen:', err));
+                  videoRef.current.requestFullscreen().catch(err =>
+                    console.error('Failed to enter fullscreen:', err)
+                  )
                 }
               }}
             >
@@ -401,7 +424,6 @@ export const VideosPage = () => {
           )}
         </div>
       )}
-
     </div>
   )
 }
