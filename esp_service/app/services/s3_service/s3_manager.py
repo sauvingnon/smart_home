@@ -428,19 +428,3 @@ class S3Manager:
         except Exception as e:
             logger.exception(f"❌ Ошибка удаления: {e}")
             return False
-    
-    async def get_video_presigned_url(self, key: str, expires_in: int = 3600) -> Optional[str]:
-        """Генерирует подписанную ссылку"""
-        if not await self._ensure_connection():
-            return None
-        
-        try:
-            url = await self._client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': self.bucket_name, 'Key': key},
-                ExpiresIn=expires_in
-            )
-            return url
-        except Exception as e:
-            logger.exception(f"❌ Ошибка генерации ссылки: {e}")
-            return None

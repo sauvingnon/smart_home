@@ -122,7 +122,7 @@ class ApiClient {
   }
 
   getVideoStreamUrl(key: string): string {
-    return `${API_BASE_URL}/esp_service/videos/stream?key=${encodeURIComponent(key)}`;
+      return `${API_BASE_URL}/esp_service/videos/stream?key=${encodeURIComponent(key)}`;
   }
 
   async getVideoDownloadUrl(key: string): Promise<{ url: string; key: string }> {

@@ -161,9 +161,9 @@ export const VideosPage = () => {
   }
 
   const handleVideoClick = (video: VideoItem) => {
-    const url = apiClient.getVideoStreamUrl(video.key)
-    console.log('Video URL:', url)
-    setSelectedVideo({ ...video, url })
+      const url = apiClient.getVideoStreamUrl(video.key);
+      console.log('Video URL:', url);
+      setSelectedVideo({ ...video, url });
   }
 
   const handleDownload = async (video: VideoItem, e: React.MouseEvent) => {

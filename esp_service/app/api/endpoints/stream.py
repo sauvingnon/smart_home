@@ -2,11 +2,12 @@
 import io
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Response, WebSocket, Depends
+from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, Depends
 from fastapi.responses import StreamingResponse
 from app.core.worker import BackgroundWorker
 from app.api.endpoints.auth import get_current_user_id
 from pydantic import BaseModel
+from logger import logger
 
 router = APIRouter(prefix="/esp_service", tags=["esp_service"])
 
@@ -62,18 +63,69 @@ async def list_videos(
 
 
 @router.get("/videos/stream")
-async def stream_video(key: str = Query(...)):
+async def stream_video(
+    request: Request,
+    key: str = Query(...)
+):
+    """Потоковая передача видео с поддержкой Range (перемотки)"""
     worker = BackgroundWorker.get_instance()
-    video_data = await worker.video_service.get_video(key)
+    s3 = worker.video_service._s3_manager
     
-    if not video_data:
-        raise HTTPException(status_code=404)
-    
-    return StreamingResponse(
-        io.BytesIO(video_data),
-        media_type="video/mp4",
-        headers={"Content-Disposition": "inline"},
-    )
+    try:
+        # Получаем размер файла
+        head = await s3._client.head_object(
+            Bucket=s3.bucket_name,
+            Key=key
+        )
+        file_size = head['ContentLength']
+        range_header = request.headers.get('range')
+        
+        if range_header:
+            # Парсим range заголовок
+            range_match = range_header.replace('bytes=', '').split('-')
+            start = int(range_match[0])
+            end = int(range_match[1]) if range_match[1] else file_size - 1
+            
+            # Загружаем только нужный кусок из S3
+            response = await s3._client.get_object(
+                Bucket=s3.bucket_name,
+                Key=key,
+                Range=f'bytes={start}-{end}'
+            )
+            data = await response['Body'].read()
+            
+            return Response(
+                content=data,
+                status_code=206,
+                media_type='video/mp4',
+                headers={
+                    'Content-Range': f'bytes {start}-{end}/{file_size}',
+                    'Accept-Ranges': 'bytes',
+                    'Content-Length': str(end - start + 1),
+                    'Cache-Control': 'no-cache'
+                }
+            )
+        else:
+            # Первый запрос - отдаём весь файл (или можно только первый кусок)
+            response = await s3._client.get_object(
+                Bucket=s3.bucket_name,
+                Key=key
+            )
+            data = await response['Body'].read()
+            
+            return Response(
+                content=data,
+                media_type='video/mp4',
+                headers={
+                    'Accept-Ranges': 'bytes',
+                    'Content-Length': str(file_size),
+                    'Cache-Control': 'no-cache'
+                }
+            )
+            
+    except Exception as e:
+        logger.error(f"Stream error: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Video not found")
 
 @router.get("/videos/download")
 async def download_video(
