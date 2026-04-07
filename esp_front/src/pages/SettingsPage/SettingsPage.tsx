@@ -9,6 +9,7 @@ import {
 import { apiClient } from '../../api/client'
 import './SettingsPage.css'
 import { useTheme } from '../../context/ThemeContext'
+import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 type Settings = {
   displayMode: number
@@ -233,17 +234,12 @@ const itemVar = {
 }
 
 export default function SettingsPage() {
-  const navigate = useNavigate()
   const { theme } = useTheme()
   const [settings, setSettings] = useState<Settings>(defaultSettings)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('schedule')
   const [showSuccess, setShowSuccess] = useState(false)
-
-  const handleClose = () => {
-    navigate('/')
-  }
 
   useEffect(() => {
     let mounted = true
@@ -289,24 +285,6 @@ export default function SettingsPage() {
     { id: 'fan', label: 'Вентилятор', icon: Fan },
   ]
 
-  if (loading) {
-    return (
-      <div className="settings-page">
-        <div className="background-spot">
-          <div className="spot-1"></div>
-          <div className="spot-2"></div>
-          <div className="spot-3"></div>
-        </div>
-        <div className="loading-container">
-          <div className="loading-card glass-card">
-            <div className="spinner" />
-            <p className="loading-text">Загрузка настроек...</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className={`settings-page ${theme}`}>
       
@@ -325,9 +303,6 @@ export default function SettingsPage() {
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
         >
-          <button onClick={handleClose} className="back-button">
-            <ChevronLeft size={24} />
-          </button>
           
           <h1 className="settings-title">
             Настройки
@@ -345,7 +320,15 @@ export default function SettingsPage() {
           </motion.button>
         </motion.div>
 
-
+        {loading ? (
+          <div className="loading-container">
+            <div className="loading-card glass-card">
+              <div className="spinner" />
+              <p className="loading-text">Загрузка настроек...</p>
+            </div>
+          </div>
+        ) : (
+          <>
         {/* Уведомление об успехе */}
         <AnimatePresence>
           {showSuccess && (
@@ -769,9 +752,12 @@ export default function SettingsPage() {
             )}
 
           </motion.div>
+          </>
+        )}
         </div>
-
+        <BottomNavBar />
       </div>
-    // </div>
+
   )
+
 }

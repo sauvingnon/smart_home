@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  ChevronLeft,
   Camera as CameraIcon,
   Wifi,
   WifiOff,
@@ -19,6 +18,7 @@ import { apiClient } from '../../api/client'
 import type { Resolution } from '../../api/camera';
 import './CameraPage.css'
 import { useTheme } from '../../context/ThemeContext'
+import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 const containerVar = {
   hidden: { opacity: 0 },
@@ -31,7 +31,6 @@ const itemVar = {
 }
 
 export const CameraPage: React.FC = () => {
-  const navigate = useNavigate()
   const { theme } = useTheme()
   const { cameraId } = useParams<{ cameraId: string }>()
   const [fullscreen, setFullscreen] = useState(false)
@@ -41,10 +40,6 @@ export const CameraPage: React.FC = () => {
   const [isChangingResolution, setIsChangingResolution] = useState(false)
   // 👇 Добавляем локальный стейт для разрешения
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('VGA')
-
-  const handleClose = () => {
-    navigate('/')
-  }
 
   const videoContainerRef = useRef<HTMLDivElement>(null)
 
@@ -156,24 +151,6 @@ export const CameraPage: React.FC = () => {
     }
   }
 
-  if (loading) {
-    return (
-      <div className={`camera-page ${theme}`}>
-        <div className="background-spot">
-          <div className="spot-1"></div>
-          <div className="spot-2"></div>
-          <div className="spot-3"></div>
-        </div>
-        <div className="loading-container">
-          <div className="loading-card glass-card">
-            <div className="spinner" />
-            <p className="loading-text">Загрузка камеры...</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className={`camera-page ${theme}`}>
       {/* Фоновые пятна */}
@@ -190,9 +167,6 @@ export const CameraPage: React.FC = () => {
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
         >
-          <button onClick={handleClose} className="back-button">
-            <ChevronLeft size={24} />
-          </button>
           
           <div className="camera-title">
             <CameraIcon size={24} className="title-icon" />
@@ -217,6 +191,15 @@ export const CameraPage: React.FC = () => {
           </div>
         </motion.div>
 
+        {loading ? (
+          <div className="loading-container">
+          <div className="loading-card glass-card">
+            <div className="spinner" />
+            <p className="loading-text">Загрузка камеры...</p>
+          </div>
+        </div>
+        ) : (
+        <>
         {/* Основной контент */}
         <motion.div 
           className="camera-main"
@@ -369,7 +352,10 @@ export const CameraPage: React.FC = () => {
             </div>
           </motion.div>
         </motion.div>
+        </>
+        )}
       </div>
+      <BottomNavBar />
     </div>
   )
 }

@@ -119,6 +119,7 @@
   max-width: 64rem;
   margin: 0 auto;
   padding: 2rem 1.5rem;
+  padding-bottom: 80px;
 }
 
 /* Glass-карточка */
@@ -212,6 +213,7 @@
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  padding-bottom: 80px;
 }
 
 /* Видеопоток */
@@ -544,6 +546,7 @@
 @media (max-width: 640px) {
   .camera-page-container {
     padding: 1rem;
+    padding-bottom: 80px ;
   }
 
   .camera-header {

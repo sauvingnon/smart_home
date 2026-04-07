@@ -690,7 +690,8 @@ body {
 /* Алерт */
 .alert-message {
   position: fixed;
-  bottom: 6rem;
+  bottom: 80px; /* ← важно! Отступ от низа */
+  z-index: 200;
   left: 1.5rem;
   right: 1.5rem;
   background: rgba(239, 68, 68, 0.9);
@@ -703,8 +704,10 @@ body {
   align-items: center;
   gap: 0.75rem;
   box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);
-  z-index: 40;
   border: 1px solid rgba(248, 113, 113, 0.5);
+
+  backdrop-filter: blur(10px);
+  background: rgba(0,0,0,0.8);
 }
 
 .alert-icon {
@@ -871,4 +874,32 @@ body {
     height: 3rem;
     font-size: 0.8rem;
   }
+}
+/* 
+/* На светлой теме */
+.home-container.light .alert-message {
+  background: rgba(255, 255, 255, 0.95);
+  color: #1e293b;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.alert-icon {
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+.alert-content {
+  flex: 1;
+}
+
+.alert-title {
+  font-weight: 700;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.alert-text {
+  font-size: 0.75rem;
+  opacity: 0.9;
+  margin: 0;
 }

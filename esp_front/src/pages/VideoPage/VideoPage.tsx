@@ -14,6 +14,7 @@ import {
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
+import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 interface VideoItem {
   key: string
@@ -37,16 +38,11 @@ const itemVar = {
 }
 
 export const VideosPage = () => {
-  const navigate = useNavigate()
   const { theme } = useTheme()
   const [videos, setVideos] = useState<VideoItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-
-  const handleClose = () => {
-    navigate('/')
-  }
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -222,9 +218,6 @@ export const VideosPage = () => {
           initial="hidden"
           animate="visible"
         >
-          <button className="back-button" onClick={handleClose}>
-            <ChevronLeft size={24} />
-          </button>
 
           <div className="videos-title">
             <Video size={24} className="title-icon" />
@@ -375,6 +368,8 @@ export const VideosPage = () => {
         </motion.div>
       </div>
 
+      <BottomNavBar />
+
       {/* Модальное окно для просмотра видео */}
       {selectedVideo && (
         <div className="video-modal-simple">
@@ -406,6 +401,7 @@ export const VideosPage = () => {
           )}
         </div>
       )}
+
     </div>
   )
 }

@@ -1,0 +1,159 @@
+/* iOS Liquid Glass Bottom Navigation */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 10px 16px 28px;
+  z-index: 100;
+  
+  /* Liquid Glass эффект */
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  
+  /* Тень как у iOS */
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+
+}
+
+/* Светлая тема - iOS Light */
+.bottom-nav.light {
+  background: rgba(255, 255, 255, 0.72);
+  border-top: 0.5px solid rgba(60, 60, 67, 0.08);
+}
+
+/* Тёмная тема - iOS Dark */
+.bottom-nav.dark {
+  background: rgba(28, 28, 30, 0.72);
+  border-top: 0.5px solid rgba(84, 84, 88, 0.2);
+}
+
+/* Nav Item */
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 8px 12px;
+  border-radius: 24px;
+  position: relative;
+}
+
+/* Иконки */
+.nav-icon {
+  font-size: 22px;
+  transition: transform 0.2s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+/* Активная иконка - увеличение */
+.nav-item.active .nav-icon {
+  transform: translateY(-2px) scale(1.05);
+}
+
+/* Лейблы */
+.nav-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  transition: all 0.2s ease;
+}
+
+/* Светлая тема - цвета */
+.bottom-nav.light .nav-item {
+  color: #8e8e93;
+}
+
+.bottom-nav.light .nav-item.active {
+  color: #007aff;
+}
+
+.bottom-nav.light .nav-label {
+  color: #8e8e93;
+}
+
+.bottom-nav.light .nav-item.active .nav-label {
+  color: #007aff;
+  font-weight: 600;
+}
+
+/* Тёмная тема - цвета */
+.bottom-nav.dark .nav-item {
+  color: #8e8e93;
+}
+
+.bottom-nav.dark .nav-item.active {
+  color: #0a84ff;
+}
+
+.bottom-nav.dark .nav-label {
+  color: #8e8e93;
+}
+
+.bottom-nav.dark .nav-item.active .nav-label {
+  color: #0a84ff;
+  font-weight: 600;
+}
+
+/* Hover эффект (для десктопа) */
+@media (hover: hover) {
+  .nav-item:hover:not(.active) {
+    transform: translateY(-2px);
+  }
+  
+  .nav-item:hover:not(.active) .nav-icon {
+    transform: scale(1.05);
+  }
+}
+
+/* Адаптивность для разных устройств */
+@media (max-width: 480px) {
+  .bottom-nav {
+    padding: 8px 12px 24px;
+  }
+  
+  .nav-icon {
+    font-size: 20px;
+  }
+  
+  .nav-label {
+    font-size: 9px;
+  }
+  
+  .nav-item {
+    padding: 6px 8px;
+  }
+}
+
+/* Для iPhone с notch (дополнительный отступ) */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .bottom-nav {
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Эффект "прилипания" при скролле */
+.bottom-nav {
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Гласс-эффект на активном элементе */
+.bottom-nav.light .nav-item.active {
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.bottom-nav.dark .nav-item.active {
+  background: rgba(10, 132, 255, 0.12);
+}
+
+/* Плавный переход при смене темы */
+.bottom-nav {
+  transition: background 0.3s ease, border-color 0.3s ease;
+}

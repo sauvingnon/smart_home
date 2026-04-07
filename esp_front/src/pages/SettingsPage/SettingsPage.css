@@ -116,7 +116,7 @@
   z-index: 10;
   max-width: 56rem;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
+  padding: 2rem 1.5rem 80px 1.5rem;
 }
 
 /* Glass-карточка (общий стиль) */
@@ -707,7 +707,7 @@
 /* Адаптивность */
 @media (max-width: 640px) {
   .settings-container {
-    padding: 1rem;
+    padding: 1rem 1rem 80px 1rem;
   }
 
   .settings-header {
@@ -1415,11 +1415,6 @@
   hyphens: auto;
 }
 
-/* Для контейнеров с настройками */
-.settings-container {
-  padding: 1rem 0.75rem; /* чуть меньше отступы */
-}
-
 /* Защита для карточек */
 .section {
   padding: 1rem;
@@ -1471,7 +1466,7 @@
 /* Медиа-запрос специально для очень маленьких экранов */
 @media (max-width: 375px) {
   .settings-container {
-    padding: 0.5rem;
+    padding: 1rem 1rem 80px 1rem;
   }
   
   .section {

@@ -49,6 +49,7 @@
   position: relative;
   overflow-x: hidden;
   font-family: system-ui, -apple-system, sans-serif;
+  padding-bottom: 80px;
 }
 
 /* Фоновые пятна */
@@ -108,7 +109,7 @@
   z-index: 10;
   max-width: 1400px;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
+  padding: 2rem 1.5rem 80px 1.5rem;
 }
 
 /* Glass-карточка */
@@ -588,7 +589,7 @@
 /* Адаптивность */
 @media (max-width: 768px) {
   .videos-page-container {
-    padding: 1rem;
+    padding: 1rem 1rem 80px 1rem;
   }
 
   .videos-grid {

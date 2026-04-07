@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
 import {
-  Thermometer, Droplets, Bluetooth, Gauge, Camera, AlertCircle,
-  Sun, Cloud, CloudRain, CloudSnow, Video,
-  Sunrise, Sunset, Moon, Settings2, RefreshCw, Wind, Zap
+  Thermometer, Droplets, Bluetooth, Gauge, AlertCircle,
+  Sun, Cloud, CloudRain, CloudSnow,
+  Sunrise, Sunset, Moon, RefreshCw, Wind, Zap
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import AIReport from '../../components/AIReport/AIReport'
 import { useTheme } from '../../context/ThemeContext'
+import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 // --- Типы и Хелперы (без изменений) ---
 type WeatherData = {
@@ -53,7 +53,6 @@ const itemVar = {
 }
 
 export default function HomePage() {
-  const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
   const [data, setData] = useState<Telemetry | null>(null)
   const [weather, setWeather] = useState<WeatherData | null>(null)
@@ -75,18 +74,6 @@ export default function HomePage() {
     fetchData();
     fetchWeather();
   }, [])
-
-  const handleCameraClick = () => {
-    navigate('/camera/cam1')
-  }
-
-  const handleVideosClick = () => {
-    navigate('/videos')
-  }
-
-  const handleSettingsClick = () => {
-    navigate('/settings')
-  }
 
   return (
     <div className={`home-container ${theme}`}>
@@ -116,27 +103,6 @@ export default function HomePage() {
           
           <div className="header-actions">
 
-             {/* Кнопка камеры */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handleCameraClick}
-              className="settings-button"
-              title="Камера"
-            >
-              <Camera size={20} />
-            </motion.button>
-
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handleVideosClick}
-              className="settings-button"
-              title="Видеозаписи"
-            >
-              <Video size={20} />
-            </motion.button>
-
             {/* Кнопка переключения темы */}
             <motion.button
               whileHover={{ scale: 1.1, rotate: theme === 'light' ? 180 : -180 }}
@@ -148,15 +114,6 @@ export default function HomePage() {
               {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
             </motion.button>
 
-            {/* Кнопка настроек */}
-            <motion.button
-              whileHover={{ rotate: 90 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={handleSettingsClick}
-              className="settings-button"
-            >
-              <Settings2 size={20} />
-            </motion.button>
           </div>
         </header>
 
@@ -304,21 +261,6 @@ export default function HomePage() {
         </motion.div>
       </div>
 
-      {/* Floating Bottom Bar */}
-      <div className="bottom-bar">
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={fetchData}
-          disabled={loading}
-          className="update-button"
-        >
-          <div className="button-shine" />
-          <RefreshCw size={18} className={`button-icon ${loading ? 'spin' : ''}`} />
-          {loading ? 'СИНХРОНИЗАЦИЯ...' : 'ОБНОВИТЬ ДАННЫЕ'}
-        </motion.button>
-      </div>
-
       {/* Alert Overlay */}
       <AnimatePresence>
         {isStale && !loading && (
@@ -327,6 +269,7 @@ export default function HomePage() {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 50, opacity: 0 }}
             className="alert-message"
+            style={{ bottom: '100px' }}
           >
             <AlertCircle size={24} className="alert-icon" />
             <div className="alert-content">
@@ -336,7 +279,7 @@ export default function HomePage() {
           </motion.div>
         )}
       </AnimatePresence>
-
+      <BottomNavBar />
     </div>
   )
 }
