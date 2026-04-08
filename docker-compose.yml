@@ -2,9 +2,6 @@ services:
   redis:
     image: redis:alpine
     container_name: esp_redis
-    # он нужен только в контейнерной сети. наружу не пробрасывать!
-    # ports:
-    #   - "6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -37,11 +34,6 @@ services:
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
       - garage_data:/var/lib/garage
-    # ports:
-      # - "3900:3900"
-      # - "3901:3901"
-      # - "3902:3902"
-      # - "3903:3903"
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/3900' 2>/dev/null && echo 'OK' || exit 1"]
       interval: 5s
@@ -126,8 +118,8 @@ services:
       - internal
     ports:
     # Даем Web API, но оно доступно только на localhost, а оттуда его подхватит nginx и переведет на https
-      # - "127.0.0.1:8005:8005"
-      - "8005:8005"
+      - "127.0.0.1:8005:8005"
+      # - "8005:8005"
     volumes:
       - ./esp_service/data:/app/data
     # mem_limit: 200m

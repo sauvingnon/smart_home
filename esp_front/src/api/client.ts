@@ -1,7 +1,7 @@
 import { useAuth } from '../context/AuthContext';
 // Прод?
-export const API_BASE_URL = false 
-  ? 'https://tgapp.dotnetdon.ru:4444'
+export const API_BASE_URL = true 
+  ? 'https://api.tgapp.dotnetdon.ru'
   : 'http://localhost:8005';
 
 // Определяем WebSocket URL на основе API_BASE_URL
