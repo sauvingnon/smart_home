@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ MQTT сервис запущен")
         app.state.mqtt_service = mqtt_service
 
-        video_service = VideoService(s3_manager)
+        video_service = VideoService(s3_manager, cache_manager)
         
         # 4. Worker
         worker = BackgroundWorker.get_instance(
@@ -145,10 +145,10 @@ app = FastAPI(lifespan=lifespan, title="ESP Ядро")
 
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=[
-    #     "https://tgapp.dotnetdon.ru:4443",
-    # ],
-    allow_origins=["*"],
+    allow_origins=[
+        "https://tgapp.dotnetdon.ru",
+    ],
+    # allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

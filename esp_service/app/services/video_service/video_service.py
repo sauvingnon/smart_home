@@ -1,5 +1,6 @@
 # app/services/video_service.py
 import asyncio
+import json
 import time
 import gc
 from datetime import datetime, timedelta
@@ -12,24 +13,25 @@ from app.schemas.camera import (
     CameraState, VideoRecorder, RecordingInfo,
     CameraStatus, CameraControlResponse, CameraModeEnum
 )
-import cv2
-import numpy as np
 import subprocess
 import shutil
 import tempfile
 import os
 import uuid
 from app.utils.time import _get_izhevsk_time
+from app.core.auth import get_auth_manager
+from app.services.redis.cache_manager import CacheManager
 
 class VideoService:
     """Сервис управления видеопотоками"""
     
-    def __init__(self, s3_manager: S3Manager = None):
+    def __init__(self, s3_manager: S3Manager = None, cache_manager: CacheManager = None):
         # Полное состояние всех камер (вместо camera_modes + cameras)
         # Dict[camera_id] -> CameraState содержит режим (active, mode) + статистику (fps, last_frame и т.д.)
         self.cameras: Dict[str, CameraState] = {}
 
         self._s3_manager = s3_manager
+        self.cache_manager = cache_manager
         
         # WebSocket соединения камер (Dict[camera_id] -> WebSocket)
         self.esp_connections: Dict[str, WebSocket] = {}
@@ -402,9 +404,9 @@ class VideoService:
             camera_id = parts[2]
             
             # Проверка ключа (закомментирована для разработки)
-            # if self.valid_access_keys.get(camera_id) != access_key:
-            #     await websocket.close(code=1008, reason="Invalid key")
-            #     return
+            if self.valid_access_keys.get(camera_id) != access_key:
+                await websocket.close(code=1008, reason="Invalid key")
+                return
             
             # Отключаем старую камеру если была
             if camera_id in self.esp_connections:
@@ -432,6 +434,16 @@ class VideoService:
             
             # Подтверждаем авторизацию
             await websocket.send_text("AUTH_OK")
+
+            viewers = list(self.viewer_connections.get(camera_id, set()))
+
+            # Включаем камеру если есть зритель
+            if len(viewers) != 0:
+                logger.info("У камеры есть зритель. Необходим запуск.")
+                await self.control_camera(
+                    camera_id=camera_id,
+                    action="start"
+                )
             
             last_ping = time.time()
             
@@ -467,6 +479,7 @@ class VideoService:
         finally:
             if camera_id and self.esp_connections.get(camera_id) == websocket:
                 del self.esp_connections[camera_id]
+                del self.cameras[camera_id]
                 logger.info(f"Камера {camera_id} отключена")
     
     async def _handle_camera_text(self, camera_id: str, text: str):
@@ -487,6 +500,7 @@ class VideoService:
                     cam.reported_fps = int(data.get('fps', 0))
                     cam.quality_mode = int(data.get('quality_mode', 1))
                     cam.temperature = float(data.get('tmp', 0))
+                    cam.active = int(data.get('isStreamActive', 0)) == 1
                     
                     # logger.info(f"📊 [{camera_id}] {cam.reported_fps} fps | "
                     #         f"Качество: {cam.quality_mode} | "
@@ -550,7 +564,7 @@ class VideoService:
                 logger.debug(f"🗑️ [{camera_id}] Удалено {len(dead)} мертвых подключений")
     
     # ========== РАБОТА СО ЗРИТЕЛЯМИ ==========
-    
+
     async def handle_viewer_websocket(self, websocket: WebSocket, camera_id: str):
         """
         Обработка WebSocket зрителя.
@@ -559,79 +573,86 @@ class VideoService:
         """
         viewer_id = None
         try:
-            await websocket.accept(subprotocol="access_key")
+            await websocket.accept()
+            logger.info(f"📺 Зритель подключился к камере: {camera_id}")
             
-            # Проверка ключа доступа (здесь можно добавить логику)
-            # Пока пропускаем для разработки
+            # --- Авторизация первым сообщением ---
+            try:
+                auth_message = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                auth_data = json.loads(auth_message)
+                if auth_data.get('type') != 'auth':
+                    await websocket.close(code=1008, reason="Первым сообщением необходимо авторизоваться.")
+                    return
+                access_key = auth_data.get('access_key')
+                if not access_key:
+                    await websocket.close(code=1008, reason="Не корректный авторизационный ключ.")
+                    return
+                
+                auth = get_auth_manager()
+                user_id = await auth.verify_access_key(access_key)  # строка -> user_id
+                if not user_id:
+                    await websocket.close(code=1008, reason="Не корректный авторизационный ключ.")
+                    return
+                logger.info(f"✅ Авторизация успешна (зритель={user_id}) для {camera_id}")
+            except (asyncio.TimeoutError, json.JSONDecodeError):
+                await websocket.close(code=1008, reason="Авторизация не была пройдена.")
+                return
             
-            # Инициализируем трекинг зрителей если нужно
+            # --- Инициализация зрителя ---
             if camera_id not in self.viewer_connections:
                 self.viewer_connections[camera_id] = set()
-            
             if camera_id not in self._viewer_connected_at:
                 self._viewer_connected_at[camera_id] = {}
-
-            # Генерируем уникальный ID зрителя и отслеживаем время подключения
-            viewer_id = str(uuid.uuid4())
-            connected_at = time.time()
             
-            self._viewer_connected_at[camera_id][viewer_id] = connected_at
+            viewer_id = str(uuid.uuid4())
+            self._viewer_connected_at[camera_id][viewer_id] = time.time()
             self.viewer_connections[camera_id].add(websocket)
             
-            logger.info(
-                f"👁 Зритель {viewer_id[:8]} подключился к {camera_id}. "
-                f"Всего зрителей: {len(self.viewer_connections[camera_id])}"
-            )
-
-            # **Включаем камеру для стрима**
-            await self.control_camera(camera_id=camera_id, action="start")
+            logger.info(f"👁 Зритель {viewer_id[:8]} подключился к {camera_id}, всего: {len(self.viewer_connections[camera_id])}")
             
-            # Отправляем последний кадр если он есть
+            await websocket.send_text("welcome")
+            
+            # Включаем камеру (если ещё не активна)
+            await self.control_camera(camera_id, action="start")
+            
+            # Отправляем последний кадр, если есть
             if camera_id in self.cameras and self.cameras[camera_id].last_frame:
                 try:
                     await websocket.send_bytes(self.cameras[camera_id].last_frame)
                 except Exception as e:
-                    logger.error(f"⚠️ Ошибка отправки первого кадра: {e}")
+                    logger.warning(f"Не удалось отправить кадры стрима: {e}")
             
-            # Пинг-понг для отслеживания живых подключений
+            # --- Пинг-понг (только сервер шлёт пинги) ---
             last_ping = time.time()
             while True:
                 try:
-                    # Отправляем периодические пинги
                     if time.time() - last_ping > 10:
                         await websocket.send_text("ping")
                         last_ping = time.time()
                     
-                    # Слушаем входящие сообщения с таймаутом
+                    # Ждём сообщения от клиента (pong или другие команды)
                     message = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-                    
-                    if message == "ping":
-                        await websocket.send_text("pong")
+                    if message == "pong":
+                        # просто сбрасываем таймаут, ничего не делаем
+                        pass
                     elif message.startswith("fps:") and camera_id in self.esp_connections:
-                        # Пробрасываем команду смены FPS/качества на камеру
                         await self.esp_connections[camera_id].send_text(message)
-                        
                 except asyncio.TimeoutError:
-                    # Таймаут на receive нормален, просто продолжаем пинг
+                    # Нормально, просто продолжаем
                     continue
                 except Exception:
-                    # Соединение разорвано
+                    # Клиент отключился
                     break
                     
         except Exception as e:
-            logger.error(f"❌ Ошибка зрителя для {camera_id}: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка при обслуживании зрителя {camera_id}: {e}", exc_info=True)
         finally:
-            # Отключаемся и даём observer loop решить выключать ли камеру
             if camera_id in self.viewer_connections:
                 self.viewer_connections[camera_id].discard(websocket)
-                
                 if viewer_id and camera_id in self._viewer_connected_at:
                     self._viewer_connected_at[camera_id].pop(viewer_id, None)
-                
-                logger.info(
-                    f"👁 Зритель {viewer_id[:8] if viewer_id else 'unknown'} отключился. "
-                    f"Осталось: {len(self.viewer_connections[camera_id])}"
-                )
+                remaining = len(self.viewer_connections[camera_id])
+                logger.info(f"👁 Зритель покинул {camera_id}, осталось: {remaining}")
     
     # ========== УПРАВЛЕНИЕ РАЗРЕШЕНИЕМ ==========
     
@@ -639,15 +660,15 @@ class VideoService:
         """Изменить разрешение камеры"""
         valid_resolutions = ["QVGA", "VGA", "HD"]
         if resolution not in valid_resolutions:
-            return {"error": f"Resolution must be one of {valid_resolutions}"}, 400
+            return {"error": f"Разрешение может быть только {valid_resolutions}"}, 400
         
         if camera_id not in self.esp_connections:
-            return {"error": "Camera not connected"}, 404
+            return {"error": "Камера не подключена"}, 404
         
         try:
             ws = self.esp_connections[camera_id]
             await ws.send_text(f"size:{resolution}")
-            logger.info(f"✅ Command sent to {camera_id}: {resolution}")
+            logger.info(f"✅ На камеру {camera_id} отправлена команда установки разрешения: {resolution}")
             return {"status": "command_sent", "camera": camera_id, "resolution": resolution}
         except Exception as e:
             return {"error": str(e)}, 500
@@ -657,7 +678,7 @@ class VideoService:
     async def get_status(self, camera_id: str, access_key: str = None) -> dict:
         """Получить статус камеры с полной информацией"""
         if camera_id not in self.cameras:
-            return {"error": "Camera not found"}, 404
+            return {"error": "Камера не найдена."}, 404
         
         cam = self.cameras[camera_id]
         
@@ -699,11 +720,11 @@ class VideoService:
         По истечении 10 секунд БЕЗ вызова start_recording - запись сохраняется автоматически.
         """
         if not self._s3_manager:
-            logger.warning("⚠️ S3 manager not configured")
+            logger.warning("⚠️ S3 manager не настроен")
             return
         
         if camera_id not in self.esp_connections:
-            logger.warning(f"⚠️ Camera {camera_id} not connected, recording cannot start.")
+            logger.warning(f"⚠️ Камера {camera_id} не подключена, запись не может быть начата.")
             return
         
         # ЕСЛИ УЖЕ ИДЕТ ЗАПИСЬ - ПРОДЛЯЕМ ЕЕ
@@ -714,8 +735,8 @@ class VideoService:
             # Если уже записываем 5 минут - не продляем дальше
             if current_duration >= 300:
                 logger.warning(
-                    f"⚠️ Recording for {camera_id} reached max duration (5 min). "
-                    f"Will save automatically when timer expires."
+                    f"⚠️ Запись для {camera_id} достигла максимальной длительности (5 мин) и не может быть продлена."
+                    f"Она автоматически будет остановлена."
                 )
                 return
             
@@ -723,8 +744,8 @@ class VideoService:
             recorder.last_activity_time = _get_izhevsk_time().timestamp()
             
             logger.info(
-                f"⏱️ Extended recording for {camera_id}. "
-                f"Current duration: {current_duration:.1f}s, will stop after {max_duration}s of silence"
+                f"⏱️ Продление записи для {camera_id}. "
+                f"Текущая длительности: {current_duration:.1f}s, запись будет остановлена после {max_duration}s бездействия."
             )
             return
         
@@ -752,8 +773,8 @@ class VideoService:
             await self.control_camera(camera_id, "start")
         
         logger.info(
-            f"🎥 [{camera_id}] Recording started, "
-            f"will auto-save after {max_duration}s or 5min max"
+            f"🎥 [{camera_id}] Запись начата, "
+            f"она будет автоматически остановлена и сохранена после {max_duration}s или 5 минут максимум."
         )
     
     async def stop_recording(self, camera_id: str) -> Optional[str]:
@@ -778,14 +799,14 @@ class VideoService:
         duration = (end_time - recorder.start_time).total_seconds()
         
         if not recorder.frames:
-            logger.warning(f"⚠️ [{camera_id}] No frames, discarding")
+            logger.warning(f"⚠️ [{camera_id}] Нет кадров, нечего сохранять.")
             recorder.frames.clear()
             recorder.buffer_size_bytes = 0
             del self._video_recorders[camera_id]
             gc.collect()
             return None
         
-        logger.info(f"🔄 [{camera_id}] Converting {len(recorder.frames)} frames ({recorder.buffer_size_bytes/1024/1024:.1f}MB)...")
+        logger.info(f"🔄 [{camera_id}] Конвертация {len(recorder.frames)} кадров ({recorder.buffer_size_bytes/1024/1024:.1f}MB)...")
         temp_dir = tempfile.mkdtemp()
         
         try:
@@ -832,7 +853,7 @@ class VideoService:
             ], check=True, capture_output=True)
             
             # Выбираем кадр для thumbnail (кадр через 1 секунду)
-            target_time = recorder.start_time.timestamp() + 1.0
+            target_time = recorder.start_time.timestamp() + 2.0
             thumbnail_frame_idx = 0
             for i, (frame_time, _) in enumerate(recorder.frames):
                 if frame_time >= target_time:
@@ -856,17 +877,17 @@ class VideoService:
             if video_id:
                 # Сохраняем thumbnail
                 await self._s3_manager.save_thumbnail(camera_id, video_id, thumbnail_data)
-                logger.info(f"💾 [{camera_id}] Saved video {video_id}: {duration:.1f}s, {len(recorder.frames)} frames")
+                logger.info(f"💾 [{camera_id}] Видео сохранено {video_id}: {duration:.1f}s, {len(recorder.frames)} кадров")
                 return video_id
             else:
-                logger.error(f"❌ [{camera_id}] Failed to save video")
+                logger.error(f"❌ [{camera_id}] Не удалось сохранить видео.")
                 return None
                 
         except subprocess.CalledProcessError as e:
-            logger.error(f"❌ FFmpeg error: {e.stderr.decode() if e.stderr else 'unknown'}")
+            logger.error(f"❌ FFmpeg ошибка: {e.stderr.decode() if e.stderr else 'unknown'}")
             return None
         except Exception as e:
-            logger.error(f"❌ Failed to save: {e}", exc_info=True)
+            logger.error(f"❌ Не удалось сохранить видео: {e}", exc_info=True)
             return None
         finally:
             # Очистка
@@ -876,17 +897,20 @@ class VideoService:
             gc.collect()
     
     async def force_stop_recording(self, camera_id: str) -> Optional[str]:
-        """Принудительно остановить запись (даже если она активна)"""
+        """
+        Принудительно остановить запись (даже если она активна).
+        Например, если сокет соединение с камерой разорвано.
+        """
         if camera_id not in self._video_recorders:
-            logger.info(f"ℹ️ [{camera_id}] No active recording to stop")
+            logger.info(f"ℹ️ [{camera_id}] Нет активной записи для остановки")
             return None
         
-        logger.info(f"🛑 [{camera_id}] Force stopping recording...")
+        logger.info(f"🛑 [{camera_id}] Принудительная остановка записи...")
         return await self.stop_recording(camera_id)
     
     async def _auto_stop_recording(self, camera_id: str, max_duration: int):
         """
-        Auto-save recording after max_duration seconds of SILENCE (no activity).
+        Автоматическое сохранение записи после превышения порога максимальной длительности или продолжительной тишины (отсутствие активности).
         
         Проверяет last_activity_time каждую секунду.
         Если прошло max_duration сек БЕЗ обновления last_activity_time - сохраняет запись.
@@ -904,13 +928,13 @@ class VideoService:
                 
                 # Условие 1: Прошло max_duration сек молчания
                 if silence_duration >= max_duration:
-                    logger.info(f"⏱️ [{camera_id}] Auto-saving ({max_duration}s silence)")
+                    logger.info(f"⏱️ [{camera_id}] Автоматическое сохранение ({max_duration}s тишины)")
                     await self.stop_recording(camera_id)
                     return
                 
                 # Условие 2: Прошло 5 минут от начала записи (максимум)
                 if recording_duration >= 300:
-                    logger.info(f"⏱️ [{camera_id}] Auto-saving (5min max reached)")
+                    logger.info(f"⏱️ [{camera_id}] Автоматическое сохранение (5 мин максимальная длительность)")
                     await self.stop_recording(camera_id)
                     return
                 
@@ -923,40 +947,49 @@ class VideoService:
     async def get_thumbnail(self, camera_id: str, video_id: str) -> Optional[bytes]:
         """Получить thumbnail из S3 по camera_id и video_id"""
         if not self._s3_manager:
-            logger.error("S3 manager not available")
+            logger.error("S3 manager не доступен.")
             return None
         
         return await self._s3_manager.get_thumbnail(camera_id, video_id)
 
     async def list_videos(
         self,
+        user_id: int,
         camera_id: Optional[str] = None
     ) -> list:
         """Получить список видео из S3"""
         if not self._s3_manager:
-            raise ValueError("S3 manager not configured")
+            raise ValueError("S3 manager не доступен.")
         
-        return await self._s3_manager.list_videos(
-            camera_id=camera_id
-        )
+        if not self.cache_manager:
+            raise ValueError("Redis не доступен.")
+        
+        token = await self.cache_manager.get_or_create_session_token(user_id)
+        
+        videos = await self._s3_manager.list_videos(camera_id=camera_id)
+    
+        return {
+            "videos": videos,
+            "session_token": token
+        }
 
     async def get_video(self, key: str) -> Optional[bytes]:
         """Получить видео из S3 по ключу"""
         if not self._s3_manager:
-            raise ValueError("S3 manager not configured")
+            raise ValueError("S3 manager не доступен.")
         
         return await self._s3_manager.get_video(key)
 
     async def get_video_presigned_url(self, key: str, expires_in: int = 3600) -> Optional[str]:
         """Получить подписанную ссылку на видео"""
         if not self._s3_manager:
-            raise ValueError("S3 manager not configured")
+            raise ValueError("S3 manager не доступен.")
         
         return await self._s3_manager.get_video_presigned_url(key, expires_in)
 
     async def delete_video(self, key: str) -> bool:
         """Удалить видео по ключу"""
         if not self._s3_manager:
-            raise ValueError("S3 manager not configured")
+            raise ValueError("S3 manager не доступен.")
         
         return await self._s3_manager.delete_video(key)

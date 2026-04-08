@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, Depends
 from fastapi.responses import StreamingResponse
 from app.core.worker import BackgroundWorker
-from app.api.endpoints.auth import get_current_user_id
+from app.core.auth import get_current_user_id_dep
 from pydantic import BaseModel
 from logger import logger
 
@@ -14,49 +14,46 @@ router = APIRouter(prefix="/esp_service", tags=["esp_service"])
 class ResolutionRequest(BaseModel):
     resolution: str
 
-@router.post("/camera/{camera_id}/control")
-async def control_camera(camera_id: str, action: str):
-    worker = BackgroundWorker.get_instance()
-    return await worker.video_service.control_camera(camera_id, action)
-
-@router.post("/camera/{camera_id}/recording/stop")
-async def stop_recording(camera_id: str):
-    """Принудительно остановить запись видео"""
-    worker = BackgroundWorker.get_instance()
-    result = await worker.video_service.force_stop_recording(camera_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail="No active recording")
-    return {"status": "stopped", "camera_id": camera_id}
-
 @router.websocket("/ws/camera")
 async def websocket_camera(websocket: WebSocket):
+    """Сокет соединение с камерой. Авторизация внутри подключения."""
     worker = BackgroundWorker.get_instance()
     await worker.video_service.handle_camera_websocket(websocket)
 
 @router.websocket("/ws/view/{camera_id}")
 async def websocket_viewer(websocket: WebSocket, camera_id: str):
+    """Сокет соединение со зрителем. Авторизация внутри подключения."""
     worker = BackgroundWorker.get_instance()
     await worker.video_service.handle_viewer_websocket(websocket, camera_id)
 
 @router.post("/camera/{camera_id}/resolution")
-async def set_camera_resolution(camera_id: str, request: ResolutionRequest):
+async def set_camera_resolution(
+    camera_id: str, 
+    request: ResolutionRequest,
+    user_id: int = Depends(get_current_user_id_dep)
+    ):
+    """Запрос на смену разрешения камеры."""
     worker = BackgroundWorker.get_instance()
     return await worker.video_service.set_resolution(camera_id, request.resolution)
 
 @router.get("/camera/{camera_id}/status")
-async def get_camera_status(camera_id: str):
+async def get_camera_status(
+    camera_id: str,
+    user_id: int = Depends(get_current_user_id_dep)
+    ):
     worker = BackgroundWorker.get_instance()
     return await worker.video_service.get_status(camera_id)
 
 @router.get("/videos")
 async def list_videos(
-    camera_id: Optional[str] = Query(None, description="ID камеры")
-    # user_id: int = Depends(get_current_user_id)
-) -> list[dict]:
+    camera_id: Optional[str] = Query(None, description="ID камеры"),
+    user_id: int = Depends(get_current_user_id_dep)
+) -> dict:
     """Получить список видео."""
     worker = BackgroundWorker.get_instance()
 
     videos = await worker.video_service.list_videos(
+        user_id=user_id,
         camera_id=camera_id
     )
     return videos
@@ -65,10 +62,17 @@ async def list_videos(
 @router.get("/videos/stream")
 async def stream_video(
     request: Request,
-    key: str = Query(...)
+    key: str = Query(...),
+    token: str = Query(...)
 ):
     """Потоковая передача видео с поддержкой Range (перемотки)"""
     worker = BackgroundWorker.get_instance()
+
+    user_id = await worker.cache.validate_session_token(token)
+
+    if not user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен.")
+
     s3 = worker.video_service._s3_manager
     
     try:
@@ -130,6 +134,7 @@ async def stream_video(
 @router.get("/videos/download")
 async def download_video(
     key: str = Query(..., description="Key видео."),
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """Скачать видео"""
     worker = BackgroundWorker.get_instance()
@@ -151,6 +156,7 @@ async def download_video(
 async def get_video_thumbnail(
     camera_id: str = Query(..., description="ID камеры"),
     video_id: str = Query(..., description="UUID видео"),
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """Получить thumbnail (превью) видео по video_id"""
     worker = BackgroundWorker.get_instance()

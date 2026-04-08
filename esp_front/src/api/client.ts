@@ -1,7 +1,7 @@
 import { useAuth } from '../context/AuthContext';
 // Прод?
-export const API_BASE_URL = false 
-  ? 'https://tgapp.dotnetdon.ru:4444'
+export const API_BASE_URL = true 
+  ? 'https://api.tgapp.dotnetdon.ru'
   : 'http://localhost:8005';
 
 // Определяем WebSocket URL на основе API_BASE_URL
@@ -99,30 +99,28 @@ class ApiClient {
   }
 
   async getVideos(params?: {
-    camera_id?: string;
-  }): Promise<any[]> {
-    const queryParams = new URLSearchParams();
-    
-    if (params?.camera_id) queryParams.append('camera_id', params.camera_id);
-    
-    const queryString = queryParams.toString();
-    const endpoint = `/esp_service/videos${queryString ? `?${queryString}` : ''}`;
-    
-    console.log('🔍 GET Videos request:', `${API_BASE_URL}${endpoint}`);
-    console.log('🔑 Access key present:', !!this.accessKey);
-    
-    const response = await this.fetch(endpoint);
-    
-    console.log('📦 Raw videos response:', response);
-    console.log('📊 Response type:', typeof response);
-    console.log('📈 Is array?', Array.isArray(response));
-    console.log('🔢 Length:', response?.length);
-    
-    return response;
+      camera_id?: string;
+  }): Promise<{ videos: any[]; session_token: string; expires_in: number }> {
+      const queryParams = new URLSearchParams();
+      
+      if (params?.camera_id) queryParams.append('camera_id', params.camera_id);
+      
+      const queryString = queryParams.toString();
+      const endpoint = `/esp_service/videos${queryString ? `?${queryString}` : ''}`;
+      
+      console.log('🔍 GET Videos request:', `${API_BASE_URL}${endpoint}`);
+      
+      const response = await this.fetch(endpoint);
+      
+      console.log('📦 Raw videos response:', response);
+      console.log('🎫 Session token:', response.session_token);
+      console.log('📼 Videos count:', response.videos?.length);
+      
+      return response; // { videos: [], session_token: "" }
   }
 
-  getVideoStreamUrl(key: string): string {
-      return `${API_BASE_URL}/esp_service/videos/stream?key=${encodeURIComponent(key)}`;
+  getVideoStreamUrl(key: string, token: string): string {
+    return `${API_BASE_URL}/esp_service/videos/stream?key=${encodeURIComponent(key)}&token=${encodeURIComponent(token)}`;
   }
 
   async getVideoDownloadUrl(key: string): Promise<{ url: string; key: string }> {
@@ -133,7 +131,6 @@ class ApiClient {
       return `${API_BASE_URL}/esp_service/videos/thumbnail?camera_id=${encodeURIComponent(cameraId)}&video_id=${encodeURIComponent(videoId)}`;
   }
 
-    // 👇 НОВЫЙ МЕТОД: создание WebSocket подключения к камере с ключом в заголовках
   createCameraWebSocket(cameraId: string, options: any = {}) {
       if (!this.accessKey) {
           console.error('❌ No access key available for WebSocket');
@@ -143,86 +140,73 @@ class ApiClient {
       const wsBaseUrl = getWebSocketBaseUrl();
       const wsUrl = `${wsBaseUrl}/esp_service/ws/view/${cameraId}`;
       
-      console.log(`🔌 Creating WebSocket for camera ${cameraId}`);
-      console.log(`📍 WS URL: ${wsUrl}`);
-      console.log(`🔑 Access key: ${this.accessKey.substring(0, 5)}...`);
-      console.log(`📤 Will send protocols: ['access_key', '${this.accessKey}']`);
+      console.log(`🔌 Connecting to ${wsUrl}`);
       
-      const ws = new WebSocket(wsUrl, ['access_key', this.accessKey]);
+      const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
       
       let reconnectAttempts = 0;
       const maxReconnectAttempts = 5;
       
-      const connect = () => {
-          ws.onopen = () => {
-              console.log(`🟢 WebSocket connected for camera ${cameraId}`);
-              reconnectAttempts = 0;
-              (ws as any).isManualClose = false;
-              
-              // Отправляем ping сразу
-              ws.send('ping');
-              
-              // И каждые 5 секунд
-              const pingInterval = setInterval(() => {
-                  if (ws.readyState === WebSocket.OPEN) {
-                      ws.send('ping');
-                  }
-              }, 5000);
-              
-              (ws as any).pingInterval = pingInterval;
-              
-              if (options.fps) {
-                  ws.send(`fps:${options.fps}`);
-              }
-              options.onOpen?.();
-          };
+      ws.onopen = () => {
+          console.log(`🟢 WebSocket connected for ${cameraId}`);
+          reconnectAttempts = 0;
+          (ws as any).isManualClose = false;
           
-          ws.onmessage = (event) => {
-              if (typeof event.data === 'string') {
-                  // console.log(`📨 WS text from ${cameraId}:`, event.data);
-                  options.onMessage?.(event.data);
-              } else {
-                  // event.data - это ArrayBuffer
-                  const blob = new Blob([event.data], { type: 'image/jpeg' });
-                  options.onFrame?.(blob);
-              }
-          };
+          // Отправляем авторизацию первым сообщением
+          const authMessage = JSON.stringify({
+              type: 'auth',
+              access_key: this.accessKey
+          });
+          ws.send(authMessage);
           
-          ws.onerror = (error) => {
-              console.error(`🔴 WebSocket error for camera ${cameraId}:`, error);
-              console.error(`Error event:`, error);
-              options.onError?.(error);
-          };
+          if (options.fps) {
+              ws.send(`fps:${options.fps}`);
+          }
           
-          ws.onclose = (event) => {
-              const isManual = (ws as any).isManualClose;
-              console.log(`🔌 WebSocket closed for camera ${cameraId}:`);
-              console.log(`  Code: ${event.code}, Reason: ${event.reason}`);
-              console.log(`  Was clean: ${event.wasClean}`);
-              console.log(`  Is manual close: ${isManual}`);
-              
-              if ((ws as any).pingInterval) {
-                  clearInterval((ws as any).pingInterval);
-              }
-              
-              this.wsConnections.delete(cameraId);
-              options.onClose?.(event.code, event.reason);
-              
-              // Пробуем переподключиться
-              if (!isManual && reconnectAttempts < maxReconnectAttempts) {
-                  reconnectAttempts++;
-                  console.log(`🔄 Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} for ${cameraId}`);
-                  setTimeout(() => {
-                      if (!this.wsConnections.has(cameraId)) {
-                          this.createCameraWebSocket(cameraId, options);
-                      }
-                  }, 2000 * reconnectAttempts);
-              }
-          };
+          options.onOpen?.();
       };
       
-      connect();
+      ws.onmessage = (event) => {
+          if (typeof event.data === 'string') {
+              // Только отвечаем на пинг от сервера, сами пинги не шлём
+              if (event.data === 'ping') {
+                  ws.send('pong');
+              }
+              options.onMessage?.(event.data);
+          } else {
+              // Бинарные данные — кадры JPEG
+              const blob = new Blob([event.data], { type: 'image/jpeg' });
+              options.onFrame?.(blob);
+          }
+      };
+      
+      ws.onerror = (error) => {
+          console.error(`🔴 WebSocket error for ${cameraId}:`, error);
+          options.onError?.(error);
+      };
+      
+      ws.onclose = (event) => {
+          console.log(`🔌 WebSocket closed for ${cameraId}: code=${event.code}, clean=${event.wasClean}`);
+          
+          if ((ws as any).pingInterval) {
+              clearInterval((ws as any).pingInterval);
+          }
+          
+          this.wsConnections.delete(cameraId);
+          options.onClose?.(event.code, event.reason);
+          
+          const isManual = (ws as any).isManualClose;
+          if (!isManual && reconnectAttempts < maxReconnectAttempts) {
+              reconnectAttempts++;
+              console.log(`🔄 Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
+              setTimeout(() => {
+                  if (!this.wsConnections.has(cameraId)) {
+                      this.createCameraWebSocket(cameraId, options);
+                  }
+              }, 2000 * reconnectAttempts);
+          }
+      };
       
       this.wsConnections.set(cameraId, ws);
       return ws;

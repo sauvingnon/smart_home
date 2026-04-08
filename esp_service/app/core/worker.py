@@ -16,6 +16,7 @@ from app.services.video_service.video_service import VideoService
 from app.services.monitor_db.telemetry_storage import TelemetryStorage
 from app.services.ai_api.deepseek_client import ai_message_request
 from app.utils.time import _get_izhevsk_time
+from app.core.auth import init_auth_manager, get_auth_manager
 
 # Константы и тайминги по умолчанию
 DEFAULT_WEATHER_UPDATE_INTERVAL = 1800  # 30 минут (в секундах)
@@ -59,6 +60,7 @@ class BackgroundWorker:
         self.last_activity_timestamp_sensor: Optional[datetime] = None  # Любое сообщение от дверного датчика
         self.sensor_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
         self.counter_for_telemetry = 0
+        init_auth_manager(cache_manager)
         self._initialization_complete = False  # Флаг: сервис полностью инициализирован
         
     @classmethod
@@ -91,6 +93,11 @@ class BackgroundWorker:
         async with cls._lock:
             return cls.get_instance(cache_manager, weather_service, video_service, mqtt_service, storage)
     
+    @property
+    def auth(self):
+        """Свойство для доступа к AuthManager"""
+        return get_auth_manager()
+
     async def initialize_services(self):
         """Инициализирует асинхронные сервисы (вызывается ПОСЛЕ создания worker)"""
         logger.info("🎬 Инициализирую асинхронные сервисы...")
@@ -843,49 +850,6 @@ class BackgroundWorker:
         logger.info(f"🌤️ Плата {device_id} запросила погоду")
         
         await self.send_to_board_weather_from_cache()
-
-    async def verify_websocket_key(self, websocket: WebSocket) -> Optional[int]:
-        """Проверяет ключ для WebSocket соединения"""
-        
-        # Просто получаем ключ из subprotocols
-        access_key = None
-        sec_protocol = websocket.headers.get("sec-websocket-protocol")
-        
-        if sec_protocol:
-            protocols = [p.strip() for p in sec_protocol.split(',')]
-            if len(protocols) >= 2 and protocols[0] == "access_key":
-                access_key = protocols[1]
-                logger.info(f"Found key for user")
-        
-        if not access_key:
-            logger.warning("No access key found")
-            return None
-        
-        user_id = await self.cache.validate_key(access_key)
-        return user_id
-
-    async def verify_access_key(
-        self,
-        request: Request
-    ) -> int:
-        """Проверяет X-Access-Key в заголовках"""
-        access_key = request.headers.get("X-Access-Key")
-        
-        if not access_key:
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
-                detail="Missing X-Access-Key header"
-            )
-        
-        user_id = await self.cache.validate_key(access_key)
-        
-        if not user_id:
-            raise HTTPException(
-                status_code=HTTP_403_FORBIDDEN,
-                detail="Invalid or expired key"
-            )
-        
-        return user_id
     
     def _format_time_short(self, dt: datetime) -> str:
         """Форматируем время как '14:38'"""
