@@ -2,8 +2,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.worker import BackgroundWorker
 from app.schemas.settings import SettingsData
-from typing import List
-from app.api.endpoints.auth import get_current_user_id
+from app.core.auth import get_current_user_id_dep
 
 router = APIRouter(
     prefix="/esp_service",
@@ -12,7 +11,7 @@ router = APIRouter(
 
 @router.get("/settings", response_model=SettingsData)
 async def get_current_setttings_endpoint(
-    user_id: int = Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """
     Получить текущие настройки устройства.
@@ -34,7 +33,7 @@ async def get_current_setttings_endpoint(
 @router.post("/settings")
 async def update_settings_endpoint(
     settings: SettingsData,
-    user_id: int = Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id_dep)
     ):
     """
     Обновить настройки устройства.

@@ -64,9 +64,9 @@ export const CameraPage: React.FC = () => {
   }
 
   const resolutions: { value: Resolution; label: string; description: string }[] = [
-    { value: 'QVGA', label: 'Быстро', description: '320×240, 27 fps' },
-    { value: 'VGA', label: 'Средне', description: '640×480, 23 fps' },
-    { value: 'HD', label: 'Качественно', description: '1280×720, 8 fps' }
+    { value: 'QVGA', label: 'Быстро', description: '320×240' },
+    { value: 'VGA', label: 'Средне', description: '640×480' },
+    { value: 'HD', label: 'Качественно', description: '1280×720' }
   ]
 
   // Определяем мобильное устройство

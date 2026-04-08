@@ -124,7 +124,7 @@ class MQTTService:
             if self._startup_time:
                 elapsed = (datetime.now() - self._startup_time).total_seconds()
                 if elapsed < self._startup_ignore_seconds:
-                    logger.debug(f"⏳ Игнорируем сообщение при старте ({elapsed:.1f}s): {message.topic}")
+                    # logger.debug(f"⏳ Игнорируем сообщение при старте ({elapsed:.1f}s): {message.topic}")
                     return
     
             payload_str = message.payload.decode()

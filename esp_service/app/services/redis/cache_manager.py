@@ -9,13 +9,17 @@ import secrets
 
 # =================== КЭШ МЕНЕДЖЕР ===================
 class CacheManager:
-    """Управление кэшированием погодных данных"""
+    """Управление кэшированием данных"""
     
     def __init__(self, redis_url: str):
         self.redis_client = None
         self.redis_url = redis_url
         self.key_prefix = "access_key:"
         self.key_ttl = timedelta(days=180)  # 180 дней жизни ключа
+
+        # Токены для просмотра видео
+        self.video_token_prefix = "video_token:"   # token -> video_key
+        self.video_token_ttl = 3600                # 1 час
 
         
     async def connect(self, max_retries: int = 5, retry_delay: int = 2):
@@ -381,3 +385,52 @@ class CacheManager:
         except Exception as e:
             logger.exception(f"❌ Ошибка получения недельного отчёта из кэша: {e}")
             return None
+        
+    async def get_or_create_session_token(self, user_id: int) -> str:
+        """Получает существующий токен или создаёт новый"""
+        if not await self._ensure_connection():
+            raise Exception("Redis not connected")
+        
+        # Проверяем, есть ли уже токен у пользователя
+        token_key = f"user_token:{user_id}"
+        existing_token = await self.redis_client.get(token_key)
+        
+        if existing_token:
+            # Продлеваем жизнь существующему токену
+            await self.redis_client.expire(f"{self.video_token_prefix}{existing_token}", self.video_token_ttl)
+            await self.redis_client.expire(token_key, self.video_token_ttl)
+            return existing_token
+        
+        # Создаём новый токен
+        new_token = secrets.token_urlsafe(32)
+        
+        # video_token:{token} -> user_id
+        await self.redis_client.setex(
+            f"{self.video_token_prefix}{new_token}",
+            self.video_token_ttl,
+            str(user_id)
+        )
+        
+        # user_token:{user_id} -> token (для быстрого поиска)
+        await self.redis_client.setex(
+            token_key,
+            self.video_token_ttl,
+            new_token
+        )
+        
+        logger.debug(f"Video token created for user {user_id}")
+        return new_token
+
+    async def validate_session_token(self, token: str) -> Optional[int]:
+        """Проверяет токен, возвращает user_id"""
+        if not await self._ensure_connection():
+            return None
+        
+        user_id = await self.redis_client.get(f"{self.video_token_prefix}{token}")
+        if user_id:
+            # Продлеваем жизнь токену
+            await self.redis_client.expire(f"{self.video_token_prefix}{token}", self.video_token_ttl)
+            # Продлеваем и связку user -> token
+            await self.redis_client.expire(f"user_token:{int(user_id)}", self.video_token_ttl)
+            return int(user_id)
+        return None

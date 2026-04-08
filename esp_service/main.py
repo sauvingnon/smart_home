@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ MQTT сервис запущен")
         app.state.mqtt_service = mqtt_service
 
-        video_service = VideoService(s3_manager)
+        video_service = VideoService(s3_manager, cache_manager)
         
         # 4. Worker
         worker = BackgroundWorker.get_instance(

@@ -7,7 +7,7 @@ from app.schemas.telemetry_history import (
     StatsResponse,
     TelemetryRecord
 )
-from app.api.endpoints.auth import get_current_user_id
+from app.core.auth import get_current_user_id_dep
 from app.utils.time import _get_izhevsk_time
 
 router = APIRouter(
@@ -19,7 +19,7 @@ router = APIRouter(
 async def get_history_endpoint(
     hours: int = Query(24, ge=1, le=168),
     max_points: int = Query(100, ge=10, le=250),
-    user_id: int = Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """
     Получить историю телеметрии за последние N часо
@@ -47,7 +47,7 @@ async def get_history_endpoint(
 @router.get("/stats", response_model=StatsResponse)
 async def get_stats_endpoint(
     hours: int = Query(24, ge=1, le=168, description="Количество часов для статистики"),
-    user_id: int = Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """Получить статистику за период"""
     worker = BackgroundWorker.get_instance()

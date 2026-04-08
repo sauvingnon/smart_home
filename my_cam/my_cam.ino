@@ -6,11 +6,11 @@
 // ===== НАСТРОЙКИ =====
 // const char* ssid = "TP-Link_8343";
 // const char* password = "64826424";
-// const char* websocket_host = "tgapp.dotnetdon.ru";
-// const uint16_t websocket_port = 4444;
+// const char* websocket_host = "api.tgapp.dotnetdon.ru";
+// const uint16_t websocket_port = 443;
 const char* ssid = "TP-Link_297F";
 const char* password = "23598126";
-const char* websocket_host = "192.168.1.104";
+const char* websocket_host = "192.168.1.100";
 const uint16_t websocket_port = 8005;
 const char* camera_id = "cam1";
 const char* access_key = "12345678";
@@ -189,6 +189,14 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
     case WStype_DISCONNECTED:
       isConnected = false;
       isAuthenticated = false;
+
+      if (isStreamActive) {
+          stopCamera();
+          isStreamActive = false;
+          toggleFan(false);
+          Serial.println("🛑 Camera stopped due to WS disconnect");
+      }
+
       Serial.println("❌ WS Disconnected");
       break;
     case WStype_CONNECTED:
@@ -322,7 +330,11 @@ void webSocketTask(void * pvParameters) {
 
     if (millis() - lastFpsLog > 5000) {
       if (isConnected && isAuthenticated) {
-        String fpsMsg = "fps:" + String(frameCount / 5) + ";quality_mode:" + String(currentQualityMode) + ";tmp:" + String(getTemperature());
+        byte isStreamActiveByte = isStreamActive ? 1 : 0;
+        String fpsMsg = "fps:" + String(frameCount / 5) + 
+                ";quality_mode:" + String(currentQualityMode) + 
+                ";tmp:" + String(getTemperature()) + 
+                ";isStreamActive:" + String(isStreamActiveByte);
         webSocket.sendTXT(fpsMsg);
         Serial.printf("📊 FPS report: %d fps\n", frameCount / 5);
       }

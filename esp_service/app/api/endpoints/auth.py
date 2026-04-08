@@ -28,8 +28,3 @@ async def generate_key_endpoint(
         expires_in_days=180
     )
     return result
-
-async def get_current_user_id(request: Request) -> int:
-    """Зависимость для получения user_id из ключа"""
-    worker = BackgroundWorker.get_instance()
-    return await worker.verify_access_key(request)

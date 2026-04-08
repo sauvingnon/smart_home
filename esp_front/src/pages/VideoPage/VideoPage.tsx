@@ -43,6 +43,8 @@ export const VideosPage = () => {
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
+  const [sessionToken, setSessionToken] = useState<string>('');
 
   const toggleDay = (dayKey: string) => {
     setExpandedDays(prev => {
@@ -55,6 +57,28 @@ export const VideosPage = () => {
       return newSet
     })
   }
+
+  useEffect(() => {
+      // Для каждого видео, у которого есть thumbnail_url и ещё нет загруженного URL
+      videos.forEach(async (video) => {
+          if (video.thumbnail_url && !thumbnailUrls[video.key]) {
+              try {
+                  const response = await apiClient.fetchRaw(video.thumbnail_url);
+                  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                  const blob = await response.blob();
+                  const url = URL.createObjectURL(blob);
+                  setThumbnailUrls(prev => ({ ...prev, [video.key]: url }));
+              } catch (error) {
+                  console.error(`Failed to load thumbnail for ${video.key}:`, error);
+              }
+          }
+      });
+
+      // Очистка: revoke все blob URL при размонтировании или при изменении videos
+      return () => {
+          Object.values(thumbnailUrls).forEach(url => URL.revokeObjectURL(url));
+      };
+  }, [videos]); // Зависимость от videos – перезагрузим, если список изменился
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -71,29 +95,26 @@ export const VideosPage = () => {
   }, [])
 
   const loadVideos = async () => {
-    try {
-      console.log('Loading videos...')
-      setLoading(true)
-      const accessKey = apiClient.getAccessKey()
-      if (!accessKey) {
-        console.log('No access key, skipping video load')
-        setLoading(false)
-        return
+      try {
+          console.log('Loading videos...')
+          setLoading(true)
+          const accessKey = apiClient.getAccessKey()
+          if (!accessKey) {
+              console.log('No access key, skipping video load')
+              setLoading(false)
+              return
+          }
+          
+          const response = await apiClient.getVideos()
+          console.log('Videos loaded:', response.videos.length)
+          
+          setVideos(response.videos)
+          setSessionToken(response.session_token) // Сохраняем токен
+      } catch (error) {
+          console.error('Failed to load videos:', error)
+      } finally {
+          setLoading(false)
       }
-      const data = await apiClient.getVideos()
-      const videosWithFullUrl = data.map((video: any) => ({
-        ...video,
-        thumbnail_url: video.thumbnail_url
-          ? `${apiClient.getBaseUrl()}${video.thumbnail_url}`
-          : null
-      }))
-      console.log('Videos loaded:', data.length)
-      setVideos(videosWithFullUrl)
-    } catch (error) {
-      console.error('Failed to load videos:', error)
-    } finally {
-      setLoading(false)
-    }
   }
 
   const formatDuration = (seconds?: number) => {
@@ -161,9 +182,9 @@ export const VideosPage = () => {
   }
 
   const handleVideoClick = (video: VideoItem) => {
-    const url = apiClient.getVideoStreamUrl(video.key)
-    console.log('Video URL:', url)
-    setSelectedVideo({ ...video, url })
+      const url = apiClient.getVideoStreamUrl(video.key, sessionToken)
+      console.log('Video URL:', url)
+      setSelectedVideo({ ...video, url })
   }
 
   const handleDownload = async (video: VideoItem, e: React.MouseEvent) => {
@@ -306,9 +327,9 @@ export const VideosPage = () => {
                                   whileTap={{ scale: 0.98 }}
                                 >
                                   <div className="video-preview">
-                                    {video.thumbnail_url ? (
+                                    {thumbnailUrls[video.key] ? (
                                       <img
-                                        src={video.thumbnail_url}
+                                        src={thumbnailUrls[video.key]}
                                         alt="Превью видео"
                                         className="thumbnail-image"
                                       />
