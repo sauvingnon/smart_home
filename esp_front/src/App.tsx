@@ -18,6 +18,69 @@ function App() {
   const [minTimePassed, setMinTimePassed] = useState(false);
   const [isValidating, setIsValidating] = useState(true);
 
+  // Добавь в App.tsx, рядом с другими useEffect
+useEffect(() => {
+    // Проверяем, не запустилась ли старая сломанная версия
+    const isOldBrokenVersion = () => {
+      // Если URL без параметра сессии, но приложение уже пыталось загрузиться >3 раз
+      const attempts = sessionStorage.getItem('broken_attempts') || '0';
+      const hasNoSessionParam = !window.location.search.includes('_session');
+      
+      if (hasNoSessionParam && parseInt(attempts) > 2) {
+        return true;
+      }
+      
+      if (hasNoSessionParam) {
+        sessionStorage.setItem('broken_attempts', (parseInt(attempts) + 1).toString());
+      }
+      
+      return false;
+    };
+    
+    if (isOldBrokenVersion() && window.matchMedia('(display-mode: standalone)').matches) {
+      // Показываем модалку вместо белого экрана
+      const root = document.getElementById('root');
+      if (root) {
+        root.innerHTML = `
+          <div style="
+            position: fixed; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            background: white; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            padding: 20px; 
+            text-align: center; 
+            font-family: system-ui; 
+            z-index: 99999;
+          ">
+            <h2 style="margin-bottom: 16px;">🔄 Требуется обновление</h2>
+            <p style="margin-bottom: 24px; color: #666;">
+              Приложение нужно переустановить из-за обновления.
+            </p>
+            <ol style="text-align: left; margin-bottom: 24px; color: #333;">
+              <li>Удалите приложение с экрана домой</li>
+              <li>Очистите Safari: Настройки → Safari → Очистить историю</li>
+              <li>Добавьте приложение заново</li>
+            </ol>
+            <button onclick="location.reload()" style="
+              padding: 12px 24px; 
+              background: #007aff; 
+              color: white; 
+              border: none; 
+              border-radius: 12px; 
+              font-size: 16px;
+            ">
+              Попробовать снова
+            </button>
+          </div>
+        `;
+      }
+    }
+  }, []);
+
   // 🔥 FIX #1: Защита от "вечного белого экрана" на iOS PWA
   useEffect(() => {
     const isPWA = window.matchMedia('(display-mode: standalone)').matches;
