@@ -12,6 +12,7 @@
   "dependencies": {
     "framer-motion": "^12.34.0",
     "lucide-react": "^0.570.0",
+    "pwa-asset-generator": "^8.1.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0",

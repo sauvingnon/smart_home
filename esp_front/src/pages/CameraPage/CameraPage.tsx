@@ -47,11 +47,16 @@ export const CameraPage: React.FC = () => {
   const { cameraId } = useParams<{ cameraId: string }>()
   const [fullscreen, setFullscreen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const [isIOS, setIsIOS] = useState(false)
+  const [isPWA, setIsPWA] = useState(false)
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [isChangingResolution, setIsChangingResolution] = useState(false)
   // 👇 Добавляем локальный стейт для разрешения
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('VGA')
+
+  // Состояние для имитации fullscreen на iOS
+  const [simulatedFullscreen, setSimulatedFullscreen] = useState(false)
 
   const videoContainerRef = useRef<HTMLDivElement>(null)
   const timeoutRef = useRef<number>()
@@ -68,6 +73,32 @@ export const CameraPage: React.FC = () => {
     { value: 'VGA', label: 'Средне', description: '640×480' },
     { value: 'HD', label: 'Качественно', description: '1280×720' }
   ]
+
+  useEffect(() => {
+    const checkMobile = () => {
+      const mobile = window.innerWidth <= 768 || 'ontouchstart' in window
+      setIsMobile(mobile)
+      
+      // Проверка на iOS
+      const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+      setIsIOS(iOS)
+      
+      // Проверка на PWA режим
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+      setIsPWA(isStandalone)
+    }
+    
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    window.addEventListener('fullscreenchange', () => {
+      setFullscreen(!!document.fullscreenElement)
+      if (!document.fullscreenElement) {
+        setSimulatedFullscreen(false)
+      }
+    })
+    
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Определяем мобильное устройство
   useEffect(() => {
@@ -162,7 +193,30 @@ export const CameraPage: React.FC = () => {
     }
   }, [])
 
+  // Имитация fullscreen для iOS PWA
+  const toggleSimulatedFullscreen = useCallback(() => {
+    if (!videoContainerRef.current) return
+    
+    if (!simulatedFullscreen) {
+      // Включаем имитацию
+      setSimulatedFullscreen(true)
+      // Прячем body scroll
+      document.body.style.overflow = 'hidden'
+    } else {
+      // Выключаем имитацию
+      setSimulatedFullscreen(false)
+      document.body.style.overflow = ''
+    }
+  }, [simulatedFullscreen])
+
   const toggleFullscreen = () => {
+    // На iOS PWA не поддерживает нормальный fullscreen
+    if (isIOS && isPWA) {
+      toggleSimulatedFullscreen()
+      return
+    }
+    
+    // На остальных устройствах используем стандартный fullscreen
     if (!videoContainerRef.current) return
     
     if (!document.fullscreenElement) {
@@ -176,7 +230,9 @@ export const CameraPage: React.FC = () => {
     if (!videoContainerRef.current) return
     
     if (isMobile) {
-      if (fullscreen) {
+      if (isIOS && isPWA) {
+        toggleSimulatedFullscreen()
+      } else if (fullscreen) {
         document.exitFullscreen()
       } else {
         videoContainerRef.current.requestFullscreen()
@@ -184,7 +240,13 @@ export const CameraPage: React.FC = () => {
     }
   }
 
+  const closeSimulatedFullscreen = () => {
+    setSimulatedFullscreen(false)
+    document.body.style.overflow = ''
+  }
+
   return (
+    <>
     <div className={`camera-page ${theme}`}>
       {/* Фоновые пятна */}
       <div className="background-spot">
@@ -391,5 +453,36 @@ export const CameraPage: React.FC = () => {
       </div>
       <BottomNavBar />
     </div>
+    {/* Имитация fullscreen для iOS PWA */}
+      {simulatedFullscreen && (
+        <div className="simulated-fullscreen">
+          <div className="simulated-fullscreen-header">
+            <button 
+              className="simulated-fullscreen-close"
+              onClick={closeSimulatedFullscreen}
+            >
+              <Minimize2 size={24} />
+            </button>
+            <div className="simulated-fullscreen-title">
+              Камера {cameraId}
+            </div>
+            <div className="simulated-fullscreen-placeholder" />
+          </div>
+          
+          <div className="simulated-fullscreen-video">
+            <CameraStream 
+              cameraId={cameraId}
+              showControls={false}
+              hideInfo={true}
+              disabled={!cameraStatus?.connected}
+            />
+          </div>
+          
+          <div className="simulated-fullscreen-footer">
+            <span className="exit-hint">👆 Нажмите на видео для выхода</span>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

@@ -428,11 +428,12 @@ export const VideosPage = () => {
               onError={(e) => console.error('Video error:', e)}
               onCanPlay={() => {
                 console.log('Video can play')
-                if (videoRef.current) {
-                  videoRef.current.requestFullscreen().catch(err =>
-                    console.error('Failed to enter fullscreen:', err)
-                  )
-                }
+                // 🔥 Временное отключение автоматического перехода в полноэкранный режим из-за проблем на iOS PWA
+                // if (videoRef.current) {
+                //   videoRef.current.requestFullscreen().catch(err =>
+                //     console.error('Failed to enter fullscreen:', err)
+                //   )
+                // }
               }}
             >
               Ваш браузер не поддерживает воспроизведение видео
