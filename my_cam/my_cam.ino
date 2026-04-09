@@ -4,14 +4,14 @@
 #include <Preferences.h>
 
 // ===== НАСТРОЙКИ =====
-// const char* ssid = "TP-Link_8343";
-// const char* password = "64826424";
-// const char* websocket_host = "api.tgapp.dotnetdon.ru";
-// const uint16_t websocket_port = 443;
-const char* ssid = "TP-Link_297F";
-const char* password = "23598126";
-const char* websocket_host = "192.168.1.100";
-const uint16_t websocket_port = 8005;
+const char* ssid = "TP-Link_8343";
+const char* password = "64826424";
+const char* websocket_host = "api.tgapp.dotnetdon.ru";
+const uint16_t websocket_port = 443;
+// const char* ssid = "TP-Link_297F";
+// const char* password = "23598126";
+// const char* websocket_host = "192.168.1.100";
+// const uint16_t websocket_port = 8005;
 const char* camera_id = "cam1";
 const char* access_key = "12345678";
 // =====================
@@ -290,8 +290,8 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
 
 // --- Запуск WebSocket клиента ---
 void startWebSocketClient() {
-  webSocket.begin(websocket_host, websocket_port, "/esp_service/ws/camera");
-  // webSocket.beginSSL(websocket_host, websocket_port, "/esp_service/ws/camera");
+  // webSocket.begin(websocket_host, websocket_port, "/esp_service/ws/camera");
+  webSocket.beginSSL(websocket_host, websocket_port, "/esp_service/ws/camera");
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(2000);
   webSocket.enableHeartbeat(15000, 5000, 3);

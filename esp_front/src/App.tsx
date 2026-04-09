@@ -18,6 +18,70 @@ function App() {
   const [minTimePassed, setMinTimePassed] = useState(false);
   const [isValidating, setIsValidating] = useState(true);
 
+  // 🔥 FIX #1: Защита от "вечного белого экрана" на iOS PWA
+  useEffect(() => {
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches;
+    
+    if (!isPWA) return;
+    
+    // Проверка: не зависли ли мы в битом состоянии
+    const startTime = Date.now();
+    
+    const checkIfStuck = () => {
+      // Если прошло больше 3 секунд, а страница всё ещё не загрузилась
+      if (document.readyState !== 'complete' && Date.now() - startTime > 3000) {
+        console.warn('PWA stuck detected, forcing recovery');
+        
+        // Сохраняем accessKey перед чисткой
+        const savedKey = localStorage.getItem('accessKey');
+        
+        // Жёсткая чистка
+        sessionStorage.clear();
+        
+        if (savedKey) {
+          localStorage.setItem('accessKey', savedKey);
+        }
+        
+        // Перезагрузка с уникальным параметром
+        const url = new URL(window.location.href);
+        url.searchParams.set('_recover', Date.now().toString());
+        window.location.href = url.toString();
+      }
+    };
+    
+    const timer = setTimeout(checkIfStuck, 3500);
+    
+    // Если загрузились нормально — отменяем таймер
+    if (document.readyState === 'complete') {
+      clearTimeout(timer);
+    } else {
+      window.addEventListener('load', () => clearTimeout(timer));
+    }
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  // 🔥 FIX #2: Сброс "битой сессии" при запуске
+  useEffect(() => {
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches;
+    if (!isPWA) return;
+    
+    // Проверяем уникальный ключ сессии
+    const sessionId = sessionStorage.getItem('pwa_session_id');
+    const urlSessionId = new URLSearchParams(window.location.search).get('_session');
+    
+    if (!sessionId) {
+      // Первый запуск — создаём ID сессии
+      sessionStorage.setItem('pwa_session_id', Date.now().toString());
+    } else if (!urlSessionId) {
+      // Запуск без параметра сессии — добавляем его и перезагружаем
+      // Это заставляет iOS создать "свежий" WebView
+      const url = new URL(window.location.href);
+      url.searchParams.set('_session', sessionId);
+      window.location.replace(url.toString());
+    }
+  }, []);
+
   // Минимальное время показа LaunchScreen (1 секунда)
   useEffect(() => {
     const timer = setTimeout(() => setMinTimePassed(true), 1000);
@@ -29,7 +93,7 @@ function App() {
     try {
       apiClient.setAccessKey(key);
       await apiClient.fetch('/esp_service/telemetry');
-      return true; // ключ валиден
+      return true;
     } catch (error) {
       if (error instanceof AuthError) {
         // 401 – неверный ключ
