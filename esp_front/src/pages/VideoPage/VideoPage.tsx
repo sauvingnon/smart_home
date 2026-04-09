@@ -82,13 +82,16 @@ export const VideosPage = () => {
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
-        closeModal()
+      // Не закрываем модалку при выходе из fullscreen
+      // Просто синхронизируем состояние если нужно
+      if (!document.fullscreenElement && selectedVideo) {
+        // Можно обновить какой-то флаг, но не закрывать видео
+        console.log('Exited fullscreen mode')
       }
     }
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
-  }, [])
+  }, [selectedVideo]) // Добавили зависимость
 
   useEffect(() => {
     loadVideos()
@@ -415,35 +418,39 @@ export const VideosPage = () => {
 
       {/* Модальное окно для просмотра видео */}
       {selectedVideo && (
-        <div className="video-modal-simple">
-          {selectedVideo.url ? (
-            <video
-              ref={videoRef}
-              src={selectedVideo.url}
-              controls
-              autoPlay
-              className="video-player-simple"
-              onLoadStart={() => console.log('Video load start')}
-              onLoadedData={() => console.log('Video loaded data')}
-              onError={(e) => console.error('Video error:', e)}
-              onCanPlay={() => {
-                console.log('Video can play')
-                // 🔥 Временное отключение автоматического перехода в полноэкранный режим из-за проблем на iOS PWA
-                // if (videoRef.current) {
-                //   videoRef.current.requestFullscreen().catch(err =>
-                //     console.error('Failed to enter fullscreen:', err)
-                //   )
-                // }
-              }}
-            >
-              Ваш браузер не поддерживает воспроизведение видео
-            </video>
-          ) : (
-            <div className="video-placeholder">
-              <FileVideo size={64} />
-              <p>Ссылка на видео недоступна</p>
+        <div className="video-modal-overlay" onClick={closeModal}>
+          <div className="video-modal-container" onClick={e => e.stopPropagation()}>
+            <div className="video-modal-header">
+              <button className="modal-close-btn" onClick={closeModal}>
+                ✕
+              </button>
+              <button 
+                className="modal-fullscreen-btn" 
+                onClick={() => videoRef.current?.requestFullscreen()}
+              >
+                ⛶
+              </button>
             </div>
-          )}
+            {selectedVideo.url ? (
+              <video
+                ref={videoRef}
+                src={selectedVideo.url}
+                controls
+                autoPlay
+                className="video-player-modal"
+                onLoadStart={() => console.log('Video load start')}
+                onLoadedData={() => console.log('Video loaded data')}
+                onError={(e) => console.error('Video error:', e)}
+              >
+                Ваш браузер не поддерживает воспроизведение видео
+              </video>
+            ) : (
+              <div className="video-placeholder">
+                <FileVideo size={64} />
+                <p>Ссылка на видео недоступна</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
