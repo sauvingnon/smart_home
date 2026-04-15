@@ -2,7 +2,7 @@
 import io
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, Depends
+from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, Depends, Header, UploadFile, File
 from fastapi.responses import StreamingResponse
 from app.core.worker import BackgroundWorker
 from app.core.auth import get_current_user_id_dep
@@ -18,7 +18,7 @@ class ResolutionRequest(BaseModel):
 async def websocket_camera(websocket: WebSocket):
     """Сокет соединение с камерой. Авторизация внутри подключения."""
     worker = BackgroundWorker.get_instance()
-    await worker.video_service.handle_camera_websocket(websocket)
+    await worker.video_service.handle_camera(websocket)
 
 @router.websocket("/ws/view/{camera_id}")
 async def websocket_viewer(websocket: WebSocket, camera_id: str):
@@ -30,7 +30,7 @@ async def websocket_viewer(websocket: WebSocket, camera_id: str):
 async def set_camera_resolution(
     camera_id: str, 
     request: ResolutionRequest,
-    user_id: int = Depends(get_current_user_id_dep)
+    # user_id: int = Depends(get_current_user_id_dep)
     ):
     """Запрос на смену разрешения камеры."""
     worker = BackgroundWorker.get_instance()
@@ -39,21 +39,20 @@ async def set_camera_resolution(
 @router.get("/camera/{camera_id}/status")
 async def get_camera_status(
     camera_id: str,
-    user_id: int = Depends(get_current_user_id_dep)
+    # user_id: int = Depends(get_current_user_id_dep)
     ):
     worker = BackgroundWorker.get_instance()
-    return await worker.video_service.get_status(camera_id)
+    return await worker.video_service.get_camera_state(camera_id)
 
 @router.get("/videos")
 async def list_videos(
     camera_id: Optional[str] = Query(None, description="ID камеры"),
-    user_id: int = Depends(get_current_user_id_dep)
+    # user_id: int = Depends(get_current_user_id_dep)
 ) -> dict:
     """Получить список видео."""
     worker = BackgroundWorker.get_instance()
 
-    videos = await worker.video_service.list_videos(
-        user_id=user_id,
+    videos = await worker.video_service.get_video_list(
         camera_id=camera_id
     )
     return videos
@@ -73,7 +72,7 @@ async def stream_video(
     if not user_id:
         raise HTTPException(status_code=403, detail="Доступ запрещен.")
 
-    s3 = worker.video_service._s3_manager
+    s3 = worker.video_service.s3_manager
     
     try:
         # Получаем размер файла
@@ -134,12 +133,12 @@ async def stream_video(
 @router.get("/videos/download")
 async def download_video(
     key: str = Query(..., description="Key видео."),
-    user_id: int = Depends(get_current_user_id_dep)
+    # user_id: int = Depends(get_current_user_id_dep)
 ):
     """Скачать видео"""
     worker = BackgroundWorker.get_instance()
     
-    video_data = await worker.video_service.get_video(key)
+    video_data = await worker.video_service.get_video_by_id(key)
     if not video_data:
         raise HTTPException(status_code=404, detail="Video not found")
     
@@ -156,7 +155,7 @@ async def download_video(
 async def get_video_thumbnail(
     camera_id: str = Query(..., description="ID камеры"),
     video_id: str = Query(..., description="UUID видео"),
-    user_id: int = Depends(get_current_user_id_dep)
+    # user_id: int = Depends(get_current_user_id_dep)
 ):
     """Получить thumbnail (превью) видео по video_id"""
     worker = BackgroundWorker.get_instance()
@@ -173,3 +172,64 @@ async def get_video_thumbnail(
             "Content-Length": str(len(thumbnail_data))
         }
     )
+
+
+# ========== ЗАГРУЗКА ВИДЕО ОТ КАМЕРЫ ==========
+
+# app/api/esp_service.py
+@router.post("/upload_video")
+async def upload_video_from_camera(
+    request: Request,
+    camera_id: str = Query(...),
+    start_time: int = Query(...),
+    duration: int = Query(...),
+    # x_access_key: str = Header(...),
+):
+    """ESP32 камера загружает видео (raw body)"""
+    
+    # Читаем сырые данные
+    video_data = await request.body()
+    
+    if not video_data:
+        raise HTTPException(400, "Empty video data")
+    
+    worker = BackgroundWorker.get_instance()
+    
+    video_id = await worker.video_service.save_video_from_camera(
+        camera_id=camera_id,
+        file_stream=io.BytesIO(video_data),  # ← оборачиваем в BytesIO
+        start_timestamp=start_time,
+        duration_seconds=duration,
+        # access_key=x_access_key
+    )
+    
+    if not video_id:
+        raise HTTPException(401, "Unauthorized or upload failed")
+    
+    return {
+        "status": "ok",
+        "video_id": video_id,
+        "size_bytes": len(video_data)
+    }
+
+@router.post("/camera/{camera_id}/record/stop")
+async def stop_camera_recording(
+    camera_id: str,
+    # user_id: int = Depends(get_current_user_id_dep)
+):
+    """
+    Остановить запись на камере.
+    Камера завершит текущий файл и загрузит его на сервер.
+    """
+    worker = BackgroundWorker.get_instance()
+    
+    result = await worker.video_service.stop_recording(camera_id=camera_id)
+    
+    if not result:
+        raise HTTPException(status_code=400, detail="Failed to stop recording or no active recording")
+    
+    return {
+        "status": "stopped",
+        "camera_id": camera_id,
+        "message": "Recording stopped"
+    }

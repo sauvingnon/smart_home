@@ -2,25 +2,29 @@
 #include <WiFi.h>
 #include <WebSocketsClient_Generic.h>
 #include <Preferences.h>
+#include "VideoManager.h"
 
 // ===== НАСТРОЙКИ =====
-const char* ssid = "TP-Link_8343";
-const char* password = "64826424";
-const char* websocket_host = "api.tgapp.dotnetdon.ru";
-const uint16_t websocket_port = 443;
-// const char* ssid = "TP-Link_297F";
-// const char* password = "23598126";
-// const char* websocket_host = "192.168.1.100";
-// const uint16_t websocket_port = 8005;
+// const char* ssid = "TP-Link_8343";
+// const char* password = "64826424";
+// const char* websocket_host = "api.tgapp.dotnetdon.ru";
+// const uint16_t websocket_port = 443;
+const char* ssid = "TP-Link_297F";
+const char* password = "23598126";
+const char* websocket_host = "192.168.1.102";
+const uint16_t websocket_port = 8005;
 const char* camera_id = "cam1";
 const char* access_key = "12345678";
 // =====================
 
 // Пин для управления вентилятором
-#define FAN_PIN 12
+#define FAN_PIN 13
 
 // Объект для работы с памятью
 Preferences preferences;
+
+// VideoManager videoManager(camera_id, access_key, "https://api.tgapp.dotnetdon.ru");
+VideoManager videoManager(camera_id, access_key, "http://192.168.1.102:8005");
 
 // Активен ли кулер.
 bool fanState = true;
@@ -138,6 +142,12 @@ void initCamera() {
   Serial.println("✅ Camera initialized");
 }
 
+// --- Функция инициализации SD-карты ---
+void initSDCard() {
+    SD_MMC.setPins(14, 15, 2, -1, -1, -1);
+    Serial.println("SD pins configured");
+}
+
 // Управление кулером
 void toggleFan(bool isActive){
   digitalWrite(FAN_PIN, isActive ? HIGH : LOW);
@@ -156,54 +166,74 @@ void stopCamera() {
 
 // --- Установка качества ---
 bool setFrameSize(String size) {
-  sensor_t *s = esp_camera_sensor_get();
-  if (!s) return false;
-
-  framesize_t fs;
+  // Определяем целевое разрешение
+  framesize_t targetFs;
+  int targetQualityMode;
+  
   if (size == "QVGA") {
-    fs = FRAMESIZE_QVGA;   // 320x240
-    currentQualityMode = 0;
+    targetFs = FRAMESIZE_QVGA;
+    targetQualityMode = 0;
   }
   else if (size == "VGA") { 
-    fs = FRAMESIZE_VGA;    // 640x480
-    currentQualityMode = 1;
+    targetFs = FRAMESIZE_VGA;
+    targetQualityMode = 1;
   }
   else if (size == "HD") {
-    fs = FRAMESIZE_HD;     // 1280x720
-    currentQualityMode = 2;
+    targetFs = FRAMESIZE_HD;
+    targetQualityMode = 2;
   }
   else return false;
-
-  if (s->set_framesize(s, fs) == 0) {
-    currentFrameSize = fs; // ← сохраняем
-    saveSettings();
+  
+  // Сохраняем настройки в память (всегда)
+  currentQualityMode = targetQualityMode;
+  currentFrameSize = targetFs;
+  saveSettings();
+  
+  // Пробуем применить на лету, если сенсор активен
+  sensor_t *s = esp_camera_sensor_get();
+  if (s) {
+    if (s->set_framesize(s, targetFs) == 0) {
+      Serial.printf("✅ Resolution changed on the fly to %s\n", size.c_str());
+      return true;
+    } else {
+      Serial.printf("⚠️ Failed to change resolution on the fly, will apply after restart\n");
+      return false; // Не получилось на лету, но настройки сохранены
+    }
+  } else {
+    // Сенсор не активен — просто сохранили, применится при следующем запуске
+    Serial.printf("💾 Resolution saved to %s (will apply on next camera start)\n", size.c_str());
     return true;
   }
-
-  return false;
 }
 
 // --- WebSocket Event ---
 void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& length) {
+  // Реагирование на события WS
   switch (type) {
+    // Если отключились
     case WStype_DISCONNECTED:
       isConnected = false;
       isAuthenticated = false;
 
+      // Если стрим был активен - остановим его и выключим камеру.
+
       if (isStreamActive) {
           stopCamera();
           isStreamActive = false;
+          videoManager.setStreamActive(false);
           toggleFan(false);
           Serial.println("🛑 Camera stopped due to WS disconnect");
       }
 
       Serial.println("❌ WS Disconnected");
       break;
+    // Если подключились
     case WStype_CONNECTED:
       isConnected = true;
       webSocket.sendTXT("AUTH:" + String(access_key) + ":" + String(camera_id));
       Serial.println("✅ WS Connected. Auth sent.");
       break;
+    // Обмен данными 
     case WStype_TEXT: {
       String cmd = String((char*)payload);
       
@@ -211,6 +241,7 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
         isAuthenticated = true;
         Serial.println("🔑 Auth OK! Streaming...");
       }
+      // Установка качества с сервера
       else if (cmd.startsWith("size:")) {
         String newSize = cmd.substring(5);
         if (setFrameSize(newSize)) {
@@ -221,6 +252,7 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
           webSocket.sendTXT("size:error");
         }
       }
+      // Включить\выключить стрим
       else if (cmd.startsWith("stream_state:")) {
         String state = cmd.substring(13);
         if (state == "on"){
@@ -241,6 +273,7 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
             // Инициализируем камеру заново
             initCamera();
             isStreamActive = true;
+            videoManager.setStreamActive(true);
             setCpuFrequencyMhz(240);
             WiFi.setSleep(false);
             webSocket.sendTXT("stream_state:ok");
@@ -255,6 +288,7 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
             // Полностью выключаем камеру
             stopCamera();
             isStreamActive = false;
+            videoManager.setStreamActive(false);
             setCpuFrequencyMhz(80);
             WiFi.setSleep(true);
             webSocket.sendTXT("stream_state:ok");
@@ -267,6 +301,7 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
           webSocket.sendTXT("stream_state:error");
         }
       }
+      // Установить состояние вентилятора
       else if (cmd.startsWith("fan:")) {
         String fanCmd = cmd.substring(4);
         // Да, включается во время стрима, иначе всегда молчит
@@ -282,6 +317,69 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
           webSocket.sendTXT("fan:ok");
         }
       }
+      // Начать\остановить запись
+      else if (cmd.startsWith("record:")) {
+          String recordPart = cmd.substring(7);  // "start:1744300000" или "stop"
+          
+          if (recordPart.startsWith("start")) {
+              if (!videoManager.isSDReady()) {
+                  webSocket.sendTXT("record:error:no_sd");
+                  return;
+              }
+              
+              unsigned long startTime = 0;
+              int colonPos = recordPart.indexOf(':');
+              if (colonPos != -1) {
+                  String timeStr = recordPart.substring(colonPos + 1);
+                  startTime = timeStr.toInt();
+              }
+              
+              if (videoManager.isRecording()) {
+                  webSocket.sendTXT("record:error:already");
+              } else {
+                  // Останавливаем стрим, если активен
+                  if (isStreamActive) {
+                      stopCamera();                     // ← добавить
+                      isStreamActive = false;
+                      videoManager.setStreamActive(false);
+                      setCpuFrequencyMhz(80);
+                      WiFi.setSleep(true);
+                      webSocket.sendTXT("stream_state:off");
+                      delay(500);
+                  }
+                  
+                  // Убеждаемся, что камера выключена
+                  if (esp_camera_sensor_get()) {
+                      stopCamera();
+                      delay(500);
+                  }
+                  
+                  // Инициализируем для записи
+                  initCamera();
+                  if (fanState) toggleFan(true);
+                  setCpuFrequencyMhz(240);
+                  WiFi.setSleep(false);
+                  
+                  if (videoManager.startRecord(startTime)) {
+                      webSocket.sendTXT("record:started");
+                  } else {
+                      webSocket.sendTXT("record:error");
+                  }
+              }
+          }
+          else if (recordPart == "stop") {
+              if (videoManager.stopRecord()) {
+                  webSocket.sendTXT("record:stopped");
+              } else {
+                  webSocket.sendTXT("record:error");
+              }
+          }
+      }
+      // Узнать статус очереди
+      else if (cmd == "queue:status") {
+          int pending = videoManager.pendingCount();
+          webSocket.sendTXT("queue:count:" + String(pending));
+      }
       break;
     }
     default: break;
@@ -290,11 +388,10 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
 
 // --- Запуск WebSocket клиента ---
 void startWebSocketClient() {
-  // webSocket.begin(websocket_host, websocket_port, "/esp_service/ws/camera");
-  webSocket.beginSSL(websocket_host, websocket_port, "/esp_service/ws/camera");
+  webSocket.begin(websocket_host, websocket_port, "/esp_service/ws/camera");
+  // webSocket.beginSSL(websocket_host, websocket_port, "/esp_service/ws/camera");
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(2000);
-  webSocket.enableHeartbeat(15000, 5000, 3);
 
   // Запускаем задачу стриминга на ядре 1
   xTaskCreatePinnedToCore(
@@ -319,12 +416,25 @@ void webSocketTask(void * pvParameters) {
   while(1) {
     webSocket.loop();
 
-    if (isConnected && isAuthenticated && isStreamActive) {
-      camera_fb_t * fb = esp_camera_fb_get();
-      if (fb) {
-        webSocket.sendBIN(fb->buf, fb->len, false);
-        frameCount++;
-        esp_camera_fb_return(fb);
+    if (isConnected && isAuthenticated) {
+      if (videoManager.isRecording()) {
+        camera_fb_t * fb = esp_camera_fb_get();
+        if (fb) {
+            if (!videoManager.writeFrame(fb->buf, fb->len)) {
+                videoManager.stopRecord();
+                webSocket.sendTXT("record:error:write_failed");
+            } else {
+                frameCount++;
+            }
+            esp_camera_fb_return(fb);
+        }
+      } else if (isStreamActive) {
+        camera_fb_t * fb = esp_camera_fb_get();
+        if (fb) {
+            webSocket.sendBIN(fb->buf, fb->len, false);
+            frameCount++;
+            esp_camera_fb_return(fb);
+        }
       }
     }
 
@@ -334,9 +444,11 @@ void webSocketTask(void * pvParameters) {
         String fpsMsg = "fps:" + String(frameCount / 5) + 
                 ";quality_mode:" + String(currentQualityMode) + 
                 ";tmp:" + String(getTemperature()) + 
-                ";isStreamActive:" + String(isStreamActiveByte);
+                ";isStreamActive:" + String(isStreamActiveByte) +
+                ";fan:" + String(fanState ? 1 : 0) +
+                ";isRecordActive:" + String(videoManager.isRecording() ? 1 : 0);
         webSocket.sendTXT(fpsMsg);
-        Serial.printf("📊 FPS report: %d fps\n", frameCount / 5);
+        Serial.printf("📊 Report: %s\n", fpsMsg.c_str());
       }
       frameCount = 0;
       lastFpsLog = millis();
@@ -352,9 +464,10 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println();
 
-  // Вентилятор пин
+  // Отключаем встроенный светодиод на GPIO13 (он нам не нужен, будем использовать этот пин для вентилятора)
+  ledcDetach(FAN_PIN);   // если светодиод был подключён к ШИМ (обычно нет, но на всякий случай)
   pinMode(FAN_PIN, OUTPUT);
-  digitalWrite(FAN_PIN, LOW);  // Начинаем с выключенного вентилятора
+  digitalWrite(FAN_PIN, LOW);  // светодиод выключен
 
   loadSettings();
 
@@ -373,7 +486,14 @@ void setup() {
   Serial.println("");
   Serial.println("WiFi connected");
 
-  // ---------- WEBSOCKET (ВМЕСТО HTTP-СЕРВЕРА) ----------
+  // Инициализация SD-карты
+  initSDCard();
+
+  if (!videoManager.begin()) {
+      Serial.println("VideoManager init failed! Recording will be disabled.");
+  }
+
+  // ---------- WEBSOCKET ----------
   startWebSocketClient();
 
   Serial.print("Camera Ready! Streamming to ws://");
@@ -383,7 +503,10 @@ void setup() {
 
 // --- ОСНОВНОЙ ЦИКЛ (управление камерой) ---
 void loop() {
-  delay(10000);
+    Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
+    videoManager.checkRecordTimeout();  // ← проверяем таймаут записи
+    videoManager.processQueue();
+    delay(5000);
 }
 
 // Загрузка настроек из памяти

@@ -7,3 +7,4 @@ aiomqtt
 openai
 ffmpeg
 aiobotocore
+python-multipart

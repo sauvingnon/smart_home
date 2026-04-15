@@ -294,6 +294,71 @@ class S3Manager:
             logger.exception(f"❌ Ошибка получения списка видео: {e}")
             return []
 
+    async def save_video_from_stream(
+    self, 
+    camera_id: str, 
+    file_stream,  # file-like object (из UploadFile.file)
+    start_time: datetime, 
+    duration_seconds: int, 
+    metadata: dict = None
+) -> Optional[str]:
+        """
+        Сохраняет видео из потока (для загрузки от ESP32).
+        Эффективно для больших файлов, не загружает всё в память.
+        
+        Args:
+            camera_id: ID камеры
+            file_stream: поток файла (UploadFile.file или open() file object)
+            start_time: время начала записи (datetime)
+            duration_seconds: длительность в секундах
+            metadata: дополнительные метаданные
+        
+        Returns:
+            video_id: UUID сохранённого видео или None при ошибке
+        """
+        if not await self._ensure_connection():
+            return None
+        
+        try:
+            # Генерируем уникальный ID для видео
+            video_id = str(uuid.uuid4())
+            
+            # Организация по папкам
+            year = start_time.strftime("%Y")
+            month = start_time.strftime("%m")
+            day = start_time.strftime("%d")
+            
+            # Ключ: videos/{camera_id}/{год}/{месяц}/{день}/{uuid}.mp4
+            key = f"videos/{camera_id}/{year}/{month}/{day}/{video_id}.mp4"
+            
+            # Метаданные
+            s3_metadata = {
+                'camera-id': camera_id,
+                'video-id': video_id,
+                'start-time': start_time.isoformat(),
+                'duration': str(duration_seconds),
+                'uploaded-at': datetime.now(timezone.utc).isoformat()
+            }
+            
+            if metadata:
+                s3_metadata.update(self._sanitize_metadata(metadata))
+            
+            # Загружаем напрямую из потока (без чтения в память)
+            await self._client.put_object(
+                Bucket=self.bucket_name,
+                Key=key,
+                Body=file_stream,
+                ContentType='video/mp4',
+                Metadata=s3_metadata
+            )
+            
+            logger.info(f"💾 Видео сохранено из потока: {key} (ID: {video_id})")
+            return video_id
+            
+        except Exception as e:
+            logger.exception(f"❌ Ошибка сохранения видео из потока: {e}")
+            return None
+
     async def save_video(self, camera_id: str, video_data: bytes, start_time: datetime, duration_seconds: int, metadata: dict = None) -> Optional[str]:
         """Сохраняет видео с уникальным ID"""
         if not await self._ensure_connection():

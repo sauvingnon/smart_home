@@ -1,124 +1,27 @@
-"""Схемы для управления камерами и видеозаписью"""
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
 from enum import Enum
 
+class CameraMode(str, Enum):
+    NEVER_CONNECTED = "never_connected"   # ни разу не подключалась
+    CONNECTED = "connected"               # WS есть, стрим выключен
+    STREAMING = "streaming"               # стрим активен
 
-class CameraModeEnum(str, Enum):
-    """Режимы работы камеры"""
-    MANUAL = "manual"
-    AUTO = "auto"
-    IDLE = "idle"
-
+class CameraMetrics(BaseModel):
+    """Текущие метрики камеры (обновляются из fps: сообщений)"""
+    fps: int = 0
+    quality_mode: int = 1   # 0=QVGA, 1=VGA, 2=HD
+    temperature: float = 0.0
+    is_streaming: bool = False   # флаг из прошивки
+    is_recording: bool = False
+    fan: bool = False
+    last_metrics_time: datetime = Field(default_factory=datetime.now)
 
 class CameraState(BaseModel):
-    """Полное состояние камеры (объединяет режим и статистику)"""
-    # Режим работы
-    mode: CameraModeEnum = CameraModeEnum.IDLE
-    start_time: datetime = Field(default_factory=datetime.now)
-    active: bool = False
-    
-    # Статистика потока
-    last_frame: Optional[bytes] = None
-    fps: int = 0
-    reported_fps: int = 0
-    quality_mode: Optional[int] = None
-    temperature: Optional[float] = None
-    last_time: float = 0.0  # Время последнего обновления FPS
-    frame_count: int = 0     # Счетчик кадров за период
-
-    class Config:
-        arbitrary_types_allowed = True
-        validate_assignment = True
-
-
-# Алиасы для обратной совместимости
-CameraMode = CameraState
-CameraStats = CameraState
-
-
-class ViewerConnectionInfo(BaseModel):
-    """Информация о подключении зрителя"""
-    websocket_id: str
-    connected_at: float
+    """Полное состояние камеры на сервере"""
     camera_id: str
-    
-    class Config:
-        arbitrary_types_allowed = True
-        validate_assignment = True
-
-
-class RecordingMetadata(BaseModel):
-    """Метаданные записи видео"""
-    end_time: datetime
-    frames: int
-    fps: float
-
-    class Config:
-        validate_assignment = True
-
-
-class VideoRecorder(BaseModel):
-    """Состояние активной записи видео"""
-    camera_id: str
-    frames: list
-    buffer_size_bytes: int = 0  # Общий размер буфера в байтах
-    start_time: datetime = Field(default_factory=datetime.now)
-    is_recording: bool = False
-    max_duration: int = 30
-    stop_task_id: Optional[int] = None  # ID асинхронного таска (из id() функции)
-    last_activity_time: float = Field(default_factory=lambda: datetime.now().timestamp())  # Время последнего события двери
-
-    class Config:
-        arbitrary_types_allowed = True
-        validate_assignment = True
-
-
-class RecordingInfo(BaseModel):
-    """Информация о текущей записи (для статуса)"""
-    is_recording: bool
-    duration_seconds: int
-    frames: int
-    max_duration: int
-
-    class Config:
-        validate_assignment = True
-
-
-class CameraStatus(BaseModel):
-    """Полный статус камеры"""
-    fps: int
-    reported_fps: int
-    quality_mode: Optional[int] = None
-    viewers: int
-    last_frame_size: int
-    connected: bool
-    recording: Optional[RecordingInfo] = None
-    camera_is_active: bool = False
-    record_is_active: bool = False
-
-    class Config:
-        validate_assignment = True
-
-
-class CameraControlResponse(BaseModel):
-    """Ответ на команду управления камерой"""
-    status: str
-    camera: str
-    message: Optional[str] = None
-    error: Optional[str] = None
-    reason: Optional[str] = None
-
-    class Config:
-        validate_assignment = True
-
-
-class ResolutionCommand(BaseModel):
-    """Команда для изменения разрешения"""
-    camera_id: str
-    resolution: str  # QVGA, VGA, HD
-    access_key: Optional[str] = None
-
-    class Config:
-        validate_assignment = True
+    mode: CameraMode = CameraMode.NEVER_CONNECTED
+    connected_at: Optional[datetime] = None
+    last_seen: datetime = Field(default_factory=datetime.now)  # время последнего ANY сообщения
+    metrics: CameraMetrics = Field(default_factory=CameraMetrics)
