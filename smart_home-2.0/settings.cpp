@@ -100,6 +100,7 @@ String Settings::toJSON(bool pretty) {
   
   // Заполняем значениями
   doc["displayMode"] = data.displayMode;
+  doc["clockMode"] = data.clockMode;
   
   doc["dayOnHour"] = data.dayOnHour;
   doc["dayOnMinute"] = data.dayOnMinute;
@@ -170,6 +171,8 @@ bool Settings::fromJSON(String json) {
   // Читаем значения (с проверкой наличия)
   if (doc.containsKey("displayMode")) 
     newData.displayMode = doc["displayMode"];
+  if (doc.containsKey("clockMode"))
+    newData.clockMode = doc["clockMode"];
   
   if (doc.containsKey("dayOnHour")) newData.dayOnHour = doc["dayOnHour"];
   if (doc.containsKey("dayOnMinute")) newData.dayOnMinute = doc["dayOnMinute"];
@@ -247,6 +250,7 @@ bool Settings::saveJSON() {
 
 void Settings::setDefaultValues() {
   data.displayMode = 1;
+  data.clockMode = 0;
   
   data.dayOnHour = 8;
   data.dayOnMinute = 0;
@@ -286,6 +290,7 @@ void Settings::setDefaultValues() {
 bool Settings::validateData() {
   // Проверяем все значения на валидность
   if (data.displayMode > 2) return false;
+  if (data.clockMode > 2) return false;
   
   if (!validateTime(data.dayOnHour, data.dayOnMinute)) return false;
   if (!validateTime(data.dayOffHour, data.dayOffMinute)) return false;
@@ -340,6 +345,14 @@ void Settings::setDisplayMode(byte value) {
     data.displayMode = value;
   } else {
     Serial.println("Ошибка: displayMode должен быть 0-2");
+  }
+}
+
+void Settings::setClockMode(byte value) {
+  if (value <= 2) {
+    data.clockMode = value;
+  } else {
+    Serial.println("Ошибка: clockMode должен быть 0-2");
   }
 }
 

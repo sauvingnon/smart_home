@@ -8,6 +8,9 @@
 struct SettingsData {
   // Режим экрана (0-постоянный, 1-авто, 2-умный)
   byte displayMode = 1;
+
+  // Режим часов (0-всегда, 1-всегда, ночью тусклее, 2-днем да, ночью нет)
+  byte clockMode = 0;
   
   // Дневное реле расписание
   byte dayOnHour = 8, dayOnMinute = 0;
@@ -77,6 +80,8 @@ public:
   SettingsData getData() const { return data; }
   
   byte getDisplayMode() const { return data.displayMode; }
+
+  byte getClockMode() const { return data.clockMode; }
   
   byte getDayOnHour() const { return data.dayOnHour; }
   byte getDayOnMinute() const { return data.dayOnMinute; }
@@ -115,16 +120,14 @@ public:
     return value;
   }
 
-  bool getSilentMode() {
-    bool value = data.silentMode;
-    data.silentMode = false;
-    return value;
-  }
+  bool getSilentMode() const { return data.silentMode; }
   
   // === СЕТТЕРЫ ===
   void setData(const SettingsData& newData);
   
   void setDisplayMode(byte value);
+
+  void setClockMode(byte value);
   
   void setDaySchedule(byte onH, byte onM, byte offH, byte offM);
   void setNightSchedule(byte onH, byte onM, byte offH, byte offM);

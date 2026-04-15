@@ -80,6 +80,14 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 // Создание обьекта дисплея для крупных чисел
 bigNumbers <LiquidCrystal_I2C> bigNumbersLcd(&lcd);
 
+// Библиотека для часов
+#include <TM1637Display.h>
+// Пины для часов
+#define CLK 1
+#define DIO 3
+// Объект для управления часами
+TM1637Display display(CLK, DIO);
+
 // Самописный модуль для работы с JSON
 #include "Settings.h"
 // Структура для замены EEPROM
@@ -253,6 +261,9 @@ void setup() {
   enc.setTickMode(AUTO);                        // Включение авто режима энкодера
   enc.setType(TYPE2);                           // Выбор типа энкодера
 
+  display.setBrightness(0x0f);  // яркость 0-15
+  display.clear();               // Установка яркости для часов
+
   settings.begin();
   settings.load();
 
@@ -336,7 +347,6 @@ void loop() {
     }
 
     needRedraw = true; // Принудительная перерисовка при смене режима
-    colonVisible = true; // Сбрасываем состояние двоеточия
     lcd.clear();
   }
   
@@ -346,13 +356,13 @@ void loop() {
     updateSensorData(); // Вынесено в отдельную функцию
   }
   
-  // 4. МОРГАНИЕ ДВОЕТОЧИЕМ (только в режиме времени)
-  if (currentDisplayMode == DISPLAY_MODE_TIME) {
-    if (millis() - lastColonBlink >= 500) { // Моргаем каждые 500мс
-      lastColonBlink = millis();
-      colonVisible = !colonVisible;
-      needRedraw = true;
-    }
+  // 4. МОРГАНИЕ ДВОЕТОЧИЕМ (всегда, так как есть часы, которые постоянно отображаются)
+  if (millis() - lastColonBlink >= 500) { // Моргаем каждые 500мс
+    lastColonBlink = millis();
+    colonVisible = !colonVisible;
+    // Отображение времени на часах.
+    displayTimeClock();
+    needRedraw = true;
   }
   
   // 5. ОБНОВЛЕНИЕ ДИСПЛЕЯ (раз в секунду или по необходимости)
@@ -395,6 +405,27 @@ void loop() {
 }
 
 // ===== ФУНКЦИИ ОТОБРАЖЕНИЯ ============================================
+
+// Отображение часов
+void displayTimeClock() {
+  
+  int currentTime = Hour * 100 + Minute;
+  
+  // Прямое управление через setSegments (как в вашем примере)
+  uint8_t digits[4];
+  digits[0] = display.encodeDigit(currentTime / 1000);
+  digits[1] = display.encodeDigit((currentTime / 100) % 10);
+  digits[2] = display.encodeDigit((currentTime / 10) % 10);
+  digits[3] = display.encodeDigit(currentTime % 10);
+  
+  // Добавляем двоеточие ко второму сегменту (индекс 1) если нужно
+  if (colonVisible) {
+    digits[1] |= 0x80;  // включаем двоеточие (старший бит)
+  }
+  
+  display.setSegments(digits);
+  
+}
 
 // Режим офлайн (без WiFi)
 void displayOfflineMode() {
@@ -1908,8 +1939,13 @@ void settingsForAutoRelay() {
 // Активация режима тишины и сообщение об этом
 void activateSilentMode() {
 
-  settings.setSilentMode(true);
-  sendSettingsToBluetooth();
+  // По сути во всех 3-х вариантах просто нужно второй плате узнать эти настройки. что мы уже храним. 
+  // Тут и параметр тишины, и принудительная и просто настройки времени.
+  // Мы можем не передавать каждый параметр в отдельный топик
+  // Просто говорим, эй вторая плата! Тут что то поменялось, посмотри. Она сама рулит.
+  // Мы отправим все те же самые настройки просто в иной топик и все разом. Все. 
+  // Бек не запишет их а просто ретраслирует, ведь это отдельный ОДНОРАЗОВЫЙ топик. Именно отправляемый отсюда.
+    settings.setSilentMode(true);
 
   lcd.clear();
   lcd.createChar(7, bukva_I);
@@ -1954,7 +1990,6 @@ void activateForcedVentilation() {
   }
 
   settings.setForcedVentilationTimeout(result);
-  sendSettingsToBluetooth();
 
   lcd.clear();
 
@@ -2351,6 +2386,7 @@ void loadSettingsInMemory() {
   // ВНИМАНИЕ! Функция вызывается после изменений настроек для загрузки их
   // в оперативную память. Это центральное место для примененя настроек.
   
+  // ТУТ НАДО ПИНГОВАТЬ БЕК ЧТОБЫ ОН ДАЛ СВЕЖИЕ НАСТРОЙКИ ВТОРОЙ ПЛАТЕ
   sendSettingsToBluetooth();
 
 }
@@ -2454,27 +2490,6 @@ void updateTime() {
   Month = now.month();       // Месяц (1-12)
   DayOf = now.dayOfTheWeek(); // День недели (0-6, где 0 = воскресенье)
   Year = now.year();         // Год (например, 2023)
-}
-
-// Отправить данные настроек по bluetooth
-void sendSettingsToBluetooth() {
-  Serial.print("S(");
-  Serial.print(fanDelay);
-  Serial.print("-");
-  Serial.print(fanDuration);
-  Serial.print("-");
-  Serial.print(settings.getSilentMode() ? 1 : 0);
-  Serial.print("-");
-  Serial.print(settings.getForcedVentilationTimeout());
-  Serial.print("-");
-  Serial.print(toiletRelay.startHour);
-  Serial.print("-");
-  Serial.print(toiletRelay.startMinute);
-  Serial.print("-");
-  Serial.print(toiletRelay.stopHour);
-  Serial.print("-");
-  Serial.print(toiletRelay.stopMinute);
-  Serial.print(")");
 }
 
 // Синхронизировать время по bluetooth (только часы и минуты)
