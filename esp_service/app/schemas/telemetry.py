@@ -10,7 +10,6 @@ class TelemetryData(BaseModel):
     free_memory: Optional[int] = Field(None, description="Свободная память в байтах")
     uptime: Optional[int] = Field(None, description="Время работы в секундах")
     timestamp: datetime = Field(default_factory=datetime.now, description="Время отправки")
-    bluetooth_is_active: Optional[bool] = Field(None, description="Статус Bluetooth соединения")
     
     def to_dict(self):
         """Конвертация в словарь для логирования"""
@@ -21,7 +20,6 @@ class TelemetryData(BaseModel):
             'free_memory': f"{self.free_memory:,} bytes" if self.free_memory else None,
             'uptime': f"{self.uptime} sec" if self.uptime else None,
             'timestamp': self.timestamp.isoformat(),
-            'bluetooth_is_active': self.bluetooth_is_active
         }
     
     def to_str(self) -> str:
@@ -39,10 +37,6 @@ class TelemetryData(BaseModel):
                 description += f", время работы {hours} ч"
             else:
                 description += f", время работы {minutes} мин"
-        
-        if self.bluetooth_is_active is not None:
-            status = "активно" if self.bluetooth_is_active else "неактивно"
-            description += f", Bluetooth-соединение {status}"
         
         description += f" (данные от {self.timestamp.strftime('%d.%m.%Y %H:%M')})"
         

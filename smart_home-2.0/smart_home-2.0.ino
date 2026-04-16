@@ -40,8 +40,6 @@ Adafruit_AHT10 myAHT10;
 // Объявление энкодера как объекта
 Encoder enc(S1, S2, KEY);
 
-// Пин отслеживания состояние Bluetooth
-const byte BLUETOOTH_STATE_PIN = A0; 
 
 // Подключение кнопок
 const byte GREEN_BUTTON_PIN = D8;
@@ -197,6 +195,8 @@ byte displayChangeModeTimeout;
 boolean isOfflineModeActive;
 // Для режима работы экрана
 byte displayMode;
+// Для режима работы часов
+byte clockMode;
 // Для хранения состояния режима работы ночного и дневного реле   
 boolean isManualModeRelayEnabled;
 // Переменные для сохранения ручных настроек работы реле              
@@ -230,6 +230,10 @@ boolean exitFlag;
 // Таймаут обновления дисплея - 1 сек.
 #define DISPLAY_UPDATE_INTERVAL 1000
 
+// Авто выход из меню при бездействии
+unsigned long lastMenuActivity = 0;
+const unsigned long MENU_TIMEOUT = 30000;  // 30 секунд
+
 // Текущий режим отображения дисплея
 uint8_t currentDisplayMode = DISPLAY_MODE_TIME; 
 // Последнее переключение режима
@@ -252,7 +256,6 @@ void setup() {
   lcd.init();
   lcd.backlight();
   bigNumbersLcd.intNumbers();
-  pinMode(BLUETOOTH_STATE_PIN, INPUT);
   pinMode(S1, INPUT_PULLUP);
   pinMode(S2, INPUT_PULLUP);
   pinMode(RelayDayPin, OUTPUT);               // Установка режима пина дневного реле как выходного
@@ -397,11 +400,28 @@ void loop() {
   // 6. ФОНОВЫЕ ПРОЦЕССЫ (низший приоритет)
   updateTimer(); // Таймер бездействия
   displayLoop();
+  clockLoop();
   relayLoop();   // Управление реле
   if(!isOfflineModeActive) {
     // ОБРАТИ ВНИМАНИЕ! ЕСЛИ БРОКЕР НЕ РАБОТАЕТ ТО ЭТО БУДЕТ БЛОКИРОВАТЬ ПОТОК!
     mqtt.loop();   // Проверка хендлеров MQTT
   }
+}
+
+// ===== ФУНКЦИИ ВЫХОДА ИЗ МЕНЮ =========================================
+
+// Проверяет, не пора ли выйти из меню
+bool checkMenuTimeout() {
+  if (millis() - lastMenuActivity >= MENU_TIMEOUT) {
+    exitFlag = true;      // Устанавливаешь свой флаг выхода
+    return true;          // Таймаут наступил
+  }
+  return false;           // Ещё не время
+}
+
+// Сбрасывай при любом действии пользователя (поворот, нажатие)
+void resetMenuTimeout() {
+  lastMenuActivity = millis();
 }
 
 // ===== ФУНКЦИИ ОТОБРАЖЕНИЯ ============================================
@@ -439,6 +459,7 @@ void displayOfflineMode() {
   lcd.setCursor(0, 2);
   lcd.print("  WiFi HE \6OCT\5\4EH");
   delay(2000);
+  lcd.clear();
 }
 
 // Онлайн без MQTT
@@ -863,9 +884,15 @@ void mainMenuFirst() {
   lcd.clear();
   k = 0;                            // Курсор в исходном положении
   needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
 
   // Бесокнечный цикл
   while (true) {
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
 
     // Флаг выхода
     if (exitFlag) {
@@ -887,6 +914,8 @@ void mainMenuFirst() {
 
     // Требуется отрисовка
     if (needRedraw) {
+
+      resetMenuTimeout();
 
       lcd.createChar(1, bukva_Y);
       lcd.createChar(2, bukva_L);
@@ -971,12 +1000,18 @@ void screenSettings() {
   lcd.clear();
   k = 0;                            // Курсор в исходном положении
   needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
 
   // Бесокнечный цикл
   while (true) {
 
     enc.tick();
     updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
 
     if (yellowPressed) {
       resetButtonFlags();
@@ -989,6 +1024,8 @@ void screenSettings() {
 
     // Требуется отрисовка
     if (needRedraw) {
+
+      resetButtonFlags();
 
       lcd.createChar(1, bukva_Y);
       lcd.createChar(2, bukva_L);
@@ -1095,11 +1132,13 @@ void screenSettings() {
 
 // Проверка ЛЮБОГО поворота налево
 bool checkEncIsLeftRotate() {
+  enc.tick();
   return enc.isLeft() || enc.isLeftH() || enc.isFastL();
 }
 
 // Проверка ЛЮБОГО поворта направо
 bool checkEncIsRightRotate() {
+  enc.tick();
   return enc.isRight() || enc.isRightH() || enc.isFastR();
 }
 
@@ -1109,11 +1148,17 @@ void relayModeSettings() {
   lcd.clear();
   k = 1;                            // Курсор в исходном положении
   needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
 
   // Бесокнечный цикл
   while (true) {
 
     updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
 
     if (yellowPressed) {
       resetButtonFlags();
@@ -1127,6 +1172,8 @@ void relayModeSettings() {
 
     // Требуется отрисовка
     if (needRedraw) {
+
+      resetButtonFlags();
 
       lcd.createChar(2, bukva_Y);
       lcd.createChar(3, bukva_IY);
@@ -1186,11 +1233,17 @@ void screenModeSettings() {
   lcd.clear();
   k = 1;                            // Курсор в исходном положении
   needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
 
   // Бесокнечный цикл
   while (true) {
 
     updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
 
     if (yellowPressed) {
       resetButtonFlags();
@@ -1203,6 +1256,8 @@ void screenModeSettings() {
 
     // Требуется отрисовка
     if (needRedraw) {
+
+      resetMenuTimeout();
 
       lcd.createChar(0, bukva_CH);
       lcd.createChar(1, bukva_Y);
@@ -1268,6 +1323,7 @@ void mainMenuSecond() {
   lcd.clear();
   k = 0;                            // Курсор в исходном положении
   needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
 
   // Бесокнечный цикл
   while (true) {
@@ -1275,6 +1331,11 @@ void mainMenuSecond() {
     yield();
 
     updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
 
     if (yellowPressed) {
       resetButtonFlags();
@@ -1287,6 +1348,9 @@ void mainMenuSecond() {
     // Требуется отрисовка
     if (needRedraw) {
 
+      resetMenuTimeout();
+
+      lcd.createChar(1, bukva_B);
       lcd.createChar(2, bukva_L);
       lcd.createChar(3, bukva_IY);
       lcd.createChar(4, bukva_EE);
@@ -1299,7 +1363,7 @@ void mainMenuSecond() {
       lcd.setCursor (1, 1);
       lcd.print("PE\7\6M \4KPAHA");
       lcd.setCursor (1, 2);
-      lcd.print("HACTPO\3KA Bluetooth");
+      lcd.print("HACTPO\3KA \5\1OPHO\3");
       lcd.setCursor (1, 3);
       lcd.print("\5CTAHOBKA BPEMEH\6");
       lcd.setCursor(0, k);
@@ -1352,9 +1416,9 @@ void mainMenuSecond() {
         case 1:
           screenModeSettings();
           break;
-        // Настройка блютуза
+        // Настройка уборной
         case 2:
-          bluetoothSettings();
+          toiletSettings();
           break;
         // Установка времени
         case 3:
@@ -1370,11 +1434,12 @@ void mainMenuSecond() {
 }
 
 // Отображение текущих параметров блока в уборной
-void bluetoothSettings() {
+void toiletSettings() {
   
   lcd.clear();
   k = 0;                            // Курсор в исходном положении
   needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
 
   // Бесокнечный цикл
   while (true) {
@@ -1382,6 +1447,11 @@ void bluetoothSettings() {
     yield();
 
     updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
 
     if (yellowPressed) {
       resetButtonFlags();
@@ -1392,7 +1462,9 @@ void bluetoothSettings() {
 
     // Требуется отрисовка
     if (needRedraw) {
+      resetMenuTimeout();
 
+      lcd.createChar(2, bukva_CH);
       lcd.createChar(3, bukva_ZH);
       lcd.createChar(4, bukva_D);                         // Символы необходимые для отрисовки кириллицы в данном меню
       lcd.createChar(5, bukva_L);
@@ -1410,12 +1482,7 @@ void bluetoothSettings() {
       lcd.setCursor (1, 2);
       lcd.print("HACTP. CBETA");
       lcd.setCursor (1, 3);
-      lcd.print("\6O\4K\5. AKT: ");
-      if (isBluetoothConnected()) {
-        lcd.print("\4A");
-      } else {
-        lcd.print("HET");
-      }
+      lcd.print("HACTP. \2ACOB");
       lcd.setCursor(0, k);
       lcd.print(">");
 
@@ -1431,7 +1498,7 @@ void bluetoothSettings() {
       if (checkEncIsLeftRotate()) {     // Был поворов вправо
         k++;
 
-        if(k>=3){      // Переход на меню 2
+        if(k>=4){      // Переход на меню 2
           k = 0;           
           needRedraw = true;                   // Для еденичной отрисовки
         }
@@ -1441,7 +1508,7 @@ void bluetoothSettings() {
         k--;
         
         if (k <= -1) {           // Переход на меню 1
-            k = 2;   
+            k = 3;   
             needRedraw = true;                   // Для еденичной отрисовки
           }
           
@@ -1459,6 +1526,7 @@ void bluetoothSettings() {
           settings.setFanSettings(result, fanDuration);
           settings.save();
           loadSettingsInMemory();
+          sendSettings();
           break;
         // Установка времени после
         case 1:
@@ -1466,11 +1534,14 @@ void bluetoothSettings() {
           settings.setFanSettings(fanDelay, result);
           settings.save();
           loadSettingsInMemory();
+          sendSettings();
           break;
         // Настройка времени
         case 2:
-          setBluetoothTime();
+          setToiletRelayTime();
           break;
+        case 3:
+          clockModeSettings();
       }
       needRedraw = true;
     
@@ -1480,18 +1551,111 @@ void bluetoothSettings() {
 
 }
 
+// Настройка режима работы часов
+void clockModeSettings() {
+
+  lcd.clear();
+  k = 1;                            // Курсор в исходном положении
+  needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
+
+  // Бесокнечный цикл
+  while (true) {
+
+    updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
+
+    if (yellowPressed) {
+      resetButtonFlags();
+      lcd.clear();
+      needRedraw = true;
+      return;
+    }
+
+    yield();
+
+    // Требуется отрисовка
+    if (needRedraw) {
+
+      resetMenuTimeout();
+
+      lcd.createChar(1, bukva_Y);
+      lcd.createChar(2, bukva_IY);
+      lcd.createChar(3, bukva_CH);
+      lcd.createChar(4, bukva_ZH);
+      lcd.createChar(5, bukva_I);
+      lcd.createChar(6, bukva_P);
+      lcd.createChar(7, bukva_Ya);
+      lcd.setCursor (0, 0);
+      lcd.print("----PE\4\5M  \3ACOB----");
+      lcd.setCursor (1, 1);
+      lcd.print("\6OCTO\7HHb|\2    [ ]");
+      lcd.setCursor (1, 2);
+      lcd.print("HO\3b T\1CK      [ ]");
+      lcd.setCursor (1, 3);
+      lcd.print("HO\3b HET       [ ]");
+      lcd.setCursor(0, k);
+      lcd.print(">");
+      lcd.setCursor(17, clockMode+1);
+      lcd.print("*");
+      needRedraw = false;         // Изменений нет - отрисовка завершена
+    }
+
+    enc.tick();
+
+    if (enc.isTurn()){     // Если был поворот в любую сторону
+      lcd.setCursor(0, k);
+      lcd.print(" ");
+      
+      if (checkEncIsLeftRotate()) {     // Был поворов вправо
+        k++;
+        if(k>=4){      // Переход на меню 2
+          k = 1;   
+        }
+      } 
+      if (checkEncIsRightRotate()) {      // Был поворот влево
+        k--;
+        if (k <= -0) {           // Переход на меню 2
+            k = 3;
+          }  
+      }
+
+      needRedraw = true;
+    } 
+          
+    if (enc.isPress()) {      // Если было нажатие кнопки энкодера
+      settings.setClockMode(k-1);
+      settings.save();
+      loadSettingsInMemory();
+      needRedraw = true;
+    }
+
+  }
+
+}
+
 // Меню настройки блока в уборной
-void setBluetoothTime() { 
+void setToiletRelayTime() { 
 
   lcd.clear();
   k = 0;                            // Курсор в исходном положении
   needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
 
   while (true) {
     
     yield();
 
     updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
 
     if (yellowPressed) {
       resetButtonFlags();
@@ -1502,6 +1666,7 @@ void setBluetoothTime() {
 
     if (needRedraw) {                                          // Если есть изменения 
 
+      resetMenuTimeout();
 
       lcd.createChar(7, bukva_L);
       lcd.createChar(6, bukva_L); 
@@ -1560,9 +1725,11 @@ void setBluetoothTime() {
       switch(k) {
         case 0:
           relaySetTime(toiletRelay.startHour, toiletRelay.startMinute, 1, 11, 4);
+          sendSettings();
           break;
         case 1:
           relaySetTime(toiletRelay.stopHour, toiletRelay.stopMinute, 13, 23, 5);
+          sendSettings();
           break;
       }
        needRedraw = true;
@@ -1592,6 +1759,7 @@ void setDefaultSettings() {
   lcd.print("     Bb|\4O\5HEHO");
   delay(2000);
   lcd.clear();
+  resetMenuTimeout();
 }
 
 // Настройки для интернета
@@ -1599,6 +1767,7 @@ void settingsForInternet() {
    lcd.clear();
   k = 0;                            // Курсор в исходном положении
   needRedraw = true;                   // Для еденичной отрисовки
+  resetMenuTimeout();
 
   // Бесокнечный цикл
   while (true) {
@@ -1606,6 +1775,11 @@ void settingsForInternet() {
     yield();
 
     updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
 
     if (yellowPressed) {
       resetButtonFlags();
@@ -1616,6 +1790,7 @@ void settingsForInternet() {
 
     // Требуется отрисовка
     if (needRedraw) {
+      resetMenuTimeout();
 
       lcd.clear();
 
@@ -1728,12 +1903,19 @@ void settingsForManualRelay() {
   k = 0;
   lcd.clear();
   needRedraw = true;
+  resetMenuTimeout();
 
   while (true) {        // Воид настройки реле ручного режима работы
 
     yield();
 
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
+
     if (needRedraw) {                             // Если есть изменения 
+      resetMenuTimeout();
 
       lcd.createChar(3, bukva_L);
       lcd.createChar(4, bukva_CH);
@@ -1831,12 +2013,20 @@ void settingsForAutoRelay() {
   k = 0;
   lcd.clear();
   needRedraw = true;
+  resetMenuTimeout();
 
   while (true) {      //Воид настроки реле автоматического режима работы
 
     yield();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
   
     if (needRedraw) {                                                   // Если есть изменения 
+
+      resetMenuTimeout();
 
       lcd.createChar(3, bukva_L);
       lcd.createChar(4, bukva_CH);
@@ -1939,13 +2129,15 @@ void settingsForAutoRelay() {
 // Активация режима тишины и сообщение об этом
 void activateSilentMode() {
 
-  // По сути во всех 3-х вариантах просто нужно второй плате узнать эти настройки. что мы уже храним. 
-  // Тут и параметр тишины, и принудительная и просто настройки времени.
-  // Мы можем не передавать каждый параметр в отдельный топик
-  // Просто говорим, эй вторая плата! Тут что то поменялось, посмотри. Она сама рулит.
-  // Мы отправим все те же самые настройки просто в иной топик и все разом. Все. 
-  // Бек не запишет их а просто ретраслирует, ведь это отдельный ОДНОРАЗОВЫЙ топик. Именно отправляемый отсюда.
-    settings.setSilentMode(true);
+  // Если руками включен оффлайн режим или бекенд неактивен
+  if (isOfflineModeActive || mqtt.connected() == false) {
+    displayOfflineMode();
+    return;
+  }
+ 
+  settings.setSilentMode(true);
+  sendSettings();
+  settings.setSilentMode(false);
 
   lcd.clear();
   lcd.createChar(7, bukva_I);
@@ -1964,6 +2156,12 @@ void activateSilentMode() {
 
 // Запуск принудительной вентиляции
 void activateForcedVentilation() {
+
+  // Если руками включен оффлайн режим или бекенд неактивен
+  if (isOfflineModeActive || mqtt.connected() == false) {
+    displayOfflineMode();
+    return;
+  }
 
   lcd.clear();
 
@@ -1990,6 +2188,8 @@ void activateForcedVentilation() {
   }
 
   settings.setForcedVentilationTimeout(result);
+  sendSettings();
+  settings.setForcedVentilationTimeout(0);
 
   lcd.clear();
 
@@ -2152,13 +2352,6 @@ bool connectToMQTT() {
   return false;
 }
 
-// Получить состояние bluetooth
-bool isBluetoothConnected() {
-  int stateValue = analogRead(A0);
-  float voltage = stateValue * (3.3 / 1024.0);
-  return (voltage > 2.5);
-}
-
 // Запросить погоду
 void requestForecast() {
   // Если руками включен оффлайн режим или бекенд неактивен
@@ -2233,9 +2426,6 @@ void setupMQTTHandlers() {
     // Установить время на ESP
     rtc.adjust(DateTime(year, month, day, hour, minute, second));
 
-    // Дослать время (только часы и минуты) на Arduino
-    sendTimeToBluetooth(hour, minute);
-
     mqtt.publish("time/ready", "{}");
 
   });
@@ -2271,7 +2461,6 @@ void sendTelemetry() {
   // Системная информация
   doc["uptime"] = millis() / 1000;
   doc["free_memory"] = ESP.getFreeHeap();
-  doc["bluetooth_is_active"] = isBluetoothConnected();
   
   mqtt.publish("telemetry", doc);
 }
@@ -2343,6 +2532,8 @@ void loadSettingsInMemory() {
   // 2 - Умный
   displayMode = settings.getDisplayMode();
 
+  clockMode = settings.getClockMode();
+
   // Режим работы дневного реле
   dayRelay.startHour = settings.getDayOnHour();
   dayRelay.startMinute = settings.getDayOnMinute();
@@ -2386,8 +2577,7 @@ void loadSettingsInMemory() {
   // ВНИМАНИЕ! Функция вызывается после изменений настроек для загрузки их
   // в оперативную память. Это центральное место для примененя настроек.
   
-  // ТУТ НАДО ПИНГОВАТЬ БЕК ЧТОБЫ ОН ДАЛ СВЕЖИЕ НАСТРОЙКИ ВТОРОЙ ПЛАТЕ
-  sendSettingsToBluetooth();
+  sendSettings();
 
 }
 
@@ -2432,6 +2622,36 @@ void relayLoop() {
 // Сброс таймера бездействия
 void resetInactivityTimer() {
   timer = 0;
+}
+
+// Проверка условий на режимы часов
+void clockLoop() {
+
+  // Режим часов (0-всегда, 1-всегда, ночью тусклее, 2-днем да, ночью нет)
+
+  // Всегда - просто включить яркость на максимум.
+  if (clockMode == 0) {
+    display.setBrightness(0x0f);  // яркость 0-15
+  }
+
+  // Если ночь, то тусклее чем днем.
+  if (clockMode  == 1) {
+      if (!(Hour >= dayRelay.startHour && (Hour != dayRelay.startHour || Minute >= dayRelay.startMinute) && Hour <= dayRelay.stopHour && (Hour != dayRelay.stopHour || Minute < dayRelay.stopMinute))) {  // Если ночь, то:
+        display.setBrightness(0x05);  // 5 из 15
+      } else {  
+        display.setBrightness(0x0f);  // яркость 0-15
+      }
+  }
+
+  // Днем да ночью нет.
+  if (clockMode  == 2) {                    
+    if (!(Hour >= dayRelay.startHour && (Hour != dayRelay.startHour || Minute >= dayRelay.startMinute) && Hour <= dayRelay.stopHour && (Hour != dayRelay.stopHour || Minute < dayRelay.stopMinute))) {  // Если ночь, то:
+      display.setBrightness(0);
+    } else {  
+      display.setBrightness(0x0f);
+    }
+  }
+
 }
 
 // Проверка условий на режимы экрана
@@ -2492,25 +2712,23 @@ void updateTime() {
   Year = now.year();         // Год (например, 2023)
 }
 
-// Синхронизировать время по bluetooth (только часы и минуты)
-void sendTimeToBluetooth(int hour, int minute) {
-  Serial.print("T(");
-  Serial.print(String(hour));
-  Serial.print(":");
-  Serial.print(String(minute));
-  Serial.print(")");
-}
-
 // Установить время для реле
 void relaySetTime(int hour, int minute, int minLimit, int highLimit, byte paramIndex) {  
   
   boolean x = true;
+  resetMenuTimeout();
   
   while (x) {            // Универсальная функция настройки минут и часов для любого реле
 
     yield();
 
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
+
     if (needRedraw) {                          // Цикл настройки реле (часов)
+      resetMenuTimeout();
       lcd.setCursor(14, k);
       lcd.print(">");
       lcd.print(hour / 10);
@@ -2543,13 +2761,21 @@ void relaySetTime(int hour, int minute, int minLimit, int highLimit, byte paramI
     }
 
   }
+
   x = true;
+  resetMenuTimeout();
             
   while (x) {                      // Цикл настройки минут
 
     yield();
 
-    if (needRedraw) {            
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return;  // Выходим из меню по таймауту
+    }
+
+    if (needRedraw) {         
+      resetMenuTimeout();   
       lcd.setCursor(18, k);
       lcd.print(minute / 10);
       lcd.print(minute % 10);
@@ -2627,6 +2853,7 @@ bool setTimeParam(TimeParam &param, int* A, bool isLast = false) {
 
   boolean x = true;
   String result = "";
+  resetMenuTimeout(); 
   
   while(x) {
 
@@ -2634,8 +2861,15 @@ bool setTimeParam(TimeParam &param, int* A, bool isLast = false) {
 
     enc.tick();
     updateButtons();
+
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return false;  // Выходим из меню по таймауту
+    }
     
     if(needRedraw) {
+
+      resetMenuTimeout(); 
 
       // Очищаем область отображения
       lcd.clear();
@@ -2781,9 +3015,6 @@ void setTime() {
   
   // Все параметры настроены - устанавливаем время
   rtc.adjust(DateTime(A[5], A[4], A[3], A[2], A[1], 0));
-
-  // Отправить минуты и часы на плату в уборной
-  sendTimeToBluetooth(A[2], A[1]);
   
   // Выводим сообщение о завершении
   lcd.createChar(4, bukva_P);
@@ -2802,13 +3033,21 @@ byte functionSet(int Param, int limit, byte interval) {
 
   needRedraw = true; 
 
+  resetMenuTimeout();
+
   while (true) {              // Цикл настройки таймаута дисплея
 
     yield();
 
     enc.tick();
 
-    if (needRedraw) {                         
+    if (checkMenuTimeout()) {
+      lcd.clear();
+      return Param;  // Выходим из меню по таймауту
+    }
+
+    if (needRedraw) {       
+      resetMenuTimeout();                  
       lcd.setCursor(14, k);
       lcd.print(" >   ");
       lcd.setCursor(16, k);

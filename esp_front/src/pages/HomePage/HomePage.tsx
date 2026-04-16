@@ -22,7 +22,6 @@ type WeatherData = {
 type Telemetry = {
   device_id: string; temperature: number; humidity: number;
   free_memory?: number; uptime?: number; timestamp?: string;
-  bluetooth_is_active?: boolean;
 }
 
 const weatherTranslations: Record<string, string> = {
@@ -151,12 +150,12 @@ export default function HomePage() {
 
               <div className="stats-grid">
                 <div className="stat-item">
-                  <div className={`stat-icon ${data?.bluetooth_is_active ? 'active' : 'inactive'}`}>
+                  <div className={`stat-icon ${true ? 'active' : 'inactive'}`}>
                     <Bluetooth size={18} />
                   </div>
                   <div className="stat-info">
-                    <span className="stat-label">Bluetooth</span>
-                    <span className="stat-value">{data?.bluetooth_is_active ? 'Активен' : 'Выкл'}</span>
+                    <span className="stat-label">СТАТУСЫ ПЛАТ</span>
+                    <span className="stat-value">{true ? 'Активен' : 'Выкл'}</span>
                   </div>
                 </div>
                 <div className="stat-item">

@@ -114,11 +114,7 @@ public:
 
   byte getDisplayChangeModeTimeout() const { return data.displayChangeModeTimeout; }
 
-  byte getForcedVentilationTimeout() {
-    byte value = data.forcedVentilationTimeout;
-    data.forcedVentilationTimeout = 0;
-    return value;
-  }
+  byte getForcedVentilationTimeout() const { return data.forcedVentilationTimeout; }
 
   bool getSilentMode() const { return data.silentMode; }
   
