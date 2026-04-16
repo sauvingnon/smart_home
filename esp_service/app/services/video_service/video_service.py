@@ -1,36 +1,132 @@
 # app/services/video_service.py
 import asyncio
-import json
-import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 from fastapi import WebSocket
 from logger import logger
+from config import API_BASE_URL
 from app.schemas.camera import CameraState, CameraMode, CameraMetrics
 from app.core.auth import get_auth_manager
 from app.utils.time import _get_izhevsk_time
 from app.services.s3_service.s3_manager import S3Manager
 from app.services.redis.cache_manager import CacheManager
+import tempfile
+import os
 
 class VideoService:
     """Сервис управления камерами — базовая версия (только подключение и метрики)"""
     
     def __init__(self, s3_manager: S3Manager, cache_manager: CacheManager):
-
         self.s3_manager = s3_manager
         self.cache_manager = cache_manager
 
         # Состояние всех камер
         self.cameras: Dict[str, CameraState] = {}
-        # WebSocket соединения
+        # WebSocket соединения камер
         self.connections: Dict[str, WebSocket] = {}
+        # WebSoket соединения зрителей
+        self.viewers: Dict[str, Set[WebSocket]] = {}
         # Простая авторизация (потом вынесите в базу)
         self.valid_keys = {"cam1": "12345678"}
     
     async def start(self):
         """Запустить фоновый ping-pong watcher"""
         logger.info("✅ VideoService (базовый) запущен")
-    
+
+    async def handle_viewer_websocket(self, websocket: WebSocket, camera_id: str):
+        """Обработка WebSocket соединения от зрителя"""
+        await websocket.accept()
+        viewer_added = False
+        
+        try:
+            # Ждем авторизацию
+            auth_msg = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+            
+            # Парсим JSON
+            try:
+                import json
+                auth_data = json.loads(auth_msg)
+            except:
+                await websocket.send_text("ERROR: Invalid JSON")
+                return  # 🔧 Просто return, finally сам закроет
+            
+            # Проверяем формат
+            if auth_data.get('type') != 'auth':
+                await websocket.send_text("ERROR: Expected auth message")
+                return
+            
+            access_key = auth_data.get('access_key')
+            if not access_key:
+                await websocket.send_text("ERROR: Missing access_key")
+                return
+            
+            auth_manager = get_auth_manager()
+            
+            # Проверяем access_key
+            if not await auth_manager.verify_access_key(access_key):
+                await websocket.send_text("ERROR: Invalid access_key")
+                return
+            
+            # Проверяем что камера подключена
+            if camera_id not in self.connections:
+                await websocket.send_text("ERROR: Camera offline")
+                return
+            
+            # Отправляем подтверждение
+            await websocket.send_text("AUTH_OK")
+            
+            # Добавляем зрителя
+            if camera_id not in self.viewers:
+                self.viewers[camera_id] = set()
+            self.viewers[camera_id].add(websocket)
+            viewer_added = True
+            
+            logger.info(f"👁️ Зритель подключился к {camera_id}, всего: {len(self.viewers[camera_id])}")
+            
+            # Если это первый зритель - включаем стрим на камере
+            if len(self.viewers[camera_id]) == 1:
+                await self.send_command(camera_id, "stream_state:on")
+                logger.info(f"📹 Включили стрим для {camera_id} (первый зритель)")
+            
+            # Держим соединение
+            while True:
+                try:
+                    msg = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
+                    if msg == "ping":
+                        await websocket.send_text("pong")
+                except asyncio.TimeoutError:
+                    # Отправляем ping
+                    try:
+                        await websocket.send_text("ping")
+                    except:
+                        break  # Соединение закрыто
+                        
+        except Exception as e:
+            logger.error(f"❌ Ошибка зрителя {camera_id}: {e}")
+            
+        finally:
+            # Удаляем зрителя
+            if viewer_added and camera_id in self.viewers:
+                self.viewers[camera_id].discard(websocket)
+                viewers_left = len(self.viewers[camera_id])
+                
+                # Если зрителей не осталось - выключаем стрим
+                if viewers_left == 0:
+                    try:
+                        await self.send_command(camera_id, "stream_state:off")
+                        logger.info(f"📹 Выключили стрим для {camera_id} (нет зрителей)")
+                    except:
+                        pass
+                    del self.viewers[camera_id]
+            
+            # 🔧 Закрываем соединение только если оно еще открыто
+            try:
+                await websocket.close()
+            except:
+                pass  # Уже закрыто или ошибка - игнорируем
+            
+            logger.info(f"👁️ Зритель отключился от {camera_id}")
+
     async def handle_camera(self, websocket: WebSocket):
         """Обработка WebSocket соединения от камеры"""
         await websocket.accept()
@@ -86,9 +182,12 @@ class VideoService:
                         await self._handle_text(camera_id, message['text'])
                         
                     elif 'bytes' in message:
-                        # Обработка бинарных данных (видеокадры)
-                        self.cameras[camera_id].last_seen = datetime.now()
-                        # self.cameras[camera_id].total_frames += 1
+                        # Кадр от камеры
+                        if camera_id in self.cameras:
+                            self.cameras[camera_id].last_seen = datetime.now()
+                        
+                        # 🔧 Рассылаем зрителям
+                        await self._broadcast_frame(camera_id, message['bytes'])
                         
                 except asyncio.TimeoutError:
                     logger.warning(f"⏱️ Таймаут {camera_id}, закрываем")
@@ -138,11 +237,6 @@ class VideoService:
                 else:
                     state.mode = CameraMode.CONNECTED
                 
-                # logger.debug(
-                #     f"📊 [{camera_id}] FPS={metrics.fps}, T={metrics.temperature:.1f}°C, "
-                #     f"Stream={metrics.is_streaming}, Fan={metrics.fan}"  # ← добавили fan в лог
-                # )
-                
             except Exception as e:
                 logger.error(f"❌ Ошибка парсинга метрик {camera_id}: {e}")
             return
@@ -154,6 +248,27 @@ class VideoService:
         
         logger.warning(f"⚠️ [{camera_id}] Неизвестное текстовое сообщение: {text[:100]}")
     
+    async def _broadcast_frame(self, camera_id: str, frame_data: bytes):
+        """Рассылка кадра всем зрителям камеры"""
+        if camera_id not in self.viewers:
+            return
+        
+        dead_viewers = []
+        for viewer in self.viewers[camera_id]:
+            try:
+                await viewer.send_bytes(frame_data)
+            except:
+                dead_viewers.append(viewer)
+        
+        # Удаляем отвалившихся
+        for viewer in dead_viewers:
+            self.viewers[camera_id].discard(viewer)
+        
+        # Если все отвалились - выключаем стрим
+        if len(self.viewers[camera_id]) == 0:
+            await self.send_command(camera_id, "stream_state:off")
+            del self.viewers[camera_id]
+
     async def _disconnect_camera(self, camera_id: str):
         """Закрыть соединение и обновить состояние"""
         if camera_id in self.connections:
@@ -184,14 +299,6 @@ class VideoService:
             await self._disconnect_camera(camera_id)
             return False
     
-    async def start_stream(self, camera_id: str) -> bool:
-        """Включить стрим (камера начнёт слать видеокадры)"""
-        return await self.send_command(camera_id, "stream_state:on")
-    
-    async def stop_stream(self, camera_id: str) -> bool:
-        """Выключить стрим"""
-        return await self.send_command(camera_id, "stream_state:off")
-    
     async def set_resolution(self, camera_id: str, resolution: str) -> bool:
         """Изменить разрешение (QVGA, VGA, HD)"""
         if resolution not in ["QVGA", "VGA", "HD"]:
@@ -210,22 +317,15 @@ class VideoService:
 
     async def get_queue_status(self, camera_id: str) -> Optional[int]:
         """Запросить очередь (ответ обработается асинхронно)"""
-        # Нужно хранить pending запросов или использовать await с Future
-        # Пока можно просто отправить и игнорировать ответ
         await self.send_command(camera_id, "queue:status")
-        return None  # Временно
+        return None
 
     async def set_fan(self, camera_id: str, enable: bool) -> bool:
-        """
-        Включить/выключить вентилятор на камере.
-        Отправляет команду fan:on или fan:off
-        """
+        """Включить/выключить вентилятор на камере"""
         command = f"fan:{'on' if enable else 'off'}"
         success = await self.send_command(camera_id, command)
         
         if success:
-            # Опционально: сразу обновить состояние в metrics (камера подтвердит своим fps)
-            # Но лучше дождаться следующего fps сообщения от камеры
             logger.info(f"🌀 [{camera_id}] Отправлена команда: {'Вкл' if enable else 'Выкл'} вентилятора")
         
         return success
@@ -239,171 +339,316 @@ class VideoService:
 
     # ---- Работа с s3 ----
     async def save_video_from_camera(
-    self,
-    camera_id: str,
-    file_stream,
-    start_timestamp: int,
-    duration_seconds: int,
-) -> Optional[str]:
+        self,
+        camera_id: str,
+        file_stream,
+        start_timestamp: int,
+        duration_seconds: int,
+    ) -> Optional[str]:
         """
-        Сохранить видео, загруженное камерой.
+        Сохранить видео, загруженное камерой, и сгенерировать превью.
         
         Args:
             camera_id: ID камеры
             file_stream: поток видеофайла
             start_timestamp: Unix timestamp начала записи
             duration_seconds: длительность в секундах
-            access_key: ключ доступа для аутентификации
         
         Returns:
             video_id: UUID сохранённого видео или None
         """
         
-        # 2. Проверяем, что камера известна системе (опционально)
+        # Проверяем, что камера известна системе
         if camera_id not in self.cameras:
             logger.warning(f"⚠️ Камера {camera_id} не в состоянии, но сохраняем видео")
         
-        # 3. Конвертируем timestamp в datetime
+        # Конвертируем timestamp в datetime
         try:
             start_datetime = datetime.fromtimestamp(start_timestamp)
         except Exception as e:
             logger.error(f"❌ Неверный timestamp {start_timestamp}: {e}")
             return None
         
-        # 4. Сохраняем в S3 через S3Manager
+        # Проверяем S3 manager
         if not self.s3_manager:
             logger.error("❌ S3 manager не настроен")
             return None
         
-        video_id = await self.s3_manager.save_video_from_stream(
-            camera_id=camera_id,
-            file_stream=file_stream,
-            start_time=start_datetime,
-            duration_seconds=duration_seconds,
-            metadata={
-                "upload_method": "esp32_push",
-                "camera_id": camera_id
-            }
-        )
+        temp_input_path = None
+        temp_output_path = None
+        temp_thumb_path = None
         
-        if video_id:
-            # 5. Обновляем статистику камеры
-    
-            logger.info(f"✅ [{camera_id}] Видео сохранено: {video_id}, длительность={duration_seconds}с")
+        try:
+            # Сохраняем сырой MJPEG во временный файл
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mjpeg') as temp_file:
+                temp_input_path = temp_file.name
+                if hasattr(file_stream, 'read'):
+                    if hasattr(file_stream, 'seek'):
+                        file_stream.seek(0)
+                    file_content = file_stream.read()
+                else:
+                    file_content = file_stream
+                temp_file.write(file_content)
+                temp_file.flush()
             
-            # 6. TODO: Запустить фоновую задачу для извлечения thumbnail
-            # asyncio.create_task(self._extract_and_save_thumbnail(camera_id, video_id, file_stream))
-        
-        return video_id
-
+            # 🔧 Определяем количество кадров в MJPEG файле
+            # Считаем маркеры JPEG (FF D8 FF)
+            frame_count = 0
+            with open(temp_input_path, 'rb') as f:
+                data = f.read()
+                # Ищем JPEG заголовки
+                i = 0
+                while i < len(data) - 2:
+                    if data[i] == 0xFF and data[i+1] == 0xD8 and data[i+2] == 0xFF:
+                        frame_count += 1
+                        i += 3
+                    else:
+                        i += 1
+            
+            # Вычисляем реальный fps
+            if duration_seconds > 0 and frame_count > 0:
+                fps = frame_count / duration_seconds
+                logger.info(f"📊 [{camera_id}] Вычисленный fps: {fps:.2f} ({frame_count} кадров / {duration_seconds}с)")
+            else:
+                fps = 10  # fallback
+                logger.warning(f"⚠️ [{camera_id}] Не удалось вычислить fps, используем {fps}")
+            
+            # Конвертируем MJPEG в MP4 с правильным fps
+            temp_output_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+            
+            cmd = [
+                'ffmpeg',
+                '-f', 'mjpeg',
+                '-r', str(fps),          # 🔧 Явно указываем входной fps
+                '-i', temp_input_path,
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-crf', '23',
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart',
+                '-y',
+                temp_output_path
+            ]
+            
+            logger.info(f"🎬 [{camera_id}] Конвертация видео с fps={fps:.2f}")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                logger.error(f"❌ FFmpeg conversion failed: {stderr.decode()}")
+                return None
+            
+            # Сохраняем сконвертированный MP4 в S3
+            with open(temp_output_path, 'rb') as video_file:
+                video_id = await self.s3_manager.save_video_from_stream(
+                    camera_id=camera_id,
+                    file_stream=video_file,
+                    start_time=start_datetime,
+                    duration_seconds=duration_seconds,
+                    metadata={
+                        "upload_method": "esp32_push",
+                        "camera_id": camera_id,
+                        "format": "mp4",
+                        "fps": fps,
+                        "frame_count": frame_count
+                    }
+                )
+            
+            # Генерируем превью
+            if video_id:
+                try:
+                    thumb_time = min(5, max(1, duration_seconds // 2))
+                    temp_thumb_path = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg').name
+                    
+                    cmd_thumb = [
+                        'ffmpeg',
+                        '-i', temp_output_path,
+                        '-ss', str(thumb_time),
+                        '-vframes', '1',
+                        '-q:v', '2',
+                        '-y',
+                        temp_thumb_path
+                    ]
+                    
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd_thumb,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await process.communicate()
+                    
+                    if os.path.exists(temp_thumb_path) and os.path.getsize(temp_thumb_path) > 0:
+                        with open(temp_thumb_path, 'rb') as thumb_file:
+                            thumb_data = thumb_file.read()
+                            await self.save_thumbnail(camera_id, video_id, thumb_data)
+                            logger.info(f"🖼️ [{camera_id}] Превью сохранено для {video_id}")
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ [{camera_id}] Ошибка создания превью: {e}")
+            
+            logger.info(f"✅ [{camera_id}] Видео сохранено: {video_id}, fps={fps:.2f}, кадров={frame_count}")
+            return video_id
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения видео: {e}", exc_info=True)
+            return None
+            
+        finally:
+            for path in [temp_input_path, temp_output_path, temp_thumb_path]:
+                if path and os.path.exists(path):
+                    try:
+                        os.unlink(path)
+                    except:
+                        pass
 
     async def get_video_list(
         self,
         camera_id: Optional[str] = None
     ) -> list:
         """
-        Получить список видео (с учётом прав доступа).
+        Получить список видео.
         
         Args:
-            user_id: ID пользователя (из JWT или access_key)
             camera_id: опционально фильтр по камере
         
         Returns:
-            list: список видео с метаданными
+            list: список видео с метаданными и presigned URLs
         """
         if not self.s3_manager:
             raise ValueError("S3 manager не доступен")
         
-        videos = await self.s3_manager.list_videos(camera_id=camera_id)
+        token = await self.cache_manager.get_or_create_session_token(123)
         
-        # Добавляем presigned URLs для просмотра (опционально)
-        for video in videos:
-            if video.get('key'):
-                video['url'] = await self.s3_manager.get_video_presigned_url(video['key'])
-        
-        return videos
+        return await self.s3_manager.list_videos(camera_id=camera_id, token=token, url=API_BASE_URL)
 
-
-    async def get_video_by_id(
+    async def stream_video(
         self,
         camera_id: str,
         video_id: str,
-    ) -> Optional[bytes]:
+        range_header: Optional[str] = None
+    ) -> tuple[Optional[bytes], int, Optional[str], Optional[str]]:
         """
-        Получить видео по ID (с проверкой прав).
+        Получить видео чанк для стриминга
+        
+        Args:
+            camera_id: ID камеры
+            video_id: ID видео
+            range_header: Заголовок Range (например "bytes=0-1024")
+        
+        Returns:
+            (data, file_size, content_range, error_message)
         """
         if not self.s3_manager:
-            raise ValueError("S3 manager не доступен")
+            return None, 0, None, "S3 manager не доступен"
         
-        # Формируем ключ по известной структуре
-        # videos/{camera_id}/{year}/{month}/{day}/{video_id}.mp4
-        # Нужно найти файл, т.к. мы не знаем дату
-        all_videos = await self.s3_manager.list_videos(camera_id=camera_id)
+        # Находим ключ видео
+        video_key = await self.s3_manager.get_video_key_by_id(camera_id, video_id)
+        if not video_key:
+            return None, 0, None, "Видео не найдено"
         
-        for video in all_videos:
-            if video.get('video_id') == video_id:
-                return await self.s3_manager.get_video(video['key'])
+        # Парсим Range заголовок
+        start = None
+        end = None
         
-        logger.warning(f"❌ Видео не найдено: {camera_id}/{video_id}")
-        return None
+        if range_header:
+            try:
+                range_match = range_header.replace('bytes=', '').split('-')
+                start = int(range_match[0]) if range_match[0] else 0
+                end = int(range_match[1]) if len(range_match) > 1 and range_match[1] else None
+            except:
+                return None, 0, None, "Неверный формат Range заголовка"
+        
+        # Получаем чанк
+        data, file_size, content_range = await self.s3_manager.get_video_chunk(
+            key=video_key,
+            start=start,
+            end=end
+        )
+        
+        if data is None:
+            return None, 0, None, "Ошибка загрузки видео"
+        
+        return data, file_size, content_range, None
 
     async def get_thumbnail(self, camera_id: str, video_id: str) -> Optional[bytes]:
         """Получить thumbnail из S3"""
-        if not self._s3_manager:
+        if not self.s3_manager:  # 🔧 ИСПРАВЛЕНИЕ: было self._s3_manager
             return None
-        return await self._s3_manager.get_thumbnail(camera_id, video_id)
+        return await self.s3_manager.get_thumbnail(camera_id, video_id)
 
     async def get_video_presigned_url(
         self,
         camera_id: str,
         video_id: str,
-        user_id: int,
+        user_id: Optional[int] = None,  # 🔧 ИСПРАВЛЕНИЕ: сделали опциональным
         expires_in: int = 3600
     ) -> Optional[str]:
         """
         Получить подписанную ссылку на видео.
         """
-        if not self._s3_manager:
+        if not self.s3_manager:  # 🔧 ИСПРАВЛЕНИЕ: было self._s3_manager
             raise ValueError("S3 manager не доступен")
         
-        # TODO: Проверка прав
+        # TODO: Проверка прав если user_id передан
         
-        all_videos = await self._s3_manager.list_videos(camera_id=camera_id)
+        all_videos = await self.s3_manager.list_videos(camera_id=camera_id)
         
         for video in all_videos:
             if video.get('video_id') == video_id:
-                return await self._s3_manager.get_video_presigned_url(video['key'], expires_in)
+                return await self.s3_manager.get_video_presigned_url(video['key'], expires_in)
         
         return None
-
 
     async def delete_video(
         self,
         camera_id: str,
         video_id: str,
-        user_id: int
+        user_id: Optional[int] = None  # 🔧 ИСПРАВЛЕНИЕ: сделали опциональным
     ) -> bool:
         """
         Удалить видео.
         """
-        if not self._s3_manager:
+        if not self.s3_manager:  # 🔧 ИСПРАВЛЕНИЕ: было self._s3_manager
             raise ValueError("S3 manager не доступен")
         
-        # TODO: Проверка прав
+        # TODO: Проверка прав если user_id передан
         
-        all_videos = await self._s3_manager.list_videos(camera_id=camera_id)
+        all_videos = await self.s3_manager.list_videos(camera_id=camera_id)
         
         for video in all_videos:
             if video.get('video_id') == video_id:
                 # Удаляем видео
-                success = await self._s3_manager.delete_video(video['key'])
+                success = await self.s3_manager.delete_video(video['key'])
                 
                 # Удаляем thumbnail (если есть)
                 thumb_key = f"thumbnails/{camera_id}/{video_id}.jpg"
-                await self._s3_manager.delete_video(thumb_key)  # delete_video работает с любым ключом
+                try:
+                    await self.s3_manager.delete_video(thumb_key)
+                except:
+                    pass  # Игнорируем ошибку если thumbnail нет
                 
                 if success:
                     logger.info(f"🗑️ [{camera_id}] Видео {video_id} удалено")
                     return True
         
         return False
+    
+    async def save_thumbnail(
+        self,
+        camera_id: str,
+        video_id: str,
+        thumbnail_data: bytes
+    ) -> bool:
+        """
+        Сохранить thumbnail для видео.
+        """
+        if not self.s3_manager:
+            logger.error("❌ S3 manager не доступен")
+            return False
+        
+        return await self.s3_manager.save_thumbnail(camera_id, video_id, thumbnail_data)

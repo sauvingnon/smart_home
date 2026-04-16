@@ -31,12 +31,19 @@ const itemVar = {
 }
 
 interface CameraStatus {
-  connected?: boolean
-  quality_mode?: 0 | 1 | 2
-  reported_fps?: number
-  fps?: number
-  viewers?: number
-  last_frame_size?: number
+  camera_id: string
+  mode: 'never_connected' | 'connected' | 'streaming'
+  connected_at: string | null
+  last_seen: string
+  metrics: {
+    fps: number
+    quality_mode: number  // 0=QVGA, 1=VGA, 2=HD
+    temperature: number
+    is_streaming: boolean
+    is_recording: boolean
+    fan: boolean
+    last_metrics_time: string
+  }
 }
 
 const STATUS_UPDATE_INTERVAL = 5000
@@ -65,7 +72,7 @@ export const CameraPage: React.FC = () => {
   const qualityToResolution = (quality?: number): Resolution => {
     if (quality === 0) return 'QVGA'
     if (quality === 2) return 'HD'
-    return 'VGA' // 1 или undefined — VGA по умолчанию
+    return 'VGA'
   }
 
   const resolutions: { value: Resolution; label: string; description: string }[] = [
@@ -126,11 +133,11 @@ export const CameraPage: React.FC = () => {
       try {
         if (!cameraId) return
         const status = await apiClient.getCameraStatus(cameraId)
-        // console.log('📊 Camera status:', status)
         setCameraStatus(status)
-        // 👇 Устанавливаем разрешение из статуса при первой загрузке
-        if (status?.quality_mode !== undefined) {
-          setSelectedResolution(qualityToResolution(status.quality_mode))
+        
+        // 🔧 Разрешение берем из metrics.quality_mode
+        if (status?.metrics?.quality_mode !== undefined) {
+          setSelectedResolution(qualityToResolution(status.metrics.quality_mode))
         }
       } catch (e) {
         console.error('Failed to fetch camera status:', e)
@@ -167,8 +174,8 @@ export const CameraPage: React.FC = () => {
           // Проверяем, что компонент все еще жив
           if (timeoutRef.current) {
             setCameraStatus(status)
-            if (status?.quality_mode !== undefined) {
-              setSelectedResolution(qualityToResolution(status.quality_mode))
+            if (status?.metrics?.quality_mode !== undefined) {
+              setSelectedResolution(qualityToResolution(status.metrics.quality_mode))
             }
           }
         } finally {
@@ -309,7 +316,7 @@ export const CameraPage: React.FC = () => {
                 cameraId={cameraId}
                 showControls={false}
                 hideInfo={true}
-                disabled={!cameraStatus?.connected}
+                disabled={cameraStatus?.mode === 'never_connected'}
               />
             </div>
 
@@ -378,12 +385,14 @@ export const CameraPage: React.FC = () => {
           <motion.div variants={itemVar} className="camera-stats-grid">
             <div className="stat-card glass-card">
               <div className="stat-icon wifi">
-                {cameraStatus?.connected ? <Wifi size={24} /> : <WifiOff size={24} />}
+                {cameraStatus?.mode === 'connected' || cameraStatus?.mode === 'streaming' ? 
+                  <Wifi size={24} /> : <WifiOff size={24} />}
               </div>
               <div className="stat-info">
                 <span className="stat-label">Статус</span>
-                <span className={`stat-value ${cameraStatus?.connected ? 'connected' : 'disconnected'}`}>
-                  {cameraStatus?.connected ? 'В сети' : 'Не в сети'}
+                <span className={`stat-value ${cameraStatus?.mode !== 'never_connected' ? 'connected' : 'disconnected'}`}>
+                  {cameraStatus?.mode === 'streaming' ? 'Стрим' : 
+                  cameraStatus?.mode === 'connected' ? 'В сети' : 'Не в сети'}
                 </span>
               </div>
             </div>
@@ -395,18 +404,30 @@ export const CameraPage: React.FC = () => {
               <div className="stat-info">
                 <span className="stat-label">FPS</span>
                 <span className="stat-value">
-                  {cameraStatus?.reported_fps || cameraStatus?.fps || 0}
+                  {cameraStatus?.metrics?.fps || 0}
                 </span>
               </div>
             </div>
 
-            <div className="stat-card glass-card">
+            {/* <div className="stat-card glass-card">
               <div className="stat-icon viewers">
                 <Users size={24} />
               </div>
               <div className="stat-info">
                 <span className="stat-label">Зрители</span>
                 <span className="stat-value">{cameraStatus?.viewers || 0}</span>
+              </div>
+            </div> */}
+
+            <div className="stat-card glass-card">
+              <div className="stat-icon viewers">
+                <Users size={24} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Температура</span>
+                <span className="stat-value">
+                  {cameraStatus?.metrics?.temperature?.toFixed(1) || '—'}°C
+                </span>
               </div>
             </div>
 
@@ -415,11 +436,9 @@ export const CameraPage: React.FC = () => {
                 <Activity size={24} />
               </div>
               <div className="stat-info">
-                <span className="stat-label">Размер кадра</span>
+                <span className="stat-label">Вентилятор</span>
                 <span className="stat-value">
-                  {cameraStatus?.last_frame_size !== undefined && cameraStatus?.last_frame_size !== null
-                    ? `${Math.round(cameraStatus.last_frame_size / 1024)} KB`
-                    : '—'}
+                  {cameraStatus?.metrics?.fan ? 'Вкл' : 'Выкл'}
                 </span>
               </div>
             </div>
@@ -474,7 +493,7 @@ export const CameraPage: React.FC = () => {
               cameraId={cameraId}
               showControls={false}
               hideInfo={true}
-              disabled={!cameraStatus?.connected}
+              disabled={cameraStatus?.mode === 'never_connected'}
             />
           </div>
           

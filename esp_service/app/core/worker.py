@@ -819,8 +819,7 @@ class BackgroundWorker:
                 humidity=data.get('humidity'),
                 free_memory=data.get('free_memory'),
                 uptime=data.get('uptime'),
-                timestamp=_get_izhevsk_time(),
-                bluetooth_is_active=data.get('bluetooth_is_active')
+                timestamp=_get_izhevsk_time()
             )
             
             # Сохраняем в кэш

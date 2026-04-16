@@ -1,6 +1,6 @@
 import { useAuth } from '../context/AuthContext';
-// Прод?
-export const API_BASE_URL = true 
+
+export const API_BASE_URL = false 
   ? 'https://api.tgapp.dotnetdon.ru'
   : 'http://localhost:8005';
 
@@ -25,7 +25,7 @@ class ApiClient {
     return this.accessKey;
   }
 
-  // HTTP методы (твои существующие)
+  // HTTP методы
   async fetchRaw(endpoint: string, options: RequestInit = {}) {
     const headers: HeadersInit = {
       ...options.headers,
@@ -68,7 +68,7 @@ class ApiClient {
   }
 
   getBaseUrl(): string {
-    return API_BASE_URL
+    return API_BASE_URL;
   }
 
   async setCameraResolution(cameraId: string, resolution: 'QVGA' | 'VGA' | 'HD'): Promise<any> {
@@ -79,10 +79,9 @@ class ApiClient {
       throw new AuthError('No access key available');
     }
     
-    // 👇 Используем fetch с ключом в headers, а не в URL
     return this.fetch(`/esp_service/camera/${cameraId}/resolution`, {
       method: 'POST',
-      body: JSON.stringify({ resolution }) // тело запроса
+      body: JSON.stringify({ resolution })
     });
   }
 
@@ -92,18 +91,16 @@ class ApiClient {
       throw new AuthError('No access key available');
     }
     
-    // GET запрос с ключом в headers
     return this.fetch(`/esp_service/camera/${cameraId}/status`, {
       method: 'GET'
     });
   }
 
-  async getVideos(params?: {
-      camera_id?: string;
-  }): Promise<{ videos: any[]; session_token: string; expires_in: number }> {
+  // 🔧 ИСПРАВЛЕНО: getVideos возвращает полный ответ API
+  async getVideos(camera_id: string): Promise<any> {
       const queryParams = new URLSearchParams();
       
-      if (params?.camera_id) queryParams.append('camera_id', params.camera_id);
+      if (camera_id) queryParams.append('camera_id', camera_id);
       
       const queryString = queryParams.toString();
       const endpoint = `/esp_service/videos${queryString ? `?${queryString}` : ''}`;
@@ -112,23 +109,36 @@ class ApiClient {
       
       const response = await this.fetch(endpoint);
       
-      console.log('📦 Raw videos response:', response);
-      console.log('🎫 Session token:', response.session_token);
-      console.log('📼 Videos count:', response.videos?.length);
+      console.log('📦 Videos response:', response);
+      console.log('📼 Videos count:', response?.videos?.length || response?.length);
       
-      return response; // { videos: [], session_token: "" }
+      // 🔧 Возвращаем как есть - API сам решит формат
+      return response;
   }
 
-  getVideoStreamUrl(key: string, token: string): string {
-    return `${API_BASE_URL}/esp_service/videos/stream?key=${encodeURIComponent(key)}&token=${encodeURIComponent(token)}`;
+  // 🔧 ИСПРАВЛЕНО: download использует video_id вместо key
+  async downloadVideo(cameraId: string, videoId: string, token: string): Promise<Blob> {
+    const response = await this.fetchRaw(
+      `/esp_service/videos/download?video_id=${encodeURIComponent(videoId)}&camera_id=${encodeURIComponent(cameraId)}&token=${encodeURIComponent(token)}`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Failed to download video: ${response.status}`);
+    }
+    
+    return await response.blob();
   }
 
-  async getVideoDownloadUrl(key: string): Promise<{ url: string; key: string }> {
-    return this.fetch(`/esp_service/videos/download?key=${encodeURIComponent(key)}`);
-  }
-
-  getVideoThumbnailUrl(cameraId: string, videoId: string): string {
-      return `${API_BASE_URL}/esp_service/videos/thumbnail?camera_id=${encodeURIComponent(cameraId)}&video_id=${encodeURIComponent(videoId)}`;
+  // 🔧 ДОБАВЛЕНО: управление вентилятором
+  async setCameraFan(cameraId: string, enable: boolean): Promise<any> {
+    if (!this.accessKey) {
+      throw new AuthError('No access key available');
+    }
+    
+    return this.fetch(`/esp_service/camera/${cameraId}/fan`, {
+      method: 'POST',
+      body: JSON.stringify({ enable })
+    });
   }
 
   createCameraWebSocket(cameraId: string, options: any = {}) {
@@ -169,7 +179,7 @@ class ApiClient {
       
       ws.onmessage = (event) => {
           if (typeof event.data === 'string') {
-              // Только отвечаем на пинг от сервера, сами пинги не шлём
+              // Только отвечаем на пинг от сервера
               if (event.data === 'ping') {
                   ws.send('pong');
               }
@@ -212,39 +222,31 @@ class ApiClient {
       return ws;
   }
 
-  // Закрыть WebSocket для конкретной камеры
   closeCameraWebSocket(cameraId: string) {
     const ws = this.wsConnections.get(cameraId);
     if (ws) {
       console.log(`🔌 Closing WebSocket for camera ${cameraId}, current state: ${ws.readyState}`);
       
-      // Убираем слушатели событий, чтобы избежать утечек
       ws.onopen = null;
       ws.onmessage = null;
       ws.onerror = null;
       ws.onclose = null;
       
-      // Помечаем как ручное закрытие
       (ws as any).isManualClose = true;
       
-      // Останавливаем ping интервал
       if ((ws as any).pingInterval) {
         clearInterval((ws as any).pingInterval);
       }
       
-      // Закрываем соединение, если оно не закрыто
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close(1000, 'Closed by client');
       }
       
       this.wsConnections.delete(cameraId);
       console.log(`✅ WebSocket for camera ${cameraId} closed and removed from Map`);
-    } else {
-      console.log(`ℹ️ No active WebSocket found for camera ${cameraId}`);
     }
   }
 
-  // Закрыть все WebSocket соединения
   closeAllWebSockets() {
     this.wsConnections.forEach((ws) => {
       ws.close(1000, 'Closing all connections');

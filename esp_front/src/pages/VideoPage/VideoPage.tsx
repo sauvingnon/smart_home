@@ -15,15 +15,16 @@ import { useTheme } from '../../context/ThemeContext'
 import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar'
 
 interface VideoItem {
-  key: string
-  video_id?: string
-  size_bytes: number
-  last_modified: string
-  camera_id: string
-  duration_seconds?: number
-  start_time?: string
-  thumbnail_url?: string
-  url?: string
+    key: string
+    video_id?: string
+    video_url: string  // 🔧 Добавлено
+    url?: string        // 🔧 Добавлено (алиас для video_url)
+    size_bytes: number
+    last_modified: string
+    camera_id: string
+    duration_seconds?: number
+    start_time?: string
+    thumbnail_url: string  // 🔧 Может быть null
 }
 
 const containerVar = {
@@ -43,8 +44,6 @@ export const VideosPage = () => {
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
-  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
-  const [sessionToken, setSessionToken] = useState<string>('');
 
   const toggleDay = (dayKey: string) => {
     setExpandedDays(prev => {
@@ -57,28 +56,6 @@ export const VideosPage = () => {
       return newSet
     })
   }
-
-  useEffect(() => {
-      // Для каждого видео, у которого есть thumbnail_url и ещё нет загруженного URL
-      videos.forEach(async (video) => {
-          if (video.thumbnail_url && !thumbnailUrls[video.key]) {
-              try {
-                  const response = await apiClient.fetchRaw(video.thumbnail_url);
-                  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                  const blob = await response.blob();
-                  const url = URL.createObjectURL(blob);
-                  setThumbnailUrls(prev => ({ ...prev, [video.key]: url }));
-              } catch (error) {
-                  console.error(`Failed to load thumbnail for ${video.key}:`, error);
-              }
-          }
-      });
-
-      // Очистка: revoke все blob URL при размонтировании или при изменении videos
-      return () => {
-          Object.values(thumbnailUrls).forEach(url => URL.revokeObjectURL(url));
-      };
-  }, [videos]); // Зависимость от videos – перезагрузим, если список изменился
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -99,20 +76,9 @@ export const VideosPage = () => {
 
   const loadVideos = async () => {
       try {
-          console.log('Loading videos...')
           setLoading(true)
-          const accessKey = apiClient.getAccessKey()
-          if (!accessKey) {
-              console.log('No access key, skipping video load')
-              setLoading(false)
-              return
-          }
-          
-          const response = await apiClient.getVideos()
-          console.log('Videos loaded:', response.videos.length)
-          
-          setVideos(response.videos)
-          setSessionToken(response.session_token) // Сохраняем токен
+          const videos = await apiClient.getVideos("cam1")  // 🔧 Возвращает просто массив
+          setVideos(videos)
       } catch (error) {
           console.error('Failed to load videos:', error)
       } finally {
@@ -184,35 +150,53 @@ export const VideosPage = () => {
     return formatSize(totalBytes)
   }
 
+  // 🔧 ИСПРАВЛЕНИЕ handleVideoClick:
   const handleVideoClick = (video: VideoItem) => {
-      const url = apiClient.getVideoStreamUrl(video.key, sessionToken)
-      console.log('Video URL:', url)
-      setSelectedVideo({ ...video, url })
+      console.log('🎬 Opening video:', video.video_url)
+      setSelectedVideo({ ...video, url: video.video_url })
   }
 
   const handleDownload = async (video: VideoItem, e: React.MouseEvent) => {
-    e.stopPropagation()
-    try {
-      const response = await apiClient.fetchRaw(
-        `/esp_service/videos/download?key=${encodeURIComponent(video.key)}`
-      )
-      if (!response.ok) {
-        throw new Error(`Download failed: ${response.status}`)
+      e.stopPropagation()
+      try {
+          // 🔧 Используем video_id и camera_id вместо key
+          const videoId = video.video_id || video.key.split('/').pop()?.replace('.mp4', '')
+          const cameraId = video.camera_id
+          
+          if (!videoId || !cameraId) {
+              throw new Error('Missing video_id or camera_id')
+          }
+          
+          // 🔧 Получаем токен из localStorage или контекста (если нужен)
+          const token = localStorage.getItem('session_token') || ''
+          
+          const response = await apiClient.fetchRaw(
+              `/esp_service/videos/download?video_id=${encodeURIComponent(videoId)}&camera_id=${encodeURIComponent(cameraId)}&token=${encodeURIComponent(token)}`
+          )
+          
+          if (!response.ok) {
+              throw new Error(`Download failed: ${response.status}`)
+          }
+          
+          const blob = await response.blob()
+          const downloadUrl = URL.createObjectURL(blob)
+          const safeFileName = `${cameraId}_${video.start_time?.replace(/[:T]/g, '-') || Date.now()}.mp4`
+          
+          const link = document.createElement('a')
+          link.href = downloadUrl
+          link.download = safeFileName
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          URL.revokeObjectURL(downloadUrl)
+          
+      } catch (error) {
+          console.error('Failed to download video:', error)
+          // 🔧 Можно показать уведомление пользователю
+          alert('Не удалось скачать видео')
       }
-      const blob = await response.blob()
-      const downloadUrl = URL.createObjectURL(blob)
-      const safeFileName = `${video.camera_id}_${new Date(video.last_modified).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.mp4`
-      const link = document.createElement('a')
-      link.href = downloadUrl
-      link.download = safeFileName
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(downloadUrl)
-    } catch (error) {
-      console.error('Failed to download video:', error)
-    }
   }
+
 
   const closeModal = () => {
     if (videoRef.current) {
@@ -330,16 +314,23 @@ export const VideosPage = () => {
                                   whileTap={{ scale: 0.98 }}
                                 >
                                   <div className="video-preview">
-                                    {thumbnailUrls[video.key] ? (
-                                      <img
-                                        src={thumbnailUrls[video.key]}
-                                        alt="Превью видео"
-                                        className="thumbnail-image"
-                                      />
+                                    {video.thumbnail_url ? (
+                                        <img
+                                            src={video.thumbnail_url}
+                                            alt="Превью видео"
+                                            className="thumbnail-image"
+                                            onError={(e) => {
+                                                (e.target as HTMLImageElement).style.display = 'none'
+                                                const parent = (e.target as HTMLImageElement).parentElement
+                                                if (parent) {
+                                                    parent.classList.add('thumbnail-error')
+                                                }
+                                            }}
+                                        />
                                     ) : (
-                                      <div className="thumbnail-placeholder">
-                                        <FileVideo size={32} />
-                                      </div>
+                                        <div className="thumbnail-placeholder">
+                                            <FileVideo size={32} />
+                                        </div>
                                     )}
                                     <div className="play-overlay">
                                       <Play size={24} className="play-icon" />
