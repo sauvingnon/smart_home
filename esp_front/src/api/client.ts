@@ -1,6 +1,6 @@
 import { useAuth } from '../context/AuthContext';
 
-export const API_BASE_URL = false 
+export const API_BASE_URL = true 
   ? 'https://api.tgapp.dotnetdon.ru'
   : 'http://localhost:8005';
 
