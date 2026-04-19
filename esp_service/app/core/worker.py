@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from logger import logger
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.services.s3_service.s3_manager import S3Manager
-from app.schemas.telemetry import TelemetryData
+from app.schemas.telemetry import TelemetryData, GeneralResponse
 from app.schemas.weather_data import WeatherData
 from app.schemas.settings import SettingsData
 from app.schemas.device_status import DeviceStatus
@@ -446,9 +446,26 @@ class BackgroundWorker:
         except Exception as e:
             logger.exception(f"❌ Ошибка отправки на плату: {e}")
 
-    def get_current_telemetry(self) -> Optional[TelemetryData]:
-        """Получить текущую телеметрию."""
-        return self.current_telemetry
+    async def get_current_general_status(self) -> Optional[GeneralResponse]:
+        """Получить общий статус системы."""
+
+        standard_telemetry = self.current_telemetry
+        
+        camera_status = await self.video_service.get_camera_state("cam1")
+
+        # central_board_status может быть ONLINE, OFFLINE, DEAD, NEVER_CONNECTED
+        # sensor_status может быть ONLINE, OFFLINE, DEAD, NEVER_CONNECTED
+        # toilet_status может быть ONLINE, OFFLINE, DEAD, NEVER_CONNECTED
+        # camera_status может быть NEVER_CONNECTED, OFFLINE, CONNECTED, STREAMING, RECORDING
+
+        
+        return GeneralResponse(
+            telemetry=standard_telemetry,
+            central_board_status=self.device_status.value if self.device_status else "offline",
+            camera_status=camera_status.mode.value if camera_status else "offline",
+            sensor_status=self.sensor_status.value if self.sensor_status else "offline",
+            toilet_status=self.sensor_status.value if self.sensor_status else "offline"
+        )
     
     async def get_current_config(self, timeout: float = 5.0) -> Optional[SettingsData]:
         """Получить текущие настройки (синхронный запрос-ответ)"""

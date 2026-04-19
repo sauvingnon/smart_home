@@ -12,7 +12,8 @@ import {
   Settings2,
   Check,
   Fan,
-  Power
+  Power,
+  Thermometer
 } from 'lucide-react'
 import { CameraStream } from '../../components/StreamCamera/StreamCamera'
 import { apiClient } from '../../api/client'
@@ -346,9 +347,7 @@ export const CameraPage: React.FC = () => {
             <div className="video-tap-area" onClick={handleVideoTap}>
               <CameraStream 
                 cameraId={cameraId}
-                showControls={false}
-                hideInfo={true}
-                disabled={cameraStatus?.mode !== 'streaming'}
+                cameraStatus={cameraStatus?.mode}
               />
             </div>
 
@@ -508,8 +507,8 @@ export const CameraPage: React.FC = () => {
             </div>
 
             <div className="stat-card glass-card">
-              <div className="stat-icon viewers">
-                <Users size={24} />
+              <div className="stat-icon temperature">
+                <Thermometer size={24} />
               </div>
               <div className="stat-info">
                 <span className="stat-label">Температура</span>
@@ -556,9 +555,7 @@ export const CameraPage: React.FC = () => {
           <div className="simulated-fullscreen-video">
             <CameraStream 
               cameraId={cameraId}
-              showControls={false}
-              hideInfo={true}
-              disabled={cameraStatus?.mode === 'never_connected'}
+              cameraStatus={cameraStatus?.mode}
             />
           </div>
           

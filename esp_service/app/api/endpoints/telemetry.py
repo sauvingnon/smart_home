@@ -1,7 +1,7 @@
 # api/routes/esp_service.py
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.worker import BackgroundWorker
-from app.schemas.telemetry import TelemetryData
+from app.schemas.telemetry import GeneralResponse, TelemetryData
 from typing import List
 from app.core.auth import get_current_user_id_dep
 
@@ -10,8 +10,8 @@ router = APIRouter(
     tags=["esp_service"],
 )
 
-@router.get("/telemetry", response_model=TelemetryData)
-async def get_current_telemetry_endpoint(
+@router.get("/telemetry", response_model=GeneralResponse)
+async def get_general_status_endpoint(
     user_id: int = Depends(get_current_user_id_dep)
 ):
     """
@@ -20,12 +20,12 @@ async def get_current_telemetry_endpoint(
     Возвращает последние полученные данные от ESP устройства.
     """
     worker = BackgroundWorker.get_instance()
-    telemetry = worker.get_current_telemetry()
+    response = await worker.get_current_general_status()
     
-    if telemetry is None:
+    if response is None:
         raise HTTPException(
-            status_code=404, 
-            detail="Телеметрия еще не получена от устройства"
+            status_code=500, 
+            detail="Ошибка получения данных."
         )
     
-    return telemetry
+    return response

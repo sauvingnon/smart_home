@@ -157,3 +157,13 @@
   opacity: 0.5;
   font-weight: normal;
 }
+
+.recording-icon {
+  color: #ef4444;
+  animation: pulse-record 1.5s infinite;
+}
+
+@keyframes pulse-record {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

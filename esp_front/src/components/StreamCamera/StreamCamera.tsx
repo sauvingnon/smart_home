@@ -1,31 +1,21 @@
 import React, { useRef, useEffect } from 'react';
 import { useCamera } from '../../hooks/useCamera';
-import type { Resolution } from '../../api/camera';
 import './StreamCamera.css';
-import { WifiOff } from 'lucide-react';
+import { WifiOff, Power, Video, Radio } from 'lucide-react';
 
 interface CameraStreamProps {
   cameraId?: string;
-  className?: string;
-  showControls?: boolean;
-  hideInfo?: boolean;
-  disabled?: boolean;
+  cameraStatus?: string;
 }
 
 export const CameraStream: React.FC<CameraStreamProps> = ({
   cameraId = 'cam1',
-  className = '',
-  showControls = true,
-  hideInfo = false,
-  disabled = false
+  cameraStatus = 'offline',
 }) => {
   const {
     frameBlob,
     connectionState,
-    status,
     error,
-    isChangingResolution,
-    setResolution
   } = useCamera(cameraId);
 
   const imgRef = useRef<HTMLImageElement>(null);
@@ -39,28 +29,54 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     }
   }, [frameBlob]);
 
-  const resolutions: { value: Resolution; label: string }[] = [
-    { value: 'QVGA', label: 'Быстро' },
-    { value: 'VGA', label: 'Средне' },
-    { value: 'HD', label: 'Качественно' }
-  ];
+  // Функция получения контента для отключенной камеры
+  const getDisabledContent = () => {
+    switch (cameraStatus) {
+      case 'never_connected':
+        return {
+          icon: <Power size={48} strokeWidth={1.5} />,
+          title: 'Камера не подключена',
+          hint: 'Камера ни разу не подключалась к системе'
+        };
+      case 'offline':
+        return {
+          icon: <WifiOff size={48} strokeWidth={1.5} />,
+          title: 'Камера отключена',
+          hint: 'Проверьте питание и подключение камеры'
+        };
+      case 'recording':
+        return {
+          icon: <Video size={48} strokeWidth={1.5} className="recording-icon" />,
+          title: 'Идёт запись',
+          hint: 'Стрим недоступен во время записи'
+        };
+      default:
+        return {
+          icon: <WifiOff size={48} strokeWidth={1.5} />,
+          title: 'Камера недоступна',
+          hint: 'Проверьте подключение камеры'
+        };
+    }
+  };
 
-  if (disabled) {
+  // Камера не стримит
+  if (cameraStatus !== 'streaming' && cameraStatus !== 'connected') {
+    const content = getDisabledContent();
     return (
-      <div className={`camera-container ${className}`}>
+      <div className={`camera-container`}>
         <div className="camera-viewport">
           <div className="camera-state disabled">
-            <WifiOff size={48} strokeWidth={1.5} />
-            <span>Камера отключена</span>
-            <span className="disabled-hint">Проверьте подключение камеры</span>
+            {content.icon}
+            <span>{content.title}</span>
+            <span className="disabled-hint">{content.hint}</span>
           </div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className={`camera-container ${className}`}>
+ return (
+    <div className={`camera-container`}>
       {/* Видео */}
       <div className="camera-viewport">
         {connectionState === 'connected' && (
@@ -71,17 +87,19 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           />
         )}
         
-        {/* Состояния */}
+        {/* Состояния подключения */}
         {connectionState === 'connecting' && (
           <div className="camera-state">
             <div className="spinner" />
-            <span>Подключение...</span>
+            <span>Подключение к потоку...</span>
           </div>
         )}
         
         {connectionState === 'disconnected' && (
           <div className="camera-state error">
-            <span>📡 Нет сигнала</span>
+            <Radio size={32} strokeWidth={1.5} />
+            <span>Нет сигнала</span>
+            <span className="disabled-hint">Ожидание видеопотока...</span>
           </div>
         )}
         
@@ -91,45 +109,6 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           </div>
         )}
       </div>
-
-      {/* Информация скрывается через проп */}
-      {!hideInfo && connectionState === 'connected' && status && (
-        <div className="camera-info">
-          <span className="info-dot">●</span>
-          <span className="info-text">Live</span>
-          <span className="info-separator">|</span>
-          <span className="info-text">{status.reported_fps || status.fps} fps</span>
-          {status.viewers > 0 && (
-            <>
-              <span className="info-separator">|</span>
-              <span className="info-text">👁 {status.viewers}</span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Управление тоже можно скрыть, но мы его не используем на странице */}
-      {showControls && connectionState === 'connected' && (
-        <div className="camera-controls">
-          <div className="controls-group">
-            {(['QVGA', 'VGA', 'HD'] as Resolution[]).map((res) => (
-              <button
-                key={res}
-                className={`control-btn ${isChangingResolution ? 'disabled' : ''}`}
-                onClick={() => setResolution(res)}
-                disabled={isChangingResolution}
-              >
-                {res === 'QVGA' && 'Быстро'}
-                {res === 'VGA' && 'Средне'}
-                {res === 'HD' && 'Качественно'}
-              </button>
-            ))}
-          </div>
-          {isChangingResolution && (
-            <div className="changing-hint">Смена разрешения...</div>
-          )}
-        </div>
-      )}
     </div>
   );
 };

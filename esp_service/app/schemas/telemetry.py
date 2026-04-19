@@ -41,3 +41,12 @@ class TelemetryData(BaseModel):
         description += f" (данные от {self.timestamp.strftime('%d.%m.%Y %H:%M')})"
         
         return description
+    
+class GeneralResponse(BaseModel):
+    """Общий формат ответа API"""
+    telemetry: Optional[TelemetryData] = Field(None, description="Последняя телеметрия от устройства")
+    central_board_status: Optional[str] = Field(None, description="Статус центральной платы (например, 'online', 'offline')")
+    camera_status: Optional[str] = Field(None, description="Статус камеры (например, 'online', 'offline')")
+    sensor_status: Optional[str] = Field(None, description="Статус датчиков (например, 'ok', 'error')")
+    toilet_status: Optional[str] = Field(None, description="Статус уборной (например, 'ok', 'error')")
+    
