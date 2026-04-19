@@ -73,15 +73,6 @@ async def get_camera_status(
     
     return state
 
-@router.get("/cameras")  # 🔧 ДОБАВЛЕНО: получить список всех камер
-async def get_all_cameras(
-    # user_id: int = Depends(get_current_user_id_dep)
-):
-    """Получить список всех камер и их статусы."""
-    worker = BackgroundWorker.get_instance()
-    cameras = await worker.video_service.get_all_cameras()
-    return {"cameras": cameras}
-
 @router.get("/videos")
 async def list_videos(
     request: Request,

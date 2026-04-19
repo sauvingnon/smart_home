@@ -10,7 +10,9 @@ import {
   Minimize2,
   RotateCw,
   Settings2,
-  Check
+  Check,
+  Fan,
+  Power
 } from 'lucide-react'
 import { CameraStream } from '../../components/StreamCamera/StreamCamera'
 import { apiClient } from '../../api/client'
@@ -32,16 +34,17 @@ const itemVar = {
 
 interface CameraStatus {
   camera_id: string
-  mode: 'never_connected' | 'connected' | 'streaming'
+  mode: 'never_connected' | 'connected' | 'streaming' | 'recording' | 'offline'
   connected_at: string | null
   last_seen: string
+  viewers: number
   metrics: {
     fps: number
     quality_mode: number  // 0=QVGA, 1=VGA, 2=HD
     temperature: number
     is_streaming: boolean
     is_recording: boolean
-    fan: boolean
+    is_fan_active: boolean
     last_metrics_time: string
   }
 }
@@ -61,6 +64,10 @@ export const CameraPage: React.FC = () => {
   const [isChangingResolution, setIsChangingResolution] = useState(false)
   // 👇 Добавляем локальный стейт для разрешения
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('VGA')
+
+   // 👇 Добавляем локальный стейт для вентилятора (синхронизируется с бэком)
+  const [isFanActive, setIsFanActive] = useState(false)
+  const [isChangingFan, setIsChangingFan] = useState(false)
 
   // Состояние для имитации fullscreen на iOS
   const [simulatedFullscreen, setSimulatedFullscreen] = useState(false)
@@ -139,6 +146,11 @@ export const CameraPage: React.FC = () => {
         if (status?.metrics?.quality_mode !== undefined) {
           setSelectedResolution(qualityToResolution(status.metrics.quality_mode))
         }
+
+        if (status?.metrics?.is_fan_active !== undefined) {
+          setIsFanActive(status.metrics.is_fan_active)
+        }
+        
       } catch (e) {
         console.error('Failed to fetch camera status:', e)
       } finally {
@@ -151,6 +163,26 @@ export const CameraPage: React.FC = () => {
     return () => clearInterval(interval)
   }, [cameraId])
 
+  const handleFanToggle = async (newState: boolean) => {
+    if (isChangingFan || !cameraId) return
+    
+    setIsChangingFan(true)
+    
+    try {
+      await apiClient.setCameraFan(cameraId, newState)
+      setIsFanActive(newState)
+      
+      // Запросить свежий статус
+      const status = await apiClient.getCameraStatus(cameraId)
+      if (status?.metrics?.is_fan_active !== undefined) {
+        setIsFanActive(status.metrics.is_fan_active)
+      }
+    } catch (e) {
+      console.error('Failed to toggle fan:', e)
+    } finally {
+      setIsChangingFan(false)
+    }
+  }
 
   const handleResolutionChange = async (resolution: Resolution) => {
     if (isChangingResolution || !cameraId) return
@@ -316,7 +348,7 @@ export const CameraPage: React.FC = () => {
                 cameraId={cameraId}
                 showControls={false}
                 hideInfo={true}
-                disabled={cameraStatus?.mode === 'never_connected'}
+                disabled={cameraStatus?.mode !== 'streaming'}
               />
             </div>
 
@@ -334,18 +366,17 @@ export const CameraPage: React.FC = () => {
             )}
           </motion.div>
 
-          {/* Управление качеством */}
           <motion.div variants={itemVar} className="resolution-section glass-card">
             <div className="section-header">
               <Settings2 size={24} className="section-icon" />
-              <h2>Качество видео</h2>
+              <h2>Управление</h2>
             </div>
 
+            {/* Блок разрешения */}
             <div className="resolution-grid">
               {resolutions.map(({ value, label, description }) => (
                 <motion.button
                   key={value}
-                  // 👇 Используем selectedResolution вместо currentResolution
                   className={`resolution-card ${selectedResolution === value ? 'active' : ''}`}
                   onClick={() => handleResolutionChange(value)}
                   disabled={isChangingResolution}
@@ -368,6 +399,70 @@ export const CameraPage: React.FC = () => {
               ))}
             </div>
 
+            {/* 👇 Блок управления вентилятором в стиле разрешения */}
+            <div className="fan-section">
+              <div className="section-header">
+                <Fan size={24} className="section-icon" />
+                <h2>Вентилятор охлаждения</h2>
+              </div>
+
+              <div className="resolution-grid">
+                <motion.button
+                  className={`resolution-card ${isFanActive ? 'active' : ''}`}
+                  onClick={() => handleFanToggle(true)}
+                  disabled={isChangingFan}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {isFanActive && (
+                    <motion.div 
+                      className="resolution-check"
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                    >
+                      <Check size={16} />
+                    </motion.div>
+                  )}
+                  <span className="resolution-label">Включить</span>
+                  <span className="resolution-description">Активное охлаждение</span>
+                </motion.button>
+
+                <motion.button
+                  className={`resolution-card ${!isFanActive ? 'active' : ''}`}
+                  onClick={() => handleFanToggle(false)}
+                  disabled={isChangingFan}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {!isFanActive && (
+                    <motion.div 
+                      className="resolution-check"
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                    >
+                      <Check size={16} />
+                    </motion.div>
+                  )}
+                  <span className="resolution-label">Выключить</span>
+                  <span className="resolution-description">Тишина всегда</span>
+                </motion.button>
+              </div>
+
+              {isChangingFan && (
+                <motion.div 
+                  className="changing-indicator"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <div className="spinner-small" />
+                  <span>Переключение вентилятора...</span>
+                </motion.div>
+              )}
+            </div>
+
             {isChangingResolution && (
               <motion.div 
                 className="changing-indicator"
@@ -385,14 +480,17 @@ export const CameraPage: React.FC = () => {
           <motion.div variants={itemVar} className="camera-stats-grid">
             <div className="stat-card glass-card">
               <div className="stat-icon wifi">
-                {cameraStatus?.mode === 'connected' || cameraStatus?.mode === 'streaming' ? 
-                  <Wifi size={24} /> : <WifiOff size={24} />}
+                {cameraStatus?.mode === 'never_connected' || cameraStatus?.mode === 'offline' ? 
+                  <WifiOff size={24} /> : <Wifi size={24} />}
               </div>
               <div className="stat-info">
                 <span className="stat-label">Статус</span>
-                <span className={`stat-value ${cameraStatus?.mode !== 'never_connected' ? 'connected' : 'disconnected'}`}>
-                  {cameraStatus?.mode === 'streaming' ? 'Стрим' : 
-                  cameraStatus?.mode === 'connected' ? 'В сети' : 'Не в сети'}
+                <span className={`stat-value ${cameraStatus?.mode !== 'never_connected' && cameraStatus?.mode !== 'offline' ? 'connected' : 'disconnected'}`}>
+                  {cameraStatus?.mode === 'streaming' && '📹 Стрим'}
+                  {cameraStatus?.mode === 'recording' && '🔴 Запись'}
+                  {cameraStatus?.mode === 'connected' && '✅ В сети'}
+                  {cameraStatus?.mode === 'offline' && '❌ Офлайн'}
+                  {cameraStatus?.mode === 'never_connected' && '🔌 Не подключена'}
                 </span>
               </div>
             </div>
@@ -409,16 +507,6 @@ export const CameraPage: React.FC = () => {
               </div>
             </div>
 
-            {/* <div className="stat-card glass-card">
-              <div className="stat-icon viewers">
-                <Users size={24} />
-              </div>
-              <div className="stat-info">
-                <span className="stat-label">Зрители</span>
-                <span className="stat-value">{cameraStatus?.viewers || 0}</span>
-              </div>
-            </div> */}
-
             <div className="stat-card glass-card">
               <div className="stat-icon viewers">
                 <Users size={24} />
@@ -432,37 +520,14 @@ export const CameraPage: React.FC = () => {
             </div>
 
             <div className="stat-card glass-card">
-              <div className="stat-icon size">
-                <Activity size={24} />
+              <div className="stat-icon viewers">
+                <Users size={24} />
               </div>
               <div className="stat-info">
-                <span className="stat-label">Вентилятор</span>
+                <span className="stat-label">Зрители</span>
                 <span className="stat-value">
-                  {cameraStatus?.metrics?.fan ? 'Вкл' : 'Выкл'}
+                  {cameraStatus?.viewers || 0}
                 </span>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Информация о камере */}
-          <motion.div variants={itemVar} className="camera-info-section glass-card">
-            <h3>Информация о камере</h3>
-            <div className="info-grid">
-              <div className="info-row">
-                <span className="info-label">ID камеры:</span>
-                <span className="info-value">{cameraId}</span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">Текущее разрешение:</span>
-                <span className="info-value">
-                  {selectedResolution === 'QVGA' && '320×240'}
-                  {selectedResolution === 'VGA' && '640×480'}
-                  {selectedResolution === 'HD' && '1280×720'}
-                </span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">Формат:</span>
-                <span className="info-value">MJPEG</span>
               </div>
             </div>
           </motion.div>

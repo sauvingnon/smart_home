@@ -166,8 +166,13 @@ class VideoService:
                 self.cameras[camera_id] = CameraState(camera_id=camera_id)
             
             self.cameras[camera_id].mode = CameraMode.CONNECTED
-            self.cameras[camera_id].connected_at = datetime.now()
-            self.cameras[camera_id].last_seen = datetime.now()
+            self.cameras[camera_id].connected_at = _get_izhevsk_time()
+            self.cameras[camera_id].last_seen = _get_izhevsk_time()
+
+            # 👇 Если есть зрители - сразу включаем стрим
+            if camera_id in self.viewers and len(self.viewers[camera_id]) > 0:
+                await self.send_command(camera_id, "stream_state:on")
+                logger.info(f"📹 [{camera_id}] Включаем стрим после реконнекта (есть {len(self.viewers[camera_id])} зрителей)")
             
             logger.info(f"✅ Камера {camera_id} подключена")
             await websocket.send_text("AUTH_OK")
@@ -184,7 +189,7 @@ class VideoService:
                     elif 'bytes' in message:
                         # Кадр от камеры
                         if camera_id in self.cameras:
-                            self.cameras[camera_id].last_seen = datetime.now()
+                            self.cameras[camera_id].last_seen = _get_izhevsk_time()
                         
                         # 🔧 Рассылаем зрителям
                         await self._broadcast_frame(camera_id, message['bytes'])
@@ -196,6 +201,7 @@ class VideoService:
         except Exception as e:
             logger.error(f"❌ Ошибка при обработке {camera_id}: {e}", exc_info=True)
         finally:
+            self.cameras[camera_id].mode = CameraMode.OFFLINE
             await self._disconnect_camera(camera_id)
     
     async def _handle_text(self, camera_id: str, text: str):
@@ -206,7 +212,7 @@ class VideoService:
             return
         
         # Обновляем время последней активности
-        state.last_seen = datetime.now()
+        state.last_seen = _get_izhevsk_time()
         
         # ---- Метрики (fps:30;quality_mode:2;tmp:45.5;isStreamActive:1) ----
         if text.startswith("fps:"):
@@ -225,15 +231,17 @@ class VideoService:
                     elif key == 'isStreamActive':
                         metrics.is_streaming = bool(int(val))
                     elif key == 'fan':
-                        metrics.fan = bool(int(val))
+                        metrics.is_fan_active = bool(int(val))
                     elif key == 'isRecordActive':
                         metrics.is_recording = bool(int(val))
                 
-                metrics.last_metrics_time = datetime.now()
+                metrics.last_metrics_time = _get_izhevsk_time()
                 
                 # Обновляем режим камеры на основе isStreamActive
                 if metrics.is_streaming:
                     state.mode = CameraMode.STREAMING
+                elif metrics.is_recording:
+                    state.mode = CameraMode.RECORDING
                 else:
                     state.mode = CameraMode.CONNECTED
                 
@@ -244,6 +252,35 @@ class VideoService:
         # ---- Другие команды (можно расширять) ----
         if text == "stream_state:ok":
             logger.info(f"✅ [{camera_id}] Камера подтвердила изменение стрима")
+            return
+        elif text.startswith("record:"):
+            logger.info(f"📹 [{camera_id}] Record status: {text}")
+            if text == "record:started":
+                if camera_id in self.cameras:
+                    self.cameras[camera_id].mode = CameraMode.RECORDING
+                    self.cameras[camera_id].metrics.is_recording = True
+            elif text == "record:stopped":
+                if camera_id in self.cameras:
+                    self.cameras[camera_id].metrics.is_recording = False
+                    self.cameras[camera_id].mode = CameraMode.CONNECTED
+                
+                # 👇 Если есть зрители - включаем стрим
+                if camera_id in self.viewers and len(self.viewers[camera_id]) > 0:
+                    await self.send_command(camera_id, "stream_state:on")
+                    logger.info(f"📹 [{camera_id}] Возобновляем стрим после записи (есть {len(self.viewers[camera_id])} зрителей)")
+            return
+        elif text.startswith("queue:count:"):
+            count = int(text.split(":")[2])
+            logger.info(f"📤 [{camera_id}] Queue size: {count}")
+            return
+        elif text == "size:ok":
+            logger.info(f"✅ [{camera_id}] Resolution changed successfully")
+            return
+        elif text == "size:error":
+            logger.error(f"❌ [{camera_id}] Failed to change resolution")
+            return
+        elif text == "fan:ok":
+            logger.info(f"✅ [{camera_id}] Fan state changed")
             return
         
         logger.warning(f"⚠️ [{camera_id}] Неизвестное текстовое сообщение: {text[:100]}")
@@ -267,6 +304,8 @@ class VideoService:
         # Если все отвалились - выключаем стрим
         if len(self.viewers[camera_id]) == 0:
             await self.send_command(camera_id, "stream_state:off")
+            if camera_id in self.cameras:
+                self.cameras[camera_id].metrics.is_streaming = False
             del self.viewers[camera_id]
 
     async def _disconnect_camera(self, camera_id: str):
@@ -279,7 +318,7 @@ class VideoService:
                 pass
         
         if camera_id in self.cameras:
-            self.cameras[camera_id].mode = CameraMode.NEVER_CONNECTED
+            self.cameras[camera_id].mode = CameraMode.OFFLINE
             self.cameras[camera_id].metrics.is_streaming = False
             logger.info(f"🔌 Камера {camera_id} отключена")
     
@@ -332,10 +371,11 @@ class VideoService:
 
     # ---- Получение статуса ----
     async def get_camera_state(self, camera_id: str) -> Optional[CameraState]:
-        return self.cameras.get(camera_id)
-    
-    async def get_all_cameras(self) -> Dict[str, CameraState]:
-        return self.cameras
+        status = self.cameras.get(camera_id)
+        if not status:
+            return None
+        status.viewers = len(self.viewers)
+        return status
 
     # ---- Работа с s3 ----
     async def save_video_from_camera(

@@ -138,7 +138,7 @@ bool VideoManager::stopRecord() {
 }
 
 void VideoManager::processQueue() {
-    if (_recording) return;
+    if (_recording || _streamActive) return;
     
     File queueFile = SD_MMC.open("/queue.txt", FILE_READ);
     if (!queueFile) {
@@ -240,12 +240,26 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
         http.end();
         return false;
     }
+
+    size_t actualSize = file.size();
+    if (actualSize == 0) {
+        Serial.println("❌ File is empty, deleting");
+        file.close();
+        SD_MMC.remove(filename);
+        return true;
+    }
+
+    _sending = true;
+    _currentHttp = &http;
     
     Serial.printf("📤 Sending %s (%zu bytes)...\n", filename.c_str(), file.size());
     
     int code = http.sendRequest("POST", &file, file.size());
     file.close();
     http.end();
+
+    _sending = false;
+    _currentHttp = nullptr;
     
     if (code == 200) {
         Serial.printf("✅ Video sent: %s\n", filename.c_str());
@@ -253,6 +267,15 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
     } else {
         Serial.printf("❌ HTTP %d for %s\n", code, filename.c_str());
         return false;
+    }
+}
+
+void VideoManager::abortSend() {
+    if (_sending && _currentHttp) {
+        Serial.println("🛑 Aborting send...");
+        // Устанавливаем таймаут в 1мс - практически мгновенный обрыв
+        _currentHttp->setTimeout(1);
+        // Флаги сбросятся в sendVideo после завершения запроса
     }
 }
 
@@ -267,6 +290,7 @@ void VideoManager::checkRecordTimeout() {
     if (recordDuration >= _maxRecordDuration) {
         Serial.printf("⏱️ Recording timeout (%lu sec), auto-stopping...\n", recordDuration);
         stopRecord();
+        _timeoutOccurred = true;
         // Можно отправить уведомление через WebSocket, но у нас нет доступа к webSocket
         // Лучше вернуть флаг или вызвать callback
     }

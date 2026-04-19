@@ -11,7 +11,7 @@
 // const uint16_t websocket_port = 443;
 const char* ssid = "TP-Link_297F";
 const char* password = "23598126";
-const char* websocket_host = "192.168.1.102";
+const char* websocket_host = "192.168.1.103";
 const uint16_t websocket_port = 8005;
 const char* camera_id = "cam1";
 const char* access_key = "12345678";
@@ -24,7 +24,7 @@ const char* access_key = "12345678";
 Preferences preferences;
 
 // VideoManager videoManager(camera_id, access_key, "https://api.tgapp.dotnetdon.ru");
-VideoManager videoManager(camera_id, access_key, "http://192.168.1.102:8005");
+VideoManager videoManager(camera_id, access_key, "http://192.168.1.103:8005");
 
 // Активен ли кулер.
 bool fanState = true;
@@ -66,6 +66,12 @@ void webSocketTask(void * pvParameters);
 
 // --- Функция инициализации камеры ---
 void initCamera() {
+
+  // Если камера уже инициализирована - не трогаем
+  if (esp_camera_sensor_get()) {
+      Serial.println("✅ Camera already initialized, skipping init");
+      return;
+  }
 
   // Включаем питание камеры
   pinMode(PWDN_GPIO_NUM, OUTPUT);
@@ -150,11 +156,24 @@ void initSDCard() {
 
 // Управление кулером
 void toggleFan(bool isActive){
-  digitalWrite(FAN_PIN, isActive ? HIGH : LOW);
+  // Если разрешена работа вентилятора
+  if (fanState) {
+    // Управляем им
+    digitalWrite(FAN_PIN, isActive ? HIGH : LOW);
+  } else {
+    // Иначе всегда отключение
+    digitalWrite(FAN_PIN, LOW);
+  }
 }
 
 // --- Функция остановки камеры ---
 void stopCamera() {
+
+  if (!esp_camera_sensor_get()) {
+      Serial.println("✅ Camera already off");
+      return;
+  }
+
   esp_camera_deinit();
 
   // Выключаем питание камеры
@@ -165,7 +184,7 @@ void stopCamera() {
 }
 
 // --- Установка качества ---
-bool setFrameSize(String size) {
+bool setFrameSize(String size, bool needSave = true) {
   // Определяем целевое разрешение
   framesize_t targetFs;
   int targetQualityMode;
@@ -185,9 +204,11 @@ bool setFrameSize(String size) {
   else return false;
   
   // Сохраняем настройки в память (всегда)
-  currentQualityMode = targetQualityMode;
-  currentFrameSize = targetFs;
-  saveSettings();
+  if (needSave) {
+    currentQualityMode = targetQualityMode;
+    currentFrameSize = targetFs;
+    saveSettings();
+  }
   
   // Пробуем применить на лету, если сенсор активен
   sensor_t *s = esp_camera_sensor_get();
@@ -215,12 +236,12 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
       isConnected = false;
       isAuthenticated = false;
 
-      // Если стрим был активен - остановим его и выключим камеру.
-
-      if (isStreamActive) {
+      // Если стрим или запись были активны - остановим и выключим камеру.
+      if (isStreamActive || videoManager.isRecording()) {
           stopCamera();
           isStreamActive = false;
           videoManager.setStreamActive(false);
+          videoManager.stopRecord();
           toggleFan(false);
           Serial.println("🛑 Camera stopped due to WS disconnect");
       }
@@ -254,21 +275,30 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
       }
       // Включить\выключить стрим
       else if (cmd.startsWith("stream_state:")) {
+
+        // Если сейчас запись - нельзя ничего делать.
+        if (videoManager.isRecording()) {
+          webSocket.sendTXT("stream_state:error:recording_active");
+          return;
+        }
+
+        // Стрим, отправка подождет.
+        if (videoManager.isSending()) {
+            videoManager.abortSend();
+            Serial.println("📤 Send aborted, starting stream");
+        }
+
         String state = cmd.substring(13);
         if (state == "on"){
-          if (fanState) {
-            toggleFan(true);
-          }
+
+          toggleFan(true);
+
           if (!isStreamActive) {
             // 🔧 СНАЧАЛА ДЕИНИЦИАЛИЗИРУЕМ (очищаем предыдущее состояние)
-            if (!esp_camera_sensor_get()) {
-              // Если сенсор не найден, значит камера не инициализирована
-              // Можем просто инициализировать
-            } else {
-              // Если есть сенсор - деинициализируем сначала
+            if (esp_camera_sensor_get()) {
               stopCamera();
-              delay(500);  // Даем время на деинициализацию
-            }
+              delay(200);  // Даем время на деинициализацию
+            } 
             
             // Инициализируем камеру заново
             initCamera();
@@ -304,15 +334,20 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
       // Установить состояние вентилятора
       else if (cmd.startsWith("fan:")) {
         String fanCmd = cmd.substring(4);
-        // Да, включается во время стрима, иначе всегда молчит
+        // Да, включается во время стрима или записи, иначе всегда молчит
         if (fanCmd == "on") {
+          // Установили новый статус
           fanState = true;
-          toggleFan(isStreamActive);
+          // Провеяем, есть ли нужда включить его прямо сейчас.
+          if (isStreamActive || videoManager.isRecording()) {
+              toggleFan(true);
+          }
           saveSettings();
           webSocket.sendTXT("fan:ok");
         } else if (fanCmd == "off") {
           fanState = false;
-          toggleFan(isStreamActive);
+          // Всегда выключаем
+          toggleFan(false);
           saveSettings();
           webSocket.sendTXT("fan:ok");
         }
@@ -322,6 +357,8 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
           String recordPart = cmd.substring(7);  // "start:1744300000" или "stop"
           
           if (recordPart.startsWith("start")) {
+
+              // Карта не готова для записи, мы не можем начать запись.
               if (!videoManager.isSDReady()) {
                   webSocket.sendTXT("record:error:no_sd");
                   return;
@@ -334,41 +371,79 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
                   startTime = timeStr.toInt();
               }
               
+              // Уже запись, не можем.
               if (videoManager.isRecording()) {
                   webSocket.sendTXT("record:error:already");
               } else {
-                  // Останавливаем стрим, если активен
+                  // Включаем запись
+                  // Сохраняем текущее качество
+                  int savedQualityMode = currentQualityMode;
+
+                  // Отменяем отправку, если идет
+                  if (videoManager.isSending()) {
+                      videoManager.abortSend();
+                      Serial.println("📤 Send aborted, starting recording");
+                  }
+
+                  // Останавливаем стрим и выключаем камеру если активна
                   if (isStreamActive) {
-                      stopCamera();                     // ← добавить
+                      stopCamera();
                       isStreamActive = false;
                       videoManager.setStreamActive(false);
-                      setCpuFrequencyMhz(80);
-                      WiFi.setSleep(true);
                       webSocket.sendTXT("stream_state:off");
-                      delay(500);
+                      delay(200);
                   }
+
+                  // Принудительно в HD (без сохранения в память)
+                  currentQualityMode = 2;
+                  currentFrameSize = FRAMESIZE_HD;
                   
-                  // Убеждаемся, что камера выключена
-                  if (esp_camera_sensor_get()) {
-                      stopCamera();
-                      delay(500);
-                  }
-                  
-                  // Инициализируем для записи
+                  // Инициализируем камеру для записи
                   initCamera();
-                  if (fanState) toggleFan(true);
+                  toggleFan(true);
                   setCpuFrequencyMhz(240);
                   WiFi.setSleep(false);
                   
                   if (videoManager.startRecord(startTime)) {
                       webSocket.sendTXT("record:started");
                   } else {
+                      // Выключаем камеру при ошибке
+                      stopCamera();
+                      toggleFan(false);
+                      setCpuFrequencyMhz(80);
+                      WiFi.setSleep(true);
+
+                      // При ошибке возвращаем качество
+                      currentQualityMode = savedQualityMode;
+                      switch(savedQualityMode) {
+                          case 0: currentFrameSize = FRAMESIZE_QVGA; break;
+                          case 1: currentFrameSize = FRAMESIZE_VGA; break;
+                          case 2: currentFrameSize = FRAMESIZE_HD; break;
+                      }
                       webSocket.sendTXT("record:error");
                   }
               }
           }
           else if (recordPart == "stop") {
               if (videoManager.stopRecord()) {
+                  // Выключаем камеру
+                  stopCamera();
+                  toggleFan(false);
+                  setCpuFrequencyMhz(80);
+                  WiFi.setSleep(true);
+                  
+                  // Возвращаем качество из памяти
+                  preferences.begin("camera", false);
+                  int savedQuality = preferences.getInt("qualityMode", 1);
+                  preferences.end();
+                  
+                  currentQualityMode = savedQuality;
+                  switch(savedQuality) {
+                      case 0: currentFrameSize = FRAMESIZE_QVGA; break;
+                      case 1: currentFrameSize = FRAMESIZE_VGA; break;
+                      case 2: currentFrameSize = FRAMESIZE_HD; break;
+                  }
+                  
                   webSocket.sendTXT("record:stopped");
               } else {
                   webSocket.sendTXT("record:error");
@@ -410,25 +485,54 @@ float getTemperature() {
   return temperatureRead();  // Встроенная функция
 }
 
-// --- Задача стриминга ---
+// --- Задача стриминга и записи ---
 void webSocketTask(void * pvParameters) {
 
   while(1) {
     webSocket.loop();
 
+    // Если подключены и WS активен
     if (isConnected && isAuthenticated) {
+
+      // Если идет запись
       if (videoManager.isRecording()) {
+
+        // Камера выключена, а запись якобы идёт - КРИТИЧЕСКАЯ ОШИБКА
+        if (!esp_camera_sensor_get()) {
+          Serial.println("❌ FATAL: Recording but camera is OFF!");
+          videoManager.stopRecord();
+          webSocket.sendTXT("record:error:camera_off");
+          vTaskDelay(1000);
+          continue;
+        }        
+
         camera_fb_t * fb = esp_camera_fb_get();
         if (fb) {
-            if (!videoManager.writeFrame(fb->buf, fb->len)) {
-                videoManager.stopRecord();
-                webSocket.sendTXT("record:error:write_failed");
-            } else {
-                frameCount++;
-            }
-            esp_camera_fb_return(fb);
+          // Пишем на карту
+          if (!videoManager.writeFrame(fb->buf, fb->len)) {
+              videoManager.stopRecord();
+              stopCamera();
+              toggleFan(false);
+              setCpuFrequencyMhz(80);
+              WiFi.setSleep(true);
+              webSocket.sendTXT("record:error:write_failed");
+          } else {
+              frameCount++;
+          }
+          esp_camera_fb_return(fb);
         }
+      // Если идет стрим
       } else if (isStreamActive) {
+
+        // Камера выключена, а флаг стрима true - КРИТИЧЕСКАЯ ОШИБКА
+        if (!esp_camera_sensor_get()) {
+          Serial.println("❌ FATAL: Streaming but camera is OFF!");
+          isStreamActive = false;
+          webSocket.sendTXT("stream_state:error:camera_off");
+          vTaskDelay(1000);
+          continue;
+        }
+
         camera_fb_t * fb = esp_camera_fb_get();
         if (fb) {
             webSocket.sendBIN(fb->buf, fb->len, false);
@@ -505,6 +609,17 @@ void setup() {
 void loop() {
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
     videoManager.checkRecordTimeout();  // ← проверяем таймаут записи
+
+    if (videoManager.timeoutOccurred()) {
+        stopCamera();
+        toggleFan(false);
+        setCpuFrequencyMhz(80);
+        WiFi.setSleep(true);
+        if (isConnected && isAuthenticated) {  // ← добавить проверку
+            webSocket.sendTXT("record:stopped:timeout");
+        }
+    }
+
     videoManager.processQueue();
     delay(5000);
 }

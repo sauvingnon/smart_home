@@ -5,8 +5,10 @@ from enum import Enum
 
 class CameraMode(str, Enum):
     NEVER_CONNECTED = "never_connected"   # ни разу не подключалась
-    CONNECTED = "connected"               # WS есть, стрим выключен
+    OFFLINE = "offline"                   # нет WS
+    CONNECTED = "connected"               # WS есть, стрим выключен, запись выключеа
     STREAMING = "streaming"               # стрим активен
+    RECORDING = "recording"               # запись активна
 
 class CameraMetrics(BaseModel):
     """Текущие метрики камеры (обновляются из fps: сообщений)"""
@@ -15,7 +17,7 @@ class CameraMetrics(BaseModel):
     temperature: float = 0.0
     is_streaming: bool = False   # флаг из прошивки
     is_recording: bool = False
-    fan: bool = False
+    is_fan_active: bool = False
     last_metrics_time: datetime = Field(default_factory=datetime.now)
 
 class CameraState(BaseModel):
@@ -23,5 +25,6 @@ class CameraState(BaseModel):
     camera_id: str
     mode: CameraMode = CameraMode.NEVER_CONNECTED
     connected_at: Optional[datetime] = None
+    viewers: int = 0
     last_seen: datetime = Field(default_factory=datetime.now)  # время последнего ANY сообщения
     metrics: CameraMetrics = Field(default_factory=CameraMetrics)

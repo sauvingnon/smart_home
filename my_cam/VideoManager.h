@@ -22,12 +22,22 @@ public:
     void setStreamActive(bool active); // сообщить модулю, активен ли стрим (чтобы не отправлять во время записи)
     void setMaxRecordDuration(unsigned long seconds) { _maxRecordDuration = seconds; }
     void checkRecordTimeout();  // вызывать в loop()
+    bool isSending() const { return _sending; }  // Идет ли отправка видео
+    void abortSend();       // Прервать отправку видео
+    bool timeoutOccurred() { 
+        bool ret = _timeoutOccurred; 
+        _timeoutOccurred = false; 
+        return ret; 
+    }
     
 private:
+    bool _timeoutOccurred = false;
     String _cameraId;
     String _accessKey;
     String _serverUrl;
     bool _sdReady;
+    bool _sending = false;
+    HTTPClient* _currentHttp = nullptr;
     bool _recording;
     bool _streamActive;
     File _currentFile;
