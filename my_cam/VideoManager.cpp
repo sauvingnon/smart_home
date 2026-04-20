@@ -1,4 +1,8 @@
 #include "VideoManager.h"
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 
 VideoManager::VideoManager(const char* cameraId, const char* accessKey, const char* serverUrl)
     : _cameraId(cameraId), _accessKey(accessKey), _serverUrl(serverUrl),
@@ -211,55 +215,107 @@ void VideoManager::removeFirstLine() {
     SD_MMC.rename("/queue.tmp", "/queue.txt");
 }
 
-// Упрощённая версия sendVideo (рекомендую):
 bool VideoManager::sendVideo(const String& filename, unsigned long startTime, unsigned long duration, size_t fileSize) {
     if (_recording) return false;
-    
-    HTTPClient http;
-    String url = _serverUrl + "/esp_service/upload_video?camera_id=" + _cameraId 
-                + "&start_time=" + String(startTime)
-                + "&duration=" + String(duration);
-    
-    bool useSSL = _serverUrl.startsWith("https://");
-    
-    if (useSSL) {
-        WiFiClientSecure client;
-        client.setInsecure();
-        http.begin(client, url);
-    } else {
-        http.begin(url);
-    }
-    
-    http.setTimeout(10000);
-    http.addHeader("X-Access-Key", _accessKey);
-    http.addHeader("Content-Type", "video/mjpeg");
     
     File file = SD_MMC.open(filename, FILE_READ);
     if (!file) {
         Serial.println("❌ Cannot open file for sending");
-        http.end();
         return false;
     }
-
+    
     size_t actualSize = file.size();
     if (actualSize == 0) {
-        Serial.println("❌ File is empty, deleting");
         file.close();
         SD_MMC.remove(filename);
         return true;
     }
     
-    Serial.printf("📤 Sending %s (%zu bytes)...\n", filename.c_str(), file.size());
+    Serial.printf("📤 Sending %s (%zu bytes) in chunks...\n", filename.c_str(), actualSize);
     
-    int code = http.sendRequest("POST", &file, file.size());
+    bool useSSL = _serverUrl.startsWith("https://");
+    
+    // Размер чанка: 512 КБ (оптимально для ESP32)
+    const size_t CHUNK_SIZE = 512 * 1024;
+    int totalChunks = (actualSize + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    size_t totalSent = 0;
+    bool success = true;
+    
+    for (int chunk = 1; chunk <= totalChunks && success; chunk++) {
+        size_t chunkStart = (chunk - 1) * CHUNK_SIZE;
+        size_t chunkSize = (chunk == totalChunks) ? (actualSize - chunkStart) : CHUNK_SIZE;
+        
+        Serial.printf("📦 Chunk %d/%d (%zu bytes)\n", chunk, totalChunks, chunkSize);
+        
+        String url = _serverUrl + "/esp_service/video/upload_chunk"
+                    + "?camera_id=" + _cameraId 
+                    + "&start_time=" + String(startTime)
+                    + "&duration=" + String(duration)
+                    + "&chunk=" + String(chunk)
+                    + "&total_chunks=" + String(totalChunks)
+                    + "&filename=" + filename;
+        
+        HTTPClient http;
+        int code = -1;
+        
+        if (useSSL) {
+            WiFiClientSecure client;
+            client.setInsecure();
+            http.begin(client, url);
+        } else {
+            WiFiClient client;
+            http.begin(client, url);
+        }
+        
+        http.setTimeout(30000);  // 30 секунд на чанк
+        http.addHeader("X-Access-Key", _accessKey);
+        http.addHeader("Content-Type", "application/octet-stream");
+        
+        // Позиционируем файл
+        file.seek(chunkStart);
+        
+        // Читаем чанк в буфер
+        uint8_t* buffer = (uint8_t*)malloc(chunkSize);
+        if (!buffer) {
+            Serial.printf("❌ Failed to allocate %zu bytes for chunk\n", chunkSize);
+            success = false;
+            break;
+        }
+        
+        size_t bytesRead = file.read(buffer, chunkSize);
+        if (bytesRead != chunkSize) {
+            Serial.printf("❌ Read error: got %zu of %zu bytes\n", bytesRead, chunkSize);
+            free(buffer);
+            success = false;
+            break;
+        }
+        
+        // Отправляем
+        code = http.POST(buffer, chunkSize);
+        free(buffer);
+        http.end();
+        
+        if (code == 200) {
+            totalSent += chunkSize;
+            Serial.printf("✅ Chunk %d sent\n", chunk);
+        } else {
+            Serial.printf("❌ Chunk %d failed (HTTP %d)\n", chunk, code);
+            success = false;
+        }
+        
+        // Пауза между чанками
+        delay(50);
+        yield();
+    }
+    
     file.close();
-    http.end();
     
-    if (code == 200) {
-        Serial.printf("✅ Video sent: %s\n", filename.c_str());
+    if (success && totalSent == actualSize) {
+        Serial.printf("✅ Video fully sent: %s\n", filename.c_str());
+        SD_MMC.remove(filename);
         return true;
     } else {
-        Serial.printf("❌ HTTP %d for %s\n", code, filename.c_str());
+        Serial.printf("❌ Upload failed (sent %zu/%zu)\n", totalSent, actualSize);
         return false;
     }
 }

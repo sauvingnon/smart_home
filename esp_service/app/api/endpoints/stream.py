@@ -245,49 +245,86 @@ async def get_video_thumbnail(
 
 # ========== ЗАГРУЗКА ВИДЕО ОТ КАМЕРЫ ==========
 
-@router.post("/upload_video")
-async def upload_video_from_camera(
+@router.post("/video/upload_chunk")
+async def upload_chunk(
     request: Request,
     camera_id: str = Query(..., description="ID камеры"),
     start_time: int = Query(..., description="Unix timestamp начала записи"),
     duration: int = Query(..., description="Длительность в секундах"),
+    chunk: int = Query(..., description="Номер чанка (начиная с 1)"),
+    total_chunks: int = Query(..., description="Общее количество чанков"),
+    filename: str = Query(..., description="Имя файла"),
     x_access_key: str = Header(..., description="Ключ доступа камеры")
 ):
     """
-    ESP32 камера загружает видео (raw body).
-    
-    🔧 ИСПРАВЛЕНИЕ: Использует save_video_from_camera с проверкой камеры
+    Принимает чанк видео от ESP32 камеры.
+    Когда все чанки собраны — передаёт собранный файл в VideoService.
     """
-    
-    # Читаем сырые данные
-    video_data = await request.body()
-    
-    if not video_data:
-        raise HTTPException(status_code=400, detail="Empty video data")
     
     worker = BackgroundWorker.get_instance()
     
-    # Проверяем ключ доступа камеры
+    # 1. Проверка авторизации
     if not worker.video_service.verify_camera(camera_id, x_access_key):
-        raise HTTPException(status_code=403, detail="Unauthorized camera or invalid access key")
+        logger.warning(f"🔒 [{camera_id}] Неавторизованная попытка загрузки чанка")
+        raise HTTPException(status_code=403, detail="Unauthorized camera")
     
-    video_id = await worker.video_service.save_video_from_camera(
-        camera_id=camera_id,
-        file_stream=io.BytesIO(video_data),
-        start_timestamp=start_time,
-        duration_seconds=duration,
-    )
+    # 2. Читаем данные чанка
+    chunk_data = await request.body()
     
-    if not video_id:
-        raise HTTPException(status_code=401, detail="Unauthorized or upload failed")
+    if not chunk_data:
+        raise HTTPException(status_code=400, detail="Empty chunk data")
     
-    logger.info(f"📹 [{camera_id}] Видео {video_id} загружено, {len(video_data)} байт")
+    # 3. Ключ сессии
+    session_key = worker.video_service.chunk_service._make_session_key(camera_id, start_time, filename)
     
-    return {
-        "status": "ok",
-        "video_id": video_id,
-        "size_bytes": len(video_data)
-    }
+    try:
+        # 4. Добавляем чанк через сервис
+        session, is_complete = worker.video_service.chunk_service.add_chunk(
+            session_key=session_key,
+            camera_id=camera_id,
+            filename=filename,
+            chunk_number=chunk,
+            total_chunks=total_chunks,
+            data=chunk_data
+        )
+        
+        # 5. Если сессия завершена — собираем и сохраняем видео
+        if is_complete:
+            video_stream = session.assemble()
+            
+            video_id = await worker.video_service.save_video_from_camera(
+                camera_id=camera_id,
+                file_stream=video_stream,
+                start_timestamp=start_time,
+                duration_seconds=duration,
+            )
+            
+            if not video_id:
+                raise HTTPException(status_code=500, detail="Failed to save video")
+            
+            file_size = video_stream.getbuffer().nbytes
+            
+            logger.info(f"🎉 [{camera_id}] Видео {video_id} сохранено ({file_size} байт)")
+            
+            return {
+                "status": "complete",
+                "video_id": video_id,
+                "size_bytes": file_size,
+                "chunks_received": total_chunks
+            }
+        
+        # 6. Ещё не все чанки
+        return {
+            "status": "chunk_received",
+            "chunk": chunk,
+            "received": len(session.chunks),
+            "total": total_chunks
+        }
+        
+    except ValueError as e:
+        # Чанк не по порядку или сессия истекла
+        logger.warning(f"📦 [{camera_id}] Ошибка чанка: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/camera/{camera_id}/record/start")  # 🔧 ДОБАВЛЕНО: эндпоинт запуска записи
 async def start_camera_recording(

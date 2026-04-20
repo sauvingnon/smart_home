@@ -451,7 +451,7 @@ void startWebSocketClient() {
   // Запускаем задачу стриминга на ядре 1
   // ВОЗМОЖНО ТРЕБУЕТСЯ УВИЛИЧИТЬ СТЕК 
   BaseType_t result = xTaskCreatePinnedToCore(
-    webSocketTask, "ws_task", 8192, NULL, 2, NULL, 1
+    webSocketTask, "ws_task", 4096, NULL, 1, NULL, 1
   );
   if (result != pdPASS) {
       Serial.println("❌ WS Task creation FAILED!");

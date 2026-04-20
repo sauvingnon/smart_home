@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Set
 from fastapi import WebSocket
+from app.services.video_service.video_chunk_service import VideoChunkService
 from logger import logger
 from config import API_BASE_URL
 from app.schemas.camera import CameraState, CameraMode, CameraMetrics
@@ -31,6 +32,8 @@ class VideoService:
         self.valid_keys = {CAMERA_ID: CAMERA_ACCESS_KEY}
         # Таймеры авто-остановки записи: camera_id -> asyncio.Task
         self._recording_timers: Dict[str, asyncio.Task] = {}
+        # Сервис для управления сессиями загрузки видео по чанкам
+        self.chunk_service = VideoChunkService(ttl_seconds=300)
     
     async def start(self):
         """Запустить фоновый ping-pong watcher"""
