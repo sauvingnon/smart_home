@@ -68,7 +68,7 @@ export const Login: React.FC<LoginProps> = ({ error, onLoginSuccess }) => {
                 Введите ключ доступа
               </label>
               <input
-                type="text"
+                type="password"
                 value={key}
                 onChange={(e) => {
                   setKey(e.target.value);
@@ -101,24 +101,6 @@ export const Login: React.FC<LoginProps> = ({ error, onLoginSuccess }) => {
                 </>
               )}
             </button>
-            
-            <div className="telegram-footer">
-              <div className="telegram-divider">
-                <span className="divider-text">или</span>
-              </div>
-              <a 
-                href={telegramLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="telegram-button"
-              >
-                <Send className="telegram-icon" />
-                Получить ключ в Telegram
-              </a>
-              <p className="telegram-hint">
-                Напишите <strong>/getkey</strong> в боте
-              </p>
-            </div>
           </form>
         </div>
       </div>
