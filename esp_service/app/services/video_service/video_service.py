@@ -1,6 +1,6 @@
 # app/services/video_service.py
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Set
 from fastapi import WebSocket
 from logger import logger
@@ -12,6 +12,7 @@ from app.services.s3_service.s3_manager import S3Manager
 from app.services.redis.cache_manager import CacheManager
 import tempfile
 import os
+from config import CAMERA_ID, CAMERA_ACCESS_KEY
 
 class VideoService:
     """Сервис управления камерами — базовая версия (только подключение и метрики)"""
@@ -27,7 +28,9 @@ class VideoService:
         # WebSoket соединения зрителей
         self.viewers: Dict[str, Set[WebSocket]] = {}
         # Простая авторизация (потом вынесите в базу)
-        self.valid_keys = {"cam1": "12345678"}
+        self.valid_keys = {CAMERA_ID: CAMERA_ACCESS_KEY}
+        # Таймеры авто-остановки записи: camera_id -> asyncio.Task
+        self._recording_timers: Dict[str, asyncio.Task] = {}
     
     async def start(self):
         """Запустить фоновый ping-pong watcher"""
@@ -349,7 +352,11 @@ class VideoService:
         dt = _get_izhevsk_time()
         timestampStr = dt.timestamp()
         cmd = f"record:start:{str(timestampStr)}"
-        return await self.send_command(camera_id, cmd)
+        logger.debug(f"⏺️ [{camera_id}] Отправляем команду записи с timestamp: {timestampStr}")
+        success = await self.send_command(camera_id, cmd)
+        if success:
+            await self._schedule_stop_recording(camera_id, delay=15)
+        return success
 
     async def stop_recording(self, camera_id: str) -> bool:
         return await self.send_command(camera_id, "record:stop")
@@ -369,6 +376,26 @@ class VideoService:
         
         return success
 
+    async def _schedule_stop_recording(self, camera_id: str, delay: int = 15):
+        """Запустить (или перезапустить) таймер авто-остановки записи."""
+        # Отменяем старый таймер, если был
+        old_task = self._recording_timers.pop(camera_id, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        async def _do_stop():
+            try:
+                await asyncio.sleep(delay)
+                logger.info(f"⏱️ [{camera_id}] Таймаут записи ({delay}с), отправляем stop")
+                await self.stop_recording(camera_id)
+            except asyncio.CancelledError:
+                pass  # Таймер сброшен новым start_recording — это нормально
+            finally:
+                self._recording_timers.pop(camera_id, None)
+
+        self._recording_timers[camera_id] = asyncio.create_task(_do_stop())
+        logger.info(f"⏱️ [{camera_id}] Таймер записи запущен/сброшен ({delay}с)")
+
     # ---- Получение статуса ----
     async def get_camera_state(self, camera_id: str) -> Optional[CameraState]:
         status = self.cameras.get(camera_id)
@@ -376,6 +403,9 @@ class VideoService:
             return None
         status.viewers = len(self.viewers)
         return status
+    
+    def verify_camera(self, camera_id: str, access_key: str) -> bool:
+        return self.valid_keys.get(camera_id) == access_key
 
     # ---- Работа с s3 ----
     async def save_video_from_camera(
@@ -404,10 +434,18 @@ class VideoService:
         
         # Конвертируем timestamp в datetime
         try:
-            start_datetime = datetime.fromtimestamp(start_timestamp)
+            izhevsk_tz = timezone(timedelta(hours=4))
+            start_datetime = datetime.fromtimestamp(start_timestamp, tz=izhevsk_tz)
+            logger.debug(f"📅 [{camera_id}] Полученный timestamp: {start_timestamp} -> {start_datetime.isoformat()}")
         except Exception as e:
             logger.error(f"❌ Неверный timestamp {start_timestamp}: {e}")
             return None
+        
+        # --- Проверка дубликата ---
+        existing_id = await self.cache_manager.get_video_dedup(camera_id, start_timestamp)
+        if existing_id:
+            logger.warning(f"⚠️ [{camera_id}] Дубликат, возвращаем существующий ID: {existing_id}")
+            return existing_id
         
         # Проверяем S3 manager
         if not self.s3_manager:
@@ -532,6 +570,9 @@ class VideoService:
                     logger.warning(f"⚠️ [{camera_id}] Ошибка создания превью: {e}")
             
             logger.info(f"✅ [{camera_id}] Видео сохранено: {video_id}, fps={fps:.2f}, кадров={frame_count}")
+
+            await self.cache_manager.save_video_dedup(camera_id, start_timestamp, video_id)
+
             return video_id
             
         except Exception as e:

@@ -14,7 +14,7 @@ router = APIRouter(prefix="/esp_service", tags=["esp_service"])
 class ResolutionRequest(BaseModel):
     resolution: str
 
-class FanControlRequest(BaseModel):  # 🔧 ДОБАВЛЕНО: для управления вентилятором
+class FanControlRequest(BaseModel):
     enable: bool
 
 @router.websocket("/ws/camera")
@@ -33,7 +33,7 @@ async def websocket_viewer(websocket: WebSocket, camera_id: str):
 async def set_camera_resolution(
     camera_id: str, 
     request: ResolutionRequest,
-    # user_id: int = Depends(get_current_user_id_dep)
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """Запрос на смену разрешения камеры."""
     worker = BackgroundWorker.get_instance()
@@ -44,11 +44,11 @@ async def set_camera_resolution(
     
     return {"status": "ok", "camera_id": camera_id, "resolution": request.resolution}
 
-@router.post("/camera/{camera_id}/fan")  # 🔧 ДОБАВЛЕНО: эндпоинт управления вентилятором
+@router.post("/camera/{camera_id}/fan")
 async def set_camera_fan(
     camera_id: str,
     request: FanControlRequest,
-    # user_id: int = Depends(get_current_user_id_dep)
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """Включить/выключить вентилятор на камере."""
     worker = BackgroundWorker.get_instance()
@@ -62,7 +62,7 @@ async def set_camera_fan(
 @router.get("/camera/{camera_id}/status")
 async def get_camera_status(
     camera_id: str,
-    # user_id: int = Depends(get_current_user_id_dep)
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """Получить статус камеры."""
     worker = BackgroundWorker.get_instance()
@@ -251,7 +251,7 @@ async def upload_video_from_camera(
     camera_id: str = Query(..., description="ID камеры"),
     start_time: int = Query(..., description="Unix timestamp начала записи"),
     duration: int = Query(..., description="Длительность в секундах"),
-    # x_access_key: str = Header(..., description="Ключ доступа камеры"),  # 🔧 Раскомментировать для прода
+    x_access_key: str = Header(..., description="Ключ доступа камеры")
 ):
     """
     ESP32 камера загружает видео (raw body).
@@ -267,17 +267,15 @@ async def upload_video_from_camera(
     
     worker = BackgroundWorker.get_instance()
     
-    # 🔧 ДОБАВЛЕНО: Проверяем, что камера существует и авторизована
-    # camera_state = await worker.video_service.get_camera_state(camera_id)
-    # if not camera_state:
-    #     raise HTTPException(status_code=404, detail="Camera not found")
+    # Проверяем ключ доступа камеры
+    if not worker.video_service.verify_camera(camera_id, x_access_key):
+        raise HTTPException(status_code=403, detail="Unauthorized camera or invalid access key")
     
     video_id = await worker.video_service.save_video_from_camera(
         camera_id=camera_id,
         file_stream=io.BytesIO(video_data),
         start_timestamp=start_time,
         duration_seconds=duration,
-        # access_key=x_access_key
     )
     
     if not video_id:
@@ -316,7 +314,7 @@ async def start_camera_recording(
 @router.post("/camera/{camera_id}/record/stop")
 async def stop_camera_recording(
     camera_id: str,
-    # user_id: int = Depends(get_current_user_id_dep)
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """
     Остановить запись на камере.

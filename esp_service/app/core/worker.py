@@ -816,7 +816,7 @@ class BackgroundWorker:
             
         # Нужно включить камеру и начать запись.
         # Дверь открылась → запись уже идет (10 сек таймер молчания)
-        await self.video_service.start_recording(camera_id="cam1", max_duration=10)
+        await self.video_service.start_recording(camera_id="cam1")
         logger.info(f"🚪 Плата {device_id} сообщила об открытии двери")
 
     async def handle_sensor_healthcheck(self, sensor_id: str, data: dict):

@@ -61,7 +61,6 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }} \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
-              echo '${{ secrets.ESP_TG_BOT_ENV_FILE }}' > /srv/esp_system/esp_tg_bot/.env &&
               echo '${{ secrets.ESP_SERVICE_ENV_FILE }}' > /srv/esp_system/esp_service/.env &&
               echo '${{ secrets.MQTT_BROKER_ENV_FILE }}' > /srv/esp_system/mosquitto/config/.env
             "
@@ -83,7 +82,7 @@ jobs:
             echo ""
             echo "🚨 Проверка: все сервисы running?"
             FAIL=0
-            for c in esp_grafana esp_promtail esp_redis esp_loki mosquitto esp_tg_bot esp_service esp_front esp_system-garage-1; do
+            for c in esp_grafana esp_promtail esp_redis esp_loki mosquitto esp_service esp_front esp_system-garage-1; do
               STATUS=$(sudo docker inspect -f "{{.State.Status}}" ${c} || echo "missing")
               echo "$c -> $STATUS"
               if [ "$STATUS" != "running" ]; then

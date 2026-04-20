@@ -11,6 +11,7 @@ import uuid
 import subprocess
 import json
 from logger import logger
+from app.utils.time import _get_izhevsk_time
 import tempfile
 import shutil
 
@@ -190,15 +191,6 @@ class S3Manager:
             result[safe_key] = safe_value
         return result
     
-    @staticmethod
-    def _make_aware(dt: Optional[datetime]) -> Optional[datetime]:
-        """Приводит naive datetime к UTC-aware"""
-        if dt is None:
-            return None
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt
-    
     async def list_videos(
         self, 
         token: str,
@@ -344,7 +336,7 @@ class S3Manager:
                 'video-id': video_id,
                 'start-time': start_time.isoformat(),
                 'duration': str(duration_seconds),
-                'uploaded-at': datetime.now(timezone.utc).isoformat()
+                'uploaded-at': _get_izhevsk_time().isoformat()
             }
             
             if metadata:

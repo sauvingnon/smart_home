@@ -8,7 +8,7 @@ bool VideoManager::begin() {
     _sdReady = false;
     
     // Сначала монтируем SD
-    if (!SD_MMC.begin()) {
+    if (!SD_MMC.begin("/sdcard", true)) {
         Serial.println("SD Card mount failed in VideoManager");
         return false;
     }
@@ -231,7 +231,7 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
     }
     
     http.setTimeout(10000);
-    // http.addHeader("X-Access-Key", _accessKey);
+    http.addHeader("X-Access-Key", _accessKey);
     http.addHeader("Content-Type", "video/mjpeg");
     
     File file = SD_MMC.open(filename, FILE_READ);
@@ -248,18 +248,12 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
         SD_MMC.remove(filename);
         return true;
     }
-
-    _sending = true;
-    _currentHttp = &http;
     
     Serial.printf("📤 Sending %s (%zu bytes)...\n", filename.c_str(), file.size());
     
     int code = http.sendRequest("POST", &file, file.size());
     file.close();
     http.end();
-
-    _sending = false;
-    _currentHttp = nullptr;
     
     if (code == 200) {
         Serial.printf("✅ Video sent: %s\n", filename.c_str());
@@ -267,15 +261,6 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
     } else {
         Serial.printf("❌ HTTP %d for %s\n", code, filename.c_str());
         return false;
-    }
-}
-
-void VideoManager::abortSend() {
-    if (_sending && _currentHttp) {
-        Serial.println("🛑 Aborting send...");
-        // Устанавливаем таймаут в 1мс - практически мгновенный обрыв
-        _currentHttp->setTimeout(1);
-        // Флаги сбросятся в sendVideo после завершения запроса
     }
 }
 

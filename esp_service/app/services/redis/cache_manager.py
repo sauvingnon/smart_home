@@ -6,6 +6,7 @@ import json
 from logger import logger
 import asyncio
 import secrets
+from config import DEFAULT_RECORDING_DAYS
 
 # =================== КЭШ МЕНЕДЖЕР ===================
 class CacheManager:
@@ -20,6 +21,10 @@ class CacheManager:
         # Токены для просмотра видео
         self.video_token_prefix = "video_token:"   # token -> video_key
         self.video_token_ttl = 3600                # 1 час
+
+        # Для дедупликации видео (хранить ID уже обработанных видео)
+        self.video_dedup_prefix = "video_dedup:"
+        self.video_dedup_ttl = timedelta(days=DEFAULT_RECORDING_DAYS)
 
         
     async def connect(self, max_retries: int = 5, retry_delay: int = 2):
@@ -96,6 +101,40 @@ class CacheManager:
                 return False
         
         return self.redis_client is not None
+    
+    async def get_video_dedup(self, camera_id: str, start_timestamp: int) -> Optional[str]:
+        """Проверяет дубликат видео по camera_id + start_timestamp.
+        Возвращает video_id если дубликат найден, иначе None."""
+        if not await self._ensure_connection():
+            return None
+        
+        try:
+            key = f"{self.video_dedup_prefix}{camera_id}:{start_timestamp}"
+            video_id = await self.redis_client.get(key)
+            
+            if video_id:
+                logger.warning(f"⚠️ Дубликат видео: camera={camera_id}, start={start_timestamp}, ID={video_id}")
+            
+            return video_id
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка проверки дубликата видео: {e}")
+            return None
+
+    async def save_video_dedup(self, camera_id: str, start_timestamp: int, video_id: str) -> bool:
+        """Сохраняет связку camera_id + start_timestamp -> video_id для защиты от дублей."""
+        if not await self._ensure_connection():
+            return False
+        
+        try:
+            key = f"{self.video_dedup_prefix}{camera_id}:{start_timestamp}"
+            await self.redis_client.setex(key, self.video_dedup_ttl, video_id)
+            logger.debug(f"💾 Dedup сохранён: camera={camera_id}, start={start_timestamp}, ID={video_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения dedup видео: {e}")
+            return False
     
     async def get_cached_weather(self) -> Optional[WeatherData]:
         """Получение данных из кэша"""
