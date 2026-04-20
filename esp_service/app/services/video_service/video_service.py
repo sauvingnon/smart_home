@@ -54,12 +54,12 @@ class VideoService:
 
         logger.info("🧹 Запуск очистки старых видео...")
 
-        cutoff = datetime.now() - timedelta(days=7)
+        IZHEVSK_TZ = timezone(timedelta(hours=4))
+        cutoff = datetime.now(tz=IZHEVSK_TZ) - timedelta(days=7)
         deleted_count = 0
         deleted_bytes = 0
 
         try:
-            # Берём все видео без фильтра по камере
             all_videos = await self.s3_manager.list_videos(
                 camera_id=None,
                 token="internal",
@@ -68,23 +68,36 @@ class VideoService:
 
             for video in all_videos:
                 try:
-                    # Определяем дату — берём start_time если есть, иначе last_modified
                     video_date = None
 
                     if video.get('start_time'):
                         try:
-                            video_date = datetime.fromisoformat(video['start_time'])
+                            dt = datetime.fromisoformat(video['start_time'])
+                            # Если naive — считаем что это уже ижевское время
+                            if dt.tzinfo is None:
+                                video_date = dt.replace(tzinfo=IZHEVSK_TZ)
+                            else:
+                                video_date = dt.astimezone(IZHEVSK_TZ)
                         except (ValueError, TypeError):
                             pass
 
                     if video_date is None:
                         last_modified = video.get('last_modified')
                         if last_modified:
-                            # last_modified может быть datetime или строкой
                             if isinstance(last_modified, datetime):
-                                video_date = last_modified.replace(tzinfo=None)
+                                if last_modified.tzinfo is None:
+                                    video_date = last_modified.replace(tzinfo=IZHEVSK_TZ)
+                                else:
+                                    video_date = last_modified.astimezone(IZHEVSK_TZ)
                             else:
-                                video_date = datetime.fromisoformat(str(last_modified))
+                                try:
+                                    dt = datetime.fromisoformat(str(last_modified))
+                                    if dt.tzinfo is None:
+                                        video_date = dt.replace(tzinfo=IZHEVSK_TZ)
+                                    else:
+                                        video_date = dt.astimezone(IZHEVSK_TZ)
+                                except (ValueError, TypeError):
+                                    pass
 
                     if video_date is None:
                         logger.warning(f"⚠️ Нет даты для видео {video.get('video_id')}, пропускаем")
@@ -96,14 +109,12 @@ class VideoService:
                         key = video.get('key')
                         size = video.get('size_bytes', 0)
 
-                        # Удаляем видео
                         success = await self.s3_manager.delete_video(key)
 
                         if success:
                             deleted_bytes += size
                             deleted_count += 1
 
-                            # Удаляем thumbnail
                             if video_id:
                                 thumb_key = f"thumbnails/{camera_id}/{video_id}.jpg"
                                 try:
@@ -111,9 +122,7 @@ class VideoService:
                                 except Exception:
                                     pass
 
-                                # Чистим dedup из Redis чтобы не копился мусор
                                 try:
-                                    # start_time -> timestamp для ключа dedup
                                     if video.get('start_time'):
                                         ts = int(datetime.fromisoformat(video['start_time']).timestamp())
                                         dedup_key = f"video_dedup:{camera_id}:{ts}"
@@ -123,7 +132,7 @@ class VideoService:
 
                             logger.info(
                                 f"🗑️ Удалено старое видео: {key} "
-                                f"(дата: {video_date.strftime('%Y-%m-%d')}, "
+                                f"(дата: {video_date.strftime('%Y-%m-%d %H:%M')} UTC+4, "
                                 f"размер: {size // 1024}КБ)"
                             )
 
@@ -359,37 +368,121 @@ class VideoService:
         if text == "stream_state:ok":
             logger.info(f"✅ [{camera_id}] Камера подтвердила изменение стрима")
             return
+        elif text == "stream_state:off":
+            logger.info(f"📹 [{camera_id}] Плата выключила стрим")
+            if camera_id in self.cameras:
+                self.cameras[camera_id].metrics.is_streaming = False
+                if self.cameras[camera_id].mode == CameraMode.STREAMING:
+                    self.cameras[camera_id].mode = CameraMode.CONNECTED
+            return
+        elif text == "stream_state:error:recording_active":
+            logger.warning(f"⚠️ [{camera_id}] Нельзя управлять стримом во время записи")
+            return
+        elif text == "stream_state:error:camera_init_failed":
+            logger.error(f"🔴 [{camera_id}] Камера не смогла инициализироваться")
+            if camera_id in self.cameras:
+                self.cameras[camera_id].mode = CameraMode.CONNECTED
+                self.cameras[camera_id].metrics.is_streaming = False
+            return
+        elif text == "stream_state:error:camera_off":
+            logger.error(f"🔴 [{camera_id}] КРИТИЧНО: стрим шёл но камера выключена")
+            if camera_id in self.cameras:
+                self.cameras[camera_id].mode = CameraMode.CONNECTED
+                self.cameras[camera_id].metrics.is_streaming = False
+            return
+        elif text == "stream_state:error":
+            logger.error(f"❌ [{camera_id}] Общая ошибка управления стримом")
+            if camera_id in self.cameras:
+                self.cameras[camera_id].metrics.is_streaming = False
+            return
+
+        # ---- record ----
         elif text.startswith("record:"):
             logger.info(f"📹 [{camera_id}] Record status: {text}")
+
             if text == "record:started":
                 if camera_id in self.cameras:
                     self.cameras[camera_id].mode = CameraMode.RECORDING
                     self.cameras[camera_id].metrics.is_recording = True
-            elif text == "record:stopped":
+
+            elif text in ("record:stopped", "record:stopped:timeout"):
+                if text == "record:stopped:timeout":
+                    logger.warning(f"⏱️ [{camera_id}] Запись остановлена по таймауту на плате")
+                # Гасим серверный таймер — плата уже остановила сама
+                old_task = self._recording_timers.pop(camera_id, None)
+                if old_task and not old_task.done():
+                    old_task.cancel()
                 if camera_id in self.cameras:
                     self.cameras[camera_id].metrics.is_recording = False
                     self.cameras[camera_id].mode = CameraMode.CONNECTED
-                
-                # 👇 Если есть зрители - включаем стрим
                 if camera_id in self.viewers and len(self.viewers[camera_id]) > 0:
                     await self.send_command(camera_id, "stream_state:on")
                     logger.info(f"📹 [{camera_id}] Возобновляем стрим после записи (есть {len(self.viewers[camera_id])} зрителей)")
+
+            elif text == "record:error:no_sd":
+                logger.error(f"💾 [{camera_id}] SD карта недоступна, запись невозможна")
+                old_task = self._recording_timers.pop(camera_id, None)
+                if old_task and not old_task.done():
+                    old_task.cancel()
+                if camera_id in self.cameras:
+                    self.cameras[camera_id].metrics.is_recording = False
+                    self.cameras[camera_id].mode = CameraMode.CONNECTED
+
+            elif text == "record:error:already":
+                logger.warning(f"⚠️ [{camera_id}] Запись уже идёт, повторный старт проигнорирован")
+
+            elif text == "record:error:camera_off":
+                logger.error(f"🔴 [{camera_id}] КРИТИЧНО: запись шла но камера выключена")
+                old_task = self._recording_timers.pop(camera_id, None)
+                if old_task and not old_task.done():
+                    old_task.cancel()
+                if camera_id in self.cameras:
+                    self.cameras[camera_id].metrics.is_recording = False
+                    self.cameras[camera_id].mode = CameraMode.CONNECTED
+
+            elif text == "record:error:write_failed":
+                logger.error(f"💾 [{camera_id}] Ошибка записи на SD, запись прервана")
+                old_task = self._recording_timers.pop(camera_id, None)
+                if old_task and not old_task.done():
+                    old_task.cancel()
+                if camera_id in self.cameras:
+                    self.cameras[camera_id].metrics.is_recording = False
+                    self.cameras[camera_id].mode = CameraMode.CONNECTED
+
+            elif text == "record:error":
+                logger.error(f"❌ [{camera_id}] Общая ошибка записи (не удалось стартовать)")
+                old_task = self._recording_timers.pop(camera_id, None)
+                if old_task and not old_task.done():
+                    old_task.cancel()
+                if camera_id in self.cameras:
+                    self.cameras[camera_id].metrics.is_recording = False
+                    self.cameras[camera_id].mode = CameraMode.CONNECTED
+
             return
-        elif text.startswith("queue:count:"):
-            count = int(text.split(":")[2])
-            logger.info(f"📤 [{camera_id}] Queue size: {count}")
-            return
+
+        # ---- size ----
         elif text == "size:ok":
-            logger.info(f"✅ [{camera_id}] Resolution changed successfully")
+            logger.info(f"✅ [{camera_id}] Разрешение изменено успешно")
             return
         elif text == "size:error":
-            logger.error(f"❌ [{camera_id}] Failed to change resolution")
+            logger.error(f"❌ [{camera_id}] Не удалось изменить разрешение")
             return
+
+        # ---- fan ----
         elif text == "fan:ok":
-            logger.info(f"✅ [{camera_id}] Fan state changed")
+            logger.info(f"✅ [{camera_id}] Состояние вентилятора изменено")
             return
-        
-        logger.warning(f"⚠️ [{camera_id}] Неизвестное текстовое сообщение: {text[:100]}")
+
+        # ---- queue ----
+        elif text.startswith("queue:count:"):
+            try:
+                count = int(text.split(":")[2])
+                logger.info(f"📤 [{camera_id}] Видео в очереди на отправку: {count}")
+            except (IndexError, ValueError):
+                logger.warning(f"⚠️ [{camera_id}] Не удалось распарсить queue:count: {text}")
+            return
+
+        logger.warning(f"⚠️ [{camera_id}] Неизвестное сообщение: {text[:100]}")
     
     async def _broadcast_frame(self, camera_id: str, frame_data: bytes):
         """Рассылка кадра всем зрителям камеры"""
