@@ -35,6 +35,109 @@ class VideoService:
     async def start(self):
         """Запустить фоновый ping-pong watcher"""
         logger.info("✅ VideoService (базовый) запущен")
+        asyncio.create_task(self._cleanup_loop())
+
+    async def _cleanup_loop(self):
+        """Раз в сутки удаляет видео старше 7 дней"""
+        while True:
+            try:
+                await self._cleanup_old_videos()
+            except Exception as e:
+                logger.error(f"❌ Ошибка в cleanup loop: {e}")
+            
+            await asyncio.sleep(24 * 60 * 60)  # 24 часа
+
+    async def _cleanup_old_videos(self):
+        """Удаляет видео старше 7 дней из S3"""
+        if not self.s3_manager:
+            return
+
+        logger.info("🧹 Запуск очистки старых видео...")
+
+        cutoff = datetime.now() - timedelta(days=7)
+        deleted_count = 0
+        deleted_bytes = 0
+
+        try:
+            # Берём все видео без фильтра по камере
+            all_videos = await self.s3_manager.list_videos(
+                camera_id=None,
+                token="internal",
+                url=""
+            )
+
+            for video in all_videos:
+                try:
+                    # Определяем дату — берём start_time если есть, иначе last_modified
+                    video_date = None
+
+                    if video.get('start_time'):
+                        try:
+                            video_date = datetime.fromisoformat(video['start_time'])
+                        except (ValueError, TypeError):
+                            pass
+
+                    if video_date is None:
+                        last_modified = video.get('last_modified')
+                        if last_modified:
+                            # last_modified может быть datetime или строкой
+                            if isinstance(last_modified, datetime):
+                                video_date = last_modified.replace(tzinfo=None)
+                            else:
+                                video_date = datetime.fromisoformat(str(last_modified))
+
+                    if video_date is None:
+                        logger.warning(f"⚠️ Нет даты для видео {video.get('video_id')}, пропускаем")
+                        continue
+
+                    if video_date < cutoff:
+                        camera_id = video.get('camera_id', 'unknown')
+                        video_id = video.get('video_id')
+                        key = video.get('key')
+                        size = video.get('size_bytes', 0)
+
+                        # Удаляем видео
+                        success = await self.s3_manager.delete_video(key)
+
+                        if success:
+                            deleted_bytes += size
+                            deleted_count += 1
+
+                            # Удаляем thumbnail
+                            if video_id:
+                                thumb_key = f"thumbnails/{camera_id}/{video_id}.jpg"
+                                try:
+                                    await self.s3_manager.delete_video(thumb_key)
+                                except Exception:
+                                    pass
+
+                                # Чистим dedup из Redis чтобы не копился мусор
+                                try:
+                                    # start_time -> timestamp для ключа dedup
+                                    if video.get('start_time'):
+                                        ts = int(datetime.fromisoformat(video['start_time']).timestamp())
+                                        dedup_key = f"video_dedup:{camera_id}:{ts}"
+                                        await self.cache_manager.redis_client.delete(dedup_key)
+                                except Exception:
+                                    pass
+
+                            logger.info(
+                                f"🗑️ Удалено старое видео: {key} "
+                                f"(дата: {video_date.strftime('%Y-%m-%d')}, "
+                                f"размер: {size // 1024}КБ)"
+                            )
+
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при удалении видео {video.get('key')}: {e}")
+                    continue
+
+            logger.info(
+                f"✅ Очистка завершена: удалено {deleted_count} видео, "
+                f"освобождено {deleted_bytes // (1024 * 1024)}МБ"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка очистки старых видео: {e}", exc_info=True)
 
     async def handle_viewer_websocket(self, websocket: WebSocket, camera_id: str):
         """Обработка WebSocket соединения от зрителя"""
