@@ -72,7 +72,7 @@ class S3Manager:
                 except Exception:
                     pass
 
-    async def connect(self, max_retries: int = 5, retry_delay: int = 5, init_delay: int = 10):
+    async def connect(self, max_retries: int = 5, retry_delay: int = 5, init_delay: int = 0):
         """Устанавливает соединение с S3"""
         if init_delay > 0:
             logger.info(f"⏳ Даем S3 время на инициализацию ({init_delay} сек)...")

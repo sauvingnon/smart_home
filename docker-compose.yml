@@ -92,6 +92,12 @@ services:
     restart: unless-stopped
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3100/loki/api/v1/status/buildinfo"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: "json-file"
       options:
@@ -111,9 +117,9 @@ services:
       redis:
         condition: service_healthy
       mqtt-broker:
-        condition: service_started
+        condition: service_healthy
       garage:
-        condition: service_started
+        condition: service_healthy
     networks:
       - internal
     ports:
@@ -126,7 +132,7 @@ services:
     mem_reservation: 100m
     cpus: "0.5"
     healthcheck:
-      test: ["CMD", "python", "-c", "exit(0)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health'); print('healthy')"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -164,7 +170,7 @@ services:
     cpus: "0.5"
     depends_on:
       esp_loki:
-        condition: service_started 
+        condition: service_healthy 
     networks:
       - internal
     healthcheck:
@@ -188,9 +194,9 @@ services:
       - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
     depends_on:
       esp_service:
-        condition: service_started
+        condition: service_healthy
       esp_loki:
-        condition: service_started
+        condition: service_healthy
     networks:
       - internal
 
