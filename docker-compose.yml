@@ -118,12 +118,13 @@ services:
       - internal
     ports:
     # Даем Web API, но оно доступно только на localhost, а оттуда его подхватит nginx и переведет на https
-      - "127.0.0.1:8005:8005"
-      # - "8005:8005"
+      # - "127.0.0.1:8005:8005"
+      - "8005:8005"
     volumes:
       - ./esp_service/data:/app/data
-    # mem_limit: 200m
-    # cpus: "0.5"
+    mem_limit: 200m
+    mem_reservation: 100m
+    cpus: "0.5"
     healthcheck:
       test: ["CMD", "python", "-c", "exit(0)"]
       interval: 30s
@@ -158,7 +159,7 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     restart: unless-stopped
-    mem_limit: 300m          # ← ДОБАВИТЬ
+    mem_limit: 300m
     mem_reservation: 150m
     cpus: "0.5"
     depends_on:
