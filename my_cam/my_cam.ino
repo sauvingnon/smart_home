@@ -440,7 +440,7 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
 // --- Запуск WebSocket клиента ---
 void startWebSocketClient() {
   if (WEBSOCKET_PORT == 443) {
-    webSocket.beginSSL(WEBSOCKET_HOST, WEBSOCKET_PORT, WEB_SOCKET_ENDPOINT); 
+    webSocket.beginSslWithCA(WEBSOCKET_HOST, WEBSOCKET_PORT, WEB_SOCKET_ENDPOINT, NULL, "wss");
   } else {
     webSocket.begin(WEBSOCKET_HOST, WEBSOCKET_PORT, WEB_SOCKET_ENDPOINT);
   }
@@ -451,10 +451,12 @@ void startWebSocketClient() {
   // Запускаем задачу стриминга на ядре 1
   // ВОЗМОЖНО ТРЕБУЕТСЯ УВИЛИЧИТЬ СТЕК 
   BaseType_t result = xTaskCreatePinnedToCore(
-    webSocketTask, "ws_task", 8192, NULL, 1, NULL, 1
+    webSocketTask, "ws_task", 12288, NULL, 1, NULL, 1
   );
   if (result != pdPASS) {
       Serial.println("❌ WS Task creation FAILED!");
+  } else {
+      Serial.println("✅ WS Task created");
   }
 }
 

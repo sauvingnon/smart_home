@@ -235,17 +235,11 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
     
     bool useSSL = _serverUrl.startsWith("https://");
     
-    // Размер чанка: 512 КБ (оптимально для ESP32)
-    const size_t CHUNK_SIZE = 512 * 1024;
+    // Размер чанка: 256 КБ (оптимально для ESP32)
+    const size_t CHUNK_SIZE = 256 * 1024;
     int totalChunks = (actualSize + CHUNK_SIZE - 1) / CHUNK_SIZE;
     size_t totalSent = 0;
     bool success = true;
-
-    String shortName = filename;
-    int lastSlash = filename.lastIndexOf('/');
-    if (lastSlash >= 0) {
-        shortName = filename.substring(lastSlash + 1);
-    }
     
     for (int chunk = 1; chunk <= totalChunks && success; chunk++) {
         size_t chunkStart = (chunk - 1) * CHUNK_SIZE;
@@ -259,8 +253,10 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
                     + "&duration=" + String(duration)
                     + "&chunk=" + String(chunk)
                     + "&total_chunks=" + String(totalChunks)
-                    + "&filename=" + shortName;
+                    + "&filename=" + filename.substring(filename.lastIndexOf('/') + 1);
         
+        Serial.printf("🌐 URL: %s\n", url.c_str());
+
         HTTPClient http;
         int code = -1;
         
@@ -307,6 +303,8 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
         } else {
             Serial.printf("❌ Chunk %d failed (HTTP %d)\n", chunk, code);
             success = false;
+            String response = http.getString();
+            Serial.printf("📩 Server response: %s\n", response.c_str());
         }
         
         // Пауза между чанками
