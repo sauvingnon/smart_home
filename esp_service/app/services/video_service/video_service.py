@@ -251,8 +251,6 @@ class VideoService:
     async def handle_camera(self, websocket: WebSocket):
         """Обработка WebSocket соединения от камеры"""
 
-        self._tasks[camera_id] = asyncio.current_task()
-
         await websocket.accept()
         camera_id = None
         
@@ -270,6 +268,8 @@ class VideoService:
             
             access_key = parts[1]
             camera_id = parts[2]
+
+            self._tasks[camera_id] = asyncio.current_task()
             
             if self.valid_keys.get(camera_id) != access_key:
                 await websocket.close(code=1008, reason="Invalid key")

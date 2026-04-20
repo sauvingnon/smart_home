@@ -240,6 +240,12 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
     int totalChunks = (actualSize + CHUNK_SIZE - 1) / CHUNK_SIZE;
     size_t totalSent = 0;
     bool success = true;
+
+    String shortName = filename;
+    int lastSlash = filename.lastIndexOf('/');
+    if (lastSlash >= 0) {
+        shortName = filename.substring(lastSlash + 1);
+    }
     
     for (int chunk = 1; chunk <= totalChunks && success; chunk++) {
         size_t chunkStart = (chunk - 1) * CHUNK_SIZE;
@@ -253,7 +259,7 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
                     + "&duration=" + String(duration)
                     + "&chunk=" + String(chunk)
                     + "&total_chunks=" + String(totalChunks)
-                    + "&filename=" + filename;
+                    + "&filename=" + shortName;
         
         HTTPClient http;
         int code = -1;
