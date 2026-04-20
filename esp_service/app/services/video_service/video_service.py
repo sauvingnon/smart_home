@@ -13,6 +13,7 @@ from app.services.s3_service.s3_manager import S3Manager
 from app.services.redis.cache_manager import CacheManager
 import tempfile
 import os
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 from config import CAMERA_ID, CAMERA_ACCESS_KEY
 
 class VideoService:
@@ -34,6 +35,8 @@ class VideoService:
         self._recording_timers: Dict[str, asyncio.Task] = {}
         # Сервис для управления сессиями загрузки видео по чанкам
         self.chunk_service = VideoChunkService(ttl_seconds=300)
+
+        self._tasks: Dict[str, asyncio.Task] = {}
     
     async def start(self):
         """Запустить фоновый ping-pong watcher"""
@@ -247,6 +250,9 @@ class VideoService:
 
     async def handle_camera(self, websocket: WebSocket):
         """Обработка WebSocket соединения от камеры"""
+
+        self._tasks[camera_id] = asyncio.current_task()
+
         await websocket.accept()
         camera_id = None
         
@@ -271,8 +277,12 @@ class VideoService:
             
             # ---- Старое соединение? закрываем ----
             if camera_id in self.connections:
+                old_ws = self.connections[camera_id]
                 try:
-                    await self.connections[camera_id].close()
+                    # ВАЖНО: Сначала отменяем задачу, которая крутит receive
+                    if camera_id in self._tasks:
+                        self._tasks[camera_id].cancel()
+                    await old_ws.close(code=1000, reason="New connection")
                 except:
                     pass
             
@@ -296,7 +306,7 @@ class VideoService:
             await websocket.send_text("AUTH_OK")
             
             # ---- Цикл приёма сообщений ----
-            while True:
+            while websocket.client_state == WebSocketState.CONNECTED:
                 try:
                     message = await asyncio.wait_for(websocket.receive(), timeout=60.0)
                     
@@ -313,9 +323,19 @@ class VideoService:
                         await self._broadcast_frame(camera_id, message['bytes'])
                         
                 except asyncio.TimeoutError:
-                    logger.warning(f"⏱️ Таймаут {camera_id}, закрываем")
-                    break
-                    
+                    # Отправляем пинг для поддержания соединения
+                    try:
+                        await websocket.send_text("ping")
+                    except:
+                        break
+                except RuntimeError as e:
+                    # Сокет уже закрыт — выходим тихо
+                    if "disconnect message" in str(e):
+                        logger.info(f"🔌 [{camera_id}] Соединение закрыто (нормально)")
+                        break
+                    raise
+        except WebSocketDisconnect:
+            logger.info(f"🔌 [{camera_id}] WebSocket disconnect")
         except Exception as e:
             logger.error(f"❌ Ошибка при обработке {camera_id}: {e}", exc_info=True)
         finally:
