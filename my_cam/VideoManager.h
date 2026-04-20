@@ -48,6 +48,7 @@ private:
     
     // Отправка одного файла
     bool sendVideo(const String& filename, unsigned long startTime, unsigned long duration, size_t fileSize);
+    String urlEncode(const String& str);
     
     // Вспомогательные
     String getTimestampStr();             // для имени файла

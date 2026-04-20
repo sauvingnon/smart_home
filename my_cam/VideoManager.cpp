@@ -215,7 +215,8 @@ void VideoManager::removeFirstLine() {
     SD_MMC.rename("/queue.tmp", "/queue.txt");
 }
 
-bool VideoManager::sendVideo(const String& filename, unsigned long startTime, unsigned long duration, size_t fileSize) {
+bool VideoManager::sendVideo(const String& filename, unsigned long startTime, 
+                             unsigned long duration, size_t fileSize) {
     if (_recording) return false;
     
     File file = SD_MMC.open(filename, FILE_READ);
@@ -227,91 +228,109 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
     size_t actualSize = file.size();
     if (actualSize == 0) {
         file.close();
-        SD_MMC.remove(filename);
-        return true;
+        Serial.println("⚠️ Empty file, keeping for investigation");
+        return false;  // Не удаляем пустой файл
     }
+    
+    // Кодируем имя файла для URL
+    String encodedFilename = urlEncode(filename.substring(filename.lastIndexOf('/') + 1));
     
     Serial.printf("📤 Sending %s (%zu bytes) in chunks...\n", filename.c_str(), actualSize);
     
     bool useSSL = _serverUrl.startsWith("https://");
-    
-    // Размер чанка: 256 КБ (оптимально для ESP32)
-    const size_t CHUNK_SIZE = 256 * 1024;
+    const size_t CHUNK_SIZE = 1024 * 1024;
     int totalChunks = (actualSize + CHUNK_SIZE - 1) / CHUNK_SIZE;
     size_t totalSent = 0;
     bool success = true;
+    
+    // Выделяем буфер один раз
+    uint8_t* buffer = (uint8_t*)malloc(CHUNK_SIZE);
+    if (!buffer) {
+        Serial.println("❌ Failed to allocate buffer");
+        file.close();
+        return false;
+    }
     
     for (int chunk = 1; chunk <= totalChunks && success; chunk++) {
         size_t chunkStart = (chunk - 1) * CHUNK_SIZE;
         size_t chunkSize = (chunk == totalChunks) ? (actualSize - chunkStart) : CHUNK_SIZE;
         
-        Serial.printf("📦 Chunk %d/%d (%zu bytes)\n", chunk, totalChunks, chunkSize);
+        // Повторные попытки для каждого чанка
+        const int MAX_RETRIES = 3;
+        bool chunkSuccess = false;
         
-        String url = _serverUrl + "/esp_service/video/upload_chunk"
-                    + "?camera_id=" + _cameraId 
-                    + "&start_time=" + String(startTime)
-                    + "&duration=" + String(duration)
-                    + "&chunk=" + String(chunk)
-                    + "&total_chunks=" + String(totalChunks)
-                    + "&filename=" + filename.substring(filename.lastIndexOf('/') + 1);
-        
-        Serial.printf("🌐 URL: %s\n", url.c_str());
-
-        HTTPClient http;
-        int code = -1;
-        
-        if (useSSL) {
-            WiFiClientSecure client;
-            client.setInsecure();
-            http.begin(client, url);
-        } else {
-            WiFiClient client;
-            http.begin(client, url);
+        for (int retry = 0; retry < MAX_RETRIES && !chunkSuccess; retry++) {
+            if (retry > 0) {
+                Serial.printf("🔄 Retry %d/%d for chunk %d\n", retry + 1, MAX_RETRIES, chunk);
+                delay(1000 * retry);  // Экспоненциальная задержка
+            }
+            
+            Serial.printf("📦 Chunk %d/%d (%zu bytes)\n", chunk, totalChunks, chunkSize);
+            
+            String url = _serverUrl + "/esp_service/video/upload_chunk"
+                        + "?camera_id=" + _cameraId 
+                        + "&start_time=" + String(startTime)
+                        + "&duration=" + String(duration)
+                        + "&chunk=" + String(chunk)
+                        + "&total_chunks=" + String(totalChunks)
+                        + "&filename=" + encodedFilename;
+            
+            HTTPClient http;
+            bool httpInitialized = false;
+            
+            // Инициализация HTTP клиента
+            if (useSSL) {
+                WiFiClientSecure* client = new WiFiClientSecure();
+                client->setInsecure();
+                httpInitialized = http.begin(*client, url);
+            } else {
+                WiFiClient* client = new WiFiClient();
+                httpInitialized = http.begin(*client, url);
+            }
+            
+            if (!httpInitialized) {
+                Serial.println("❌ Failed to initialize HTTP client");
+                continue;
+            }
+            
+            http.setTimeout(30000);
+            http.addHeader("X-Access-Key", _accessKey);
+            http.addHeader("Content-Type", "application/octet-stream");
+            
+            // Читаем чанк
+            file.seek(chunkStart);
+            size_t bytesRead = file.read(buffer, chunkSize);
+            
+            if (bytesRead != chunkSize) {
+                Serial.printf("❌ Read error: got %zu of %zu bytes\n", bytesRead, chunkSize);
+                http.end();
+                chunkSuccess = false;
+                break;
+            }
+            
+            // Отправляем
+            int code = http.POST(buffer, chunkSize);
+            http.end();
+            
+            if (code == 200) {
+                totalSent += chunkSize;
+                chunkSuccess = true;
+                Serial.printf("✅ Chunk %d sent\n", chunk);
+            } else {
+                Serial.printf("❌ Chunk %d failed (HTTP %d)\n", chunk, code);
+                String response = http.getString();
+                Serial.printf("📩 Server response: %s\n", response.c_str());
+            }
         }
         
-        http.setTimeout(30000);  // 30 секунд на чанк
-        http.addHeader("X-Access-Key", _accessKey);
-        http.addHeader("Content-Type", "application/octet-stream");
-        
-        // Позиционируем файл
-        file.seek(chunkStart);
-        
-        // Читаем чанк в буфер
-        uint8_t* buffer = (uint8_t*)malloc(chunkSize);
-        if (!buffer) {
-            Serial.printf("❌ Failed to allocate %zu bytes for chunk\n", chunkSize);
+        if (!chunkSuccess) {
             success = false;
-            break;
         }
         
-        size_t bytesRead = file.read(buffer, chunkSize);
-        if (bytesRead != chunkSize) {
-            Serial.printf("❌ Read error: got %zu of %zu bytes\n", bytesRead, chunkSize);
-            free(buffer);
-            success = false;
-            break;
-        }
-        
-        // Отправляем
-        code = http.POST(buffer, chunkSize);
-        free(buffer);
-        http.end();
-        
-        if (code == 200) {
-            totalSent += chunkSize;
-            Serial.printf("✅ Chunk %d sent\n", chunk);
-        } else {
-            Serial.printf("❌ Chunk %d failed (HTTP %d)\n", chunk, code);
-            success = false;
-            String response = http.getString();
-            Serial.printf("📩 Server response: %s\n", response.c_str());
-        }
-        
-        // Пауза между чанками
-        delay(50);
         yield();
     }
     
+    free(buffer);
     file.close();
     
     if (success && totalSent == actualSize) {
@@ -322,6 +341,23 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime, un
         Serial.printf("❌ Upload failed (sent %zu/%zu)\n", totalSent, actualSize);
         return false;
     }
+}
+
+// Вспомогательная функция для кодирования URL
+String VideoManager::urlEncode(const String& str) {
+    String encoded = "";
+    char c;
+    for (size_t i = 0; i < str.length(); i++) {
+        c = str[i];
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            encoded += c;
+        } else {
+            char hex[4];
+            sprintf(hex, "%%%02X", c);
+            encoded += hex;
+        }
+    }
+    return encoded;
 }
 
 void VideoManager::setStreamActive(bool active) {
