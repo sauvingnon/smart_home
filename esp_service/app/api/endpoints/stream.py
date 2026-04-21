@@ -77,14 +77,10 @@ async def get_camera_status(
 async def list_videos(
     request: Request,
     camera_id: Optional[str] = Query(None, description="ID камеры"),
-    x_access_key: str = Header(..., alias="X-Access-Key")
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """Получить список видео с presigned URLs и токеном доступа"""
     worker = BackgroundWorker.get_instance()
-    
-    # 🔧 Проверяем access_key
-    # if not worker.auth.verify_access_key(x_access_key):
-    #     raise HTTPException(status_code=403, detail="Доступ запрещен.")
     
     # Получаем список видео
     return await worker.video_service.get_video_list(camera_id=camera_id)
@@ -189,7 +185,7 @@ async def get_video_presigned_url(
 async def download_video(
     video_id: str = Query(..., description="UUID видео"),  # 🔧 ИСПРАВЛЕНИЕ: video_id вместо key
     camera_id: str = Query(..., description="ID камеры"),
-    token: str = Query(..., description="Токен доступа")
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """
     Скачать видео по video_id.
@@ -197,11 +193,6 @@ async def download_video(
     🔧 ИСПРАВЛЕНИЕ: Использует video_id вместо прямого ключа S3
     """
     worker = BackgroundWorker.get_instance()
-    
-    # Проверяем токен
-    user_id = await worker.cache.validate_session_token(token)
-    if not user_id:
-        raise HTTPException(status_code=403, detail="Доступ запрещен.")
     
     video_data = await worker.video_service.get_video_by_id(camera_id, video_id)
     if not video_data:

@@ -72,4 +72,6 @@ def get_auth_manager():
 async def get_current_user_id_dep(request: Request) -> int:
     """Dependency для FastAPI, лениво получает user_id"""
     auth = get_auth_manager()
-    return await auth.verify_access_key(request)
+    user_id = await auth.verify_access_key(request)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")

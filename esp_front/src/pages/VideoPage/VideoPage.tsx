@@ -167,11 +167,8 @@ export const VideosPage = () => {
               throw new Error('Missing video_id or camera_id')
           }
           
-          // 🔧 Получаем токен из localStorage или контекста (если нужен)
-          const token = localStorage.getItem('session_token') || ''
-          
           const response = await apiClient.fetchRaw(
-              `/esp_service/videos/download?video_id=${encodeURIComponent(videoId)}&camera_id=${encodeURIComponent(cameraId)}&token=${encodeURIComponent(token)}`
+              `/esp_service/videos/download?video_id=${encodeURIComponent(videoId)}&camera_id=${encodeURIComponent(cameraId)}`
           )
           
           if (!response.ok) {
