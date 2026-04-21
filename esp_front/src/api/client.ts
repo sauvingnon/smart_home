@@ -117,9 +117,9 @@ class ApiClient {
   }
 
   // 🔧 ИСПРАВЛЕНО: download использует video_id вместо key
-  async downloadVideo(cameraId: string, videoId: string, token: string): Promise<Blob> {
+  async downloadVideo(cameraId: string, videoId: string): Promise<Blob> {
     const response = await this.fetchRaw(
-      `/esp_service/videos/download?video_id=${encodeURIComponent(videoId)}&camera_id=${encodeURIComponent(cameraId)}&token=${encodeURIComponent(token)}`
+      `/esp_service/videos/download?video_id=${encodeURIComponent(videoId)}&camera_id=${encodeURIComponent(cameraId)}`
     );
     
     if (!response.ok) {

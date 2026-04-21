@@ -904,6 +904,14 @@ class VideoService:
         
         return None
 
+    async def get_video_by_id(self, camera_id: str, video_id: str) -> Optional[bytes]:
+        """Скачать полное видео по video_id"""
+        if not self.s3_manager:
+            logger.error("❌ S3 manager не доступен")
+            return None
+        
+        return await self.s3_manager.get_video_by_id(camera_id, video_id)
+
     async def delete_video(
         self,
         camera_id: str,

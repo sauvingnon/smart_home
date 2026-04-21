@@ -593,3 +593,28 @@ class S3Manager:
         except Exception as e:
             logger.exception(f"❌ Ошибка удаления: {e}")
             return False
+
+    async def get_video_by_id(self, camera_id: str, video_id: str) -> Optional[bytes]:
+        """Скачать полное видео по video_id"""
+        if not await self._ensure_connection():
+            return None
+        
+        key = await self.get_video_key_by_id(camera_id, video_id)
+        if not key:
+            logger.warning(f"⚠️ Видео не найдено: camera={camera_id}, video_id={video_id}")
+            return None
+        
+        try:
+            response = await self._client.get_object(Bucket=self.bucket_name, Key=key)
+            data = await response['Body'].read()
+            logger.info(f"📥 Видео скачано: {key} ({len(data)} байт)")
+            return data
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.warning(f"Видео не найдено в S3: {key}")
+            else:
+                logger.exception(f"❌ Ошибка скачивания видео: {e}")
+            return None
+        except Exception as e:
+            logger.exception(f"❌ Ошибка скачивания видео: {e}")
+            return None
