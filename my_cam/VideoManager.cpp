@@ -229,7 +229,7 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
     if (actualSize == 0) {
         file.close();
         Serial.println("⚠️ Empty file, keeping for investigation");
-        return false;  // Не удаляем пустой файл
+        return true;
     }
     
     // Кодируем имя файла для URL
@@ -275,42 +275,39 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
                         + "&total_chunks=" + String(totalChunks)
                         + "&filename=" + encodedFilename;
             
-            HTTPClient http;
-            bool httpInitialized = false;
+            int code = -1;
             
-            // Инициализация HTTP клиента
+            // 🔥🔥🔥 ВОТ ТУТ ФИКС: client на стеке, без new/delete 🔥🔥🔥
             if (useSSL) {
-                WiFiClientSecure* client = new WiFiClientSecure();
-                client->setInsecure();
-                httpInitialized = http.begin(*client, url);
-            } else {
-                WiFiClient* client = new WiFiClient();
-                httpInitialized = http.begin(*client, url);
-            }
-            
-            if (!httpInitialized) {
-                Serial.println("❌ Failed to initialize HTTP client");
-                continue;
-            }
-            
-            http.setTimeout(30000);
-            http.addHeader("X-Access-Key", _accessKey);
-            http.addHeader("Content-Type", "application/octet-stream");
-            
-            // Читаем чанк
-            file.seek(chunkStart);
-            size_t bytesRead = file.read(buffer, chunkSize);
-            
-            if (bytesRead != chunkSize) {
-                Serial.printf("❌ Read error: got %zu of %zu bytes\n", bytesRead, chunkSize);
+                WiFiClientSecure client;
+                client.setInsecure();
+                HTTPClient http;
+                http.begin(client, url);
+                http.setTimeout(30000);
+                http.addHeader("X-Access-Key", _accessKey);
+                http.addHeader("Content-Type", "application/octet-stream");
+                
+                file.seek(chunkStart);
+                size_t bytesRead = file.read(buffer, chunkSize);
+                if (bytesRead > 0) {
+                    code = http.POST(buffer, bytesRead);
+                }
                 http.end();
-                chunkSuccess = false;
-                break;
+            } else {
+                WiFiClient client;
+                HTTPClient http;
+                http.begin(client, url);
+                http.setTimeout(30000);
+                http.addHeader("X-Access-Key", _accessKey);
+                http.addHeader("Content-Type", "application/octet-stream");
+                
+                file.seek(chunkStart);
+                size_t bytesRead = file.read(buffer, chunkSize);
+                if (bytesRead > 0) {
+                    code = http.POST(buffer, bytesRead);
+                }
+                http.end();
             }
-            
-            // Отправляем
-            int code = http.POST(buffer, chunkSize);
-            http.end();
             
             if (code == 200) {
                 totalSent += chunkSize;
@@ -318,8 +315,6 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
                 Serial.printf("✅ Chunk %d sent\n", chunk);
             } else {
                 Serial.printf("❌ Chunk %d failed (HTTP %d)\n", chunk, code);
-                String response = http.getString();
-                Serial.printf("📩 Server response: %s\n", response.c_str());
             }
         }
         
