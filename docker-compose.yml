@@ -43,6 +43,11 @@ services:
     networks:
       - internal
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   mqtt-broker:
     image: eclipse-mosquitto:latest
@@ -137,6 +142,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   esp_front:
     build: ./esp_front
@@ -146,22 +156,27 @@ services:
       - internal
     ports:
     # Только локальный проброс, это для nginx
-      - "127.0.0.1:3008:3008" 
+      - "127.0.0.1:3008:3008"
     environment:
       - NODE_ENV=production
     mem_limit: 300m
     cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
 
   esp_grafana:
     image: grafana/grafana:latest
     container_name: esp_grafana
-    ports: 
+    ports:
     # Даем ей выход, порт 3000 занят remnawave, поэтому даем 3001 для просмотра логов,
     # У графаны есть авторизация, включил. Но она по http, нужен переход на https
       - "127.0.0.1:3010:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_LOG_LEVEL=debug
+      - GF_LOG_LEVEL=warn
     volumes:
       - grafana_data:/var/lib/grafana
     restart: unless-stopped
@@ -170,7 +185,7 @@ services:
     cpus: "0.5"
     depends_on:
       esp_loki:
-        condition: service_healthy 
+        condition: service_healthy
     networks:
       - internal
     healthcheck:
@@ -178,6 +193,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   esp_promtail:
     image: grafana/promtail:3.0.0
@@ -186,7 +206,7 @@ services:
     mem_limit: 100m
     mem_reservation: 50m
     cpus: "0.5"
-    command: 
+    command:
       - -config.file=/etc/promtail/config.yaml
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -199,6 +219,11 @@ services:
         condition: service_healthy
     networks:
       - internal
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
 
 volumes:
   redis_data:
