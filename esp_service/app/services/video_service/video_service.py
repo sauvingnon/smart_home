@@ -160,34 +160,18 @@ class VideoService:
         viewer_added = False
         
         try:
-            # Ждем авторизацию
-            auth_msg = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
-            
-            # Парсим JSON
-            try:
-                import json
-                auth_data = json.loads(auth_msg)
-            except:
-                await websocket.send_text("ERROR: Invalid JSON")
-                return  # 🔧 Просто return, finally сам закроет
-            
-            # Проверяем формат
-            if auth_data.get('type') != 'auth':
-                await websocket.send_text("ERROR: Expected auth message")
-                return
-            
-            access_key = auth_data.get('access_key')
+            # Auth через cookie из WS handshake headers
+            from app.core.auth import COOKIE_NAME
+            access_key = websocket.cookies.get(COOKIE_NAME)
             if not access_key:
-                await websocket.send_text("ERROR: Missing access_key")
+                await websocket.send_text("ERROR: Not authenticated")
                 return
-            
+
             auth_manager = get_auth_manager()
-            
-            # Проверяем access_key
             if not await auth_manager.verify_access_key(access_key):
-                await websocket.send_text("ERROR: Invalid access_key")
+                await websocket.send_text("ERROR: Invalid session")
                 return
-            
+
             # Проверяем что камера подключена
             if camera_id not in self.connections:
                 await websocket.send_text("ERROR: Camera offline")

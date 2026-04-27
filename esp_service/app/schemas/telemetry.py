@@ -2,6 +2,12 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
+
+class DiskUsage(BaseModel):
+    total_gb: float
+    free_gb: float
+    used_percent: float
+
 class TelemetryData(BaseModel):
     """Модель телеметрии от устройства"""
     device_id: str = Field(..., description="ID устройства")
@@ -49,4 +55,5 @@ class GeneralResponse(BaseModel):
     camera_status: Optional[str] = Field(None, description="Статус камеры (например, 'online', 'offline')")
     sensor_status: Optional[str] = Field(None, description="Статус датчиков (например, 'ok', 'error')")
     toilet_status: Optional[str] = Field(None, description="Статус уборной (например, 'ok', 'error')")
+    disk_usage: Optional[DiskUsage] = Field(None, description="Использование дискового пространства сервера")
     

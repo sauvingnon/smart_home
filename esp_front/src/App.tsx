@@ -25,39 +25,31 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Валидация ключа: true – можно пускать, false – ключ неверный
-  const validateKey = async (key: string): Promise<boolean> => {
+  // Валидация сессии через cookie — ключ больше не нужен
+  const validateSession = async (): Promise<boolean> => {
     try {
-      apiClient.setAccessKey(key);
       await apiClient.fetch('/esp_service/telemetry');
       return true;
     } catch (error) {
       if (error instanceof AuthError) {
-        // 401 – неверный ключ
         clearAccessKey();
-        setAuthError('Неверный ключ доступа');
+        setAuthError('Сессия истекла. Введите ключ заново.');
         return false;
       }
-      // Ошибка сети, сервер недоступен – не сбрасываем ключ, пропускаем в приложение
-      console.warn('Network error during key validation, assuming key is valid', error);
+      // Ошибка сети — не сбрасываем сессию, пропускаем в приложение
       return true;
     }
   };
 
-  // Проверка ключа при загрузке или его изменении
   useEffect(() => {
     const validate = async () => {
       if (authLoading) return;
       setIsValidating(true);
 
       if (accessKey) {
-        const isValid = await validateKey(accessKey);
+        const isValid = await validateSession();
         setIsAuthenticated(isValid);
-        if (!isValid && !authError) {
-          setAuthError('Сессия истекла. Введите ключ заново.');
-        } else if (isValid) {
-          setAuthError(null);
-        }
+        if (isValid) setAuthError(null);
       } else {
         setIsAuthenticated(false);
       }

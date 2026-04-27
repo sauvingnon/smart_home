@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Thermometer, Droplets, Camera, Cpu, Gauge, AlertCircle,
+  Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, DoorOpen
+  Sunrise, Sunset, Moon, Wind, DoorOpen, HardDrive
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
@@ -20,6 +20,12 @@ type WeatherData = {
   timestamp: string; expires_at: string; api_calls_today: number;
 }
 
+type DiskUsage = {
+  total_gb: number;
+  free_gb: number;
+  used_percent: number;
+}
+
 type GeneralResponse = {
   telemetry: {
     device_id: string;
@@ -33,6 +39,7 @@ type GeneralResponse = {
   camera_status: string;
   sensor_status: string;
   toilet_status: string;
+  disk_usage?: DiskUsage;
 }
 
 const weatherTranslations: Record<string, string> = {
@@ -361,15 +368,33 @@ export default function HomePage() {
 
             {/* System Stats */}
             <motion.div variants={itemVar} className="system-card">
-              <div className="card-icon icon-emerald">
-                <Gauge size={20} />
+              <div className="card-icon" style={
+                !data?.disk_usage ? {} :
+                data.disk_usage.free_gb <= 0.5 ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' } :
+                data.disk_usage.free_gb <= 2 ? { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' } :
+                { background: 'rgba(52,211,153,0.15)', color: '#34d399' }
+              }>
+                <HardDrive size={20} />
               </div>
               <div>
-                <div className="card-value">{data?.telemetry?.free_memory ? Math.round(data.telemetry.free_memory / 1024) : '--'}</div>
-                <div className="card-label">Free KB</div>
+                <div className="card-value">
+                  {data?.disk_usage ? `${data.disk_usage.free_gb} GB` : '--'}
+                </div>
+                <div className="card-label">
+                  {data?.disk_usage ? `свободно из ${data.disk_usage.total_gb} GB` : 'Диск'}
+                </div>
               </div>
               <div className="progress-bar">
-                <div className="progress-fill fill-emerald" style={{ width: '70%' }} />
+                <div
+                  className="progress-fill"
+                  style={{
+                    width: data?.disk_usage ? `${data.disk_usage.used_percent}%` : '0%',
+                    background: !data?.disk_usage ? undefined :
+                      data.disk_usage.free_gb <= 0.5 ? '#f87171' :
+                      data.disk_usage.free_gb <= 2 ? '#fbbf24' :
+                      undefined,
+                  }}
+                />
               </div>
             </motion.div>
 
@@ -398,7 +423,7 @@ export default function HomePage() {
       {/* Alert Overlay */}
       <AnimatePresence>
         {data?.central_board_status !== 'online' && !loading && (
-          <motion.div 
+          <motion.div
             initial={{ y: 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 50, opacity: 0 }}
@@ -409,6 +434,21 @@ export default function HomePage() {
             <div className="alert-content">
               <p className="alert-title">Внимание</p>
               <p className="alert-text">Данные устарели. Проверьте питание главной платы.</p>
+            </div>
+          </motion.div>
+        )}
+        {data?.disk_usage && data.disk_usage.free_gb <= 0.5 && !loading && (
+          <motion.div
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+            className="alert-message"
+            style={{ bottom: data?.central_board_status !== 'online' ? '160px' : '100px', background: 'rgba(239,68,68,0.15)', borderColor: '#f87171' }}
+          >
+            <HardDrive size={24} className="alert-icon" style={{ color: '#f87171' }} />
+            <div className="alert-content">
+              <p className="alert-title">Диск почти заполнен</p>
+              <p className="alert-text">Осталось {data.disk_usage.free_gb} GB — срочно освободите место.</p>
             </div>
           </motion.div>
         )}

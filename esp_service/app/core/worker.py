@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional
+import shutil
 from fastapi import Request, HTTPException, WebSocket
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from app.services.redis.cache_manager import CacheManager
@@ -8,7 +9,7 @@ from datetime import datetime, timedelta
 from logger import logger
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.services.s3_service.s3_manager import S3Manager
-from app.schemas.telemetry import TelemetryData, GeneralResponse
+from app.schemas.telemetry import TelemetryData, GeneralResponse, DiskUsage
 from app.schemas.weather_data import WeatherData
 from app.schemas.settings import SettingsData
 from app.schemas.device_status import DeviceStatus
@@ -459,12 +460,20 @@ class BackgroundWorker:
         # camera_status может быть NEVER_CONNECTED, OFFLINE, CONNECTED, STREAMING, RECORDING
 
         
+        disk = shutil.disk_usage('/')
+        disk_usage = DiskUsage(
+            total_gb=round(disk.total / (1024 ** 3), 1),
+            free_gb=round(disk.free / (1024 ** 3), 1),
+            used_percent=round(disk.used / disk.total * 100, 1),
+        )
+
         return GeneralResponse(
             telemetry=standard_telemetry,
             central_board_status=self.device_status.value if self.device_status else "offline",
             camera_status=camera_status.mode.value if camera_status else "offline",
             sensor_status=self.sensor_status.value if self.sensor_status else "offline",
-            toilet_status=self.sensor_status.value if self.sensor_status else "offline"
+            toilet_status=self.sensor_status.value if self.sensor_status else "offline",
+            disk_usage=disk_usage,
         )
     
     async def get_current_config(self, timeout: float = 5.0) -> Optional[SettingsData]:

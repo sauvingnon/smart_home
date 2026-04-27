@@ -1,64 +1,79 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { apiClient } from '../api/client';
+import { API_BASE_URL } from '../api/client';
 
 interface AuthContextType {
   accessKey: string | null;
   isLoading: boolean;
-  setAccessKey: (key: string) => void;
+  setAccessKey: (key: string) => Promise<void>;
   clearAccessKey: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [accessKey, setAccessKey] = useState<string | null>(null);
+  const [accessKey, setAccessKeyState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Проверяем URL на наличие ключа
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlKey = urlParams.get('key');
-    
-    // 2. Проверяем localStorage
-    const storedKey = localStorage.getItem('esp_access_key');
-    
-    if (urlKey) {
-      // Ключ из URL - сохраняем и чистим URL
-      localStorage.setItem('esp_access_key', urlKey);
-      setAccessKey(urlKey);
-      apiClient.setAccessKey(urlKey);
-      
-      // Чистим URL от ключа (безопасность и эстетика)
-      window.history.replaceState({}, '', '/');
-      
-    } else if (storedKey) {
-      // Ключ из localStorage
-      setAccessKey(storedKey);
-      apiClient.setAccessKey(storedKey);
-    }
-    
-    setIsLoading(false);
+    const init = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlKey = urlParams.get('key');
+
+      if (urlKey) {
+        // Обмениваем ключ из URL на httpOnly cookie
+        try {
+          const res = await fetch(`${API_BASE_URL}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: urlKey }),
+            credentials: 'include',
+          });
+          if (res.ok) setAccessKeyState('session');
+        } catch {}
+        window.history.replaceState({}, '', '/');
+      } else {
+        // Проверяем существующую сессию
+        try {
+          const res = await fetch(`${API_BASE_URL}/auth/me`, {
+            credentials: 'include',
+          });
+          if (res.ok) setAccessKeyState('session');
+        } catch {}
+      }
+
+      setIsLoading(false);
+    };
+
+    init();
   }, []);
 
-  const handleSetKey = (key: string) => {
-    localStorage.setItem('esp_access_key', key);
-    setAccessKey(key);
-    apiClient.setAccessKey(key);
+  const handleSetKey = async (key: string) => {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      throw new Error('Invalid key');
+    }
+    setAccessKeyState('session');
   };
 
   const clearAccessKey = () => {
-    localStorage.removeItem('esp_access_key');
-    setAccessKey(null);
-    apiClient.setAccessKey(null);
-
+    fetch(`${API_BASE_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => {});
+    setAccessKeyState(null);
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      accessKey, 
-      isLoading, 
-      setAccessKey: handleSetKey, 
-      clearAccessKey 
+    <AuthContext.Provider value={{
+      accessKey,
+      isLoading,
+      setAccessKey: handleSetKey,
+      clearAccessKey,
     }}>
       {children}
     </AuthContext.Provider>

@@ -21,3 +21,5 @@ API_BASE_URL = os.getenv("API_BASE_URL")
 CAMERA_ID = os.getenv("CAMERA_ID")
 CAMERA_ACCESS_KEY = os.getenv("CAMERA_ACCESS_KEY")
 DEFAULT_RECORDING_DAYS = int(os.getenv("DEFAULT_RECORDING_DAYS", "7"))
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production")  # "development" | "production"
+COOKIE_SECURE = ENVIRONMENT != "development"

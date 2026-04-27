@@ -13,8 +13,16 @@ export default defineConfig({
   },
   server: {
     port: 3008,
-    host: true, // разрешаем доступ извне контейнера
-    strictPort: true, // использовать точно этот порт
+    host: true,
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8005',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        ws: true, // WebSocket тоже проксируется
+      },
+    },
   },
   preview: {
     port: 3008,
