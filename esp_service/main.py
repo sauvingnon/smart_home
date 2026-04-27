@@ -141,7 +141,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Сервис остановлен корректно")
 
 
-app = FastAPI(lifespan=lifespan, title="ESP Ядро")
+app = FastAPI(lifespan=lifespan, title="ESP Ядро", root_path="/api")
 
 app.add_middleware(
     CORSMiddleware,
