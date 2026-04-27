@@ -23,7 +23,7 @@ async def get_current_setttings_endpoint(
     
     if settings is None:
         raise HTTPException(
-            status_code=404, 
+            status_code=504, 
             detail="Настройки не получены от устройства"
         )
     

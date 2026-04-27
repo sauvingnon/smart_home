@@ -21,7 +21,7 @@ async def get_current_weather_endpoint(
     
     if weather is None:
         raise HTTPException(
-            status_code=404, 
+            status_code=503, 
             detail="Не удалось получить данные о погоде."
         )
     

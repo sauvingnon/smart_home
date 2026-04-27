@@ -69,7 +69,7 @@ async def get_camera_status(
     state = await worker.video_service.get_camera_state(camera_id)
     
     if not state:
-        raise HTTPException(status_code=404, detail="Camera not found")
+        raise HTTPException(status_code=503, detail="Camera not found")
     
     return state
 
@@ -110,7 +110,7 @@ async def stream_video(
     
     if error:
         if error == "Видео не найдено":
-            raise HTTPException(status_code=404, detail=error)
+            raise HTTPException(status_code=503, detail=error)
         else:
             raise HTTPException(status_code=500, detail=error)
     
@@ -177,7 +177,7 @@ async def get_video_presigned_url(
     )
     
     if not url:
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise HTTPException(status_code=503, detail="Video not found")
     
     return {"url": url, "expires_in": expires_in}
 
@@ -196,7 +196,7 @@ async def download_video(
     
     video_data = await worker.video_service.get_video_by_id(camera_id, video_id)
     if not video_data:
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise HTTPException(status_code=503, detail="Video not found")
     
     return StreamingResponse(
         io.BytesIO(video_data),
@@ -223,7 +223,7 @@ async def get_video_thumbnail(
     
     thumbnail_data = await worker.video_service.get_thumbnail(camera_id, video_id)
     if not thumbnail_data:
-        raise HTTPException(status_code=404, detail="Thumbnail не найден")
+        raise HTTPException(status_code=503, detail="Thumbnail не найден")
     
     return Response(
         content=thumbnail_data,

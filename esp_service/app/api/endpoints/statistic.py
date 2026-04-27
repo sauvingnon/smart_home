@@ -34,7 +34,7 @@ async def get_history_endpoint(
     
     if not records:  # records — это список, проверяем через if not
         raise HTTPException(
-            status_code=404, 
+            status_code=503, 
             detail="История не получена"
         )
     
