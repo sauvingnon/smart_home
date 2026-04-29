@@ -4,7 +4,6 @@
 #include <Preferences.h>
 #include "VideoManager.h"
 #include "config.h"
-#include "freertos/queue.h"
 #include "esp_task_wdt.h"
 
 #define FAN_PIN 12
@@ -27,10 +26,7 @@
 #define HREF_GPIO_NUM  23
 #define PCLK_GPIO_NUM  22
 
-// State machine:
-//   IDLE      - camera powered down, uploadTask may run
-//   STREAMING - camera -> streamQueue -> wsTask sends frames via WS
-//   RECORDING - camera -> recordQueue -> sdTask writes to SD, WS alive for commands
+// State machine
 typedef enum { STATE_IDLE, STATE_STREAMING, STATE_RECORDING } SystemState;
 volatile SystemState systemState = STATE_IDLE;
 
@@ -41,49 +37,51 @@ WebSocketsClient webSocket;
 bool fanState = true;
 volatile bool isConnected     = false;
 volatile bool isAuthenticated = false;
-volatile bool sdWriteError    = false;  // sdTask -> wsTask: SD write failed
-volatile bool uploadCancelled = false;  // wsTask -> uploadTask: abort current upload
-volatile bool uploadError     = false;  // uploadTask -> wsTask: HTTP send failed
-
-QueueHandle_t streamQueue;   // camera_fb_t* pumped by cameraTask, drained by wsTask
-QueueHandle_t recordQueue;   // camera_fb_t* pumped by cameraTask, drained by sdTask
-TaskHandle_t  wsTaskHandle;
-TaskHandle_t  cameraTaskHandle;
-TaskHandle_t  sdTaskHandle;
-TaskHandle_t  uploadTaskHandle;
+volatile bool uploadCancelled = false;
+volatile bool uploadError     = false;
 
 static volatile unsigned long frameCount = 0;
 static unsigned long lastFpsLog = 0;
 
-static int currentQualityMode       = 1;
+static int currentQualityMode = 1;
 static framesize_t currentFrameSize = FRAMESIZE_VGA;
 
-static bool          cameraReady        = false; // true between cameraOn() and cameraOff()
-static bool          cameraSettleNeeded = false; // true after esp_camera_deinit(); triggers pre-init delay
-static volatile bool cameraCapturing    = false; // cameraTask sets this around esp_camera_fb_get()
+// Quality saved before recording starts; restored when recording ends
+static int         preRecordQualityMode = 1;
+static framesize_t preRecordFrameSize   = FRAMESIZE_VGA;
 
+static bool cameraReady        = false;
+static bool cameraSettleNeeded = false;
+
+TaskHandle_t wsTaskHandle;
+TaskHandle_t uploadTaskHandle;
+
+// ──────────────────────────────────────────────────────────────
+// Forward declarations
+// ──────────────────────────────────────────────────────────────
 void loadSettings();
 void saveSettings();
 void toggleFan(bool active);
 bool cameraOn();
 void cameraOff();
 bool setFrameSize(const String& size, bool save = true);
-void drainQueue(QueueHandle_t q);
 float getTemperature();
 void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length);
 void wsTask(void* pvParameters);
-void cameraTask(void* pvParameters);
-void sdTask(void* pvParameters);
 void uploadTask(void* pvParameters);
 
-// Powers up and initializes the camera. Idempotent: safe to call when already on.
-// After esp_camera_deinit() the I2C/SCCB bus needs time to recover: we hold PWDN
-// HIGH for 500 ms before the init sequence so the driver's probe doesn't time out.
+// ──────────────────────────────────────────────────────────────
+// Camera power management
+//
+// cameraOn() combines:
+//   - original approach: explicit deinit-if-alive + PWDN LOW + 100ms before init
+//   - current improvement: 500ms settle after previous deinit + 3-attempt retry loop
+// ──────────────────────────────────────────────────────────────
 bool cameraOn() {
     if (cameraReady) return true;
 
-    // If upload is active, abort it: the SSL context (~30-50 KB DRAM) must be
-    // released before esp_camera_init() can allocate its 32 KB DMA buffers.
+    // If an upload is running, abort it: SSL context (~30-50 KB DRAM) must be
+    // freed before esp_camera_init() can allocate its DMA buffers.
     if (videoManager.isUploading()) {
         Serial.println("Aborting upload for camera init");
         uploadCancelled = true;
@@ -91,45 +89,52 @@ bool cameraOn() {
         unsigned long deadline = millis() + 10000;
         while (videoManager.isUploading() && millis() < deadline)
             vTaskDelay(pdMS_TO_TICKS(50));
-        // Extra pause: let WiFiClientSecure destructor finish SSL cleanup.
         vTaskDelay(pdMS_TO_TICKS(300));
     }
 
+    // Deinit if somehow still alive (e.g. failed init attempt left driver half-started)
+    if (esp_camera_sensor_get()) {
+        esp_camera_deinit();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    // After esp_camera_deinit() the SCCB/I2C bus needs time to fully release.
     if (cameraSettleNeeded) {
-        // PWDN is already HIGH (set by cameraOff). Hold it there long enough
-        // for the I2C peripheral and OV2640 to fully settle after deinit.
-        // 500 ms is empirically required on AI-Thinker; the driver's own 10 ms
-        // PWDN cycle is not enough after a full deinit.
         vTaskDelay(pdMS_TO_TICKS(500));
         cameraSettleNeeded = false;
     }
 
+    // Power on: drive PWDN LOW and let OV2640 stabilise
+    pinMode(PWDN_GPIO_NUM, OUTPUT);
+    digitalWrite(PWDN_GPIO_NUM, LOW);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
     camera_config_t cfg = {};
-    cfg.ledc_channel  = LEDC_CHANNEL_0;
-    cfg.ledc_timer    = LEDC_TIMER_0;
-    cfg.pin_d0        = Y2_GPIO_NUM;
-    cfg.pin_d1        = Y3_GPIO_NUM;
-    cfg.pin_d2        = Y4_GPIO_NUM;
-    cfg.pin_d3        = Y5_GPIO_NUM;
-    cfg.pin_d4        = Y6_GPIO_NUM;
-    cfg.pin_d5        = Y7_GPIO_NUM;
-    cfg.pin_d6        = Y8_GPIO_NUM;
-    cfg.pin_d7        = Y9_GPIO_NUM;
-    cfg.pin_xclk      = XCLK_GPIO_NUM;
-    cfg.pin_pclk      = PCLK_GPIO_NUM;
-    cfg.pin_vsync     = VSYNC_GPIO_NUM;
-    cfg.pin_href      = HREF_GPIO_NUM;
-    cfg.pin_sccb_sda  = SIOD_GPIO_NUM;
-    cfg.pin_sccb_scl  = SIOC_GPIO_NUM;
-    cfg.pin_pwdn      = PWDN_GPIO_NUM;
-    cfg.pin_reset     = RESET_GPIO_NUM;
-    cfg.xclk_freq_hz  = 20000000;
-    cfg.pixel_format  = PIXFORMAT_JPEG;
+    cfg.ledc_channel = LEDC_CHANNEL_0;
+    cfg.ledc_timer   = LEDC_TIMER_0;
+    cfg.pin_d0       = Y2_GPIO_NUM;
+    cfg.pin_d1       = Y3_GPIO_NUM;
+    cfg.pin_d2       = Y4_GPIO_NUM;
+    cfg.pin_d3       = Y5_GPIO_NUM;
+    cfg.pin_d4       = Y6_GPIO_NUM;
+    cfg.pin_d5       = Y7_GPIO_NUM;
+    cfg.pin_d6       = Y8_GPIO_NUM;
+    cfg.pin_d7       = Y9_GPIO_NUM;
+    cfg.pin_xclk     = XCLK_GPIO_NUM;
+    cfg.pin_pclk     = PCLK_GPIO_NUM;
+    cfg.pin_vsync    = VSYNC_GPIO_NUM;
+    cfg.pin_href     = HREF_GPIO_NUM;
+    cfg.pin_sccb_sda = SIOD_GPIO_NUM;
+    cfg.pin_sccb_scl = SIOC_GPIO_NUM;
+    cfg.pin_pwdn     = PWDN_GPIO_NUM;
+    cfg.pin_reset    = RESET_GPIO_NUM;
+    cfg.xclk_freq_hz = 20000000;
+    cfg.pixel_format = PIXFORMAT_JPEG;
 
     if (psramFound()) {
         cfg.frame_size   = FRAMESIZE_UXGA;
-        cfg.jpeg_quality = 10;
-        cfg.fb_count     = 3;
+        cfg.jpeg_quality = 20;           // ~28-32KB per HD frame → ~55ms write → ~18fps
+        cfg.fb_count     = 2;            // 2 is enough for single-task inline pipeline
         cfg.grab_mode    = CAMERA_GRAB_LATEST;
         cfg.fb_location  = CAMERA_FB_IN_PSRAM;
     } else {
@@ -140,7 +145,15 @@ bool cameraOn() {
         cfg.fb_location  = CAMERA_FB_IN_DRAM;
     }
 
-    esp_err_t err = esp_camera_init(&cfg);
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 0; attempt < 3 && err != ESP_OK; attempt++) {
+        if (attempt > 0) {
+            Serial.printf("Camera init retry %d/3\n", attempt);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        err = esp_camera_init(&cfg);
+    }
+
     if (err != ESP_OK) {
         Serial.printf("Camera init failed: 0x%x\n", err);
         return false;
@@ -159,13 +172,10 @@ bool cameraOn() {
     return true;
 }
 
-// Deinitializes the driver (frees heap/PSRAM) and holds PWDN HIGH.
-// Must be called only after systemState is already STATE_IDLE.
 void cameraOff() {
     if (!cameraReady) return;
-    // cameraTask won't start new captures (STATE_IDLE). Wait for any in-flight capture.
-    while (cameraCapturing) vTaskDelay(pdMS_TO_TICKS(5));
     esp_camera_deinit();
+    vTaskDelay(pdMS_TO_TICKS(50));
     pinMode(PWDN_GPIO_NUM, OUTPUT);
     digitalWrite(PWDN_GPIO_NUM, HIGH);
     cameraSettleNeeded = true;
@@ -173,11 +183,13 @@ void cameraOff() {
     Serial.println("Camera OFF");
 }
 
+// ──────────────────────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────────────────────
 void toggleFan(bool active) {
     digitalWrite(FAN_PIN, (fanState && active) ? HIGH : LOW);
 }
 
-// Saves the new frame size. Applies to sensor immediately if camera is currently on.
 bool setFrameSize(const String& size, bool save) {
     framesize_t fs;
     int mode;
@@ -190,38 +202,32 @@ bool setFrameSize(const String& size, bool save) {
     currentQualityMode = mode;
 
     sensor_t* s = esp_camera_sensor_get();
-    if (s) s->set_framesize(s, fs);  // no-op when camera is off
+    if (s) s->set_framesize(s, fs);
 
     if (save) saveSettings();
     return true;
-}
-
-void drainQueue(QueueHandle_t q) {
-    camera_fb_t* fb;
-    while (xQueueReceive(q, &fb, 0) == pdTRUE) {
-        // Guard: after esp_camera_deinit() the frame pool is freed;
-        // calling fb_return on it crashes with LoadProhibited.
-        if (cameraReady) esp_camera_fb_return(fb);
-    }
 }
 
 float getTemperature() {
     return temperatureRead();
 }
 
-// Runs inside wsTask on Core 0.
+// ──────────────────────────────────────────────────────────────
+// WebSocket events — runs inside wsTask on Core 0
+// ──────────────────────────────────────────────────────────────
 void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length) {
     switch (type) {
 
         case WStype_DISCONNECTED:
-            isConnected     = false;
-            isAuthenticated = false;
-            if (systemState == STATE_RECORDING) videoManager.stopRecord();
+            isConnected = isAuthenticated = false;
+            if (systemState == STATE_RECORDING) {
+                videoManager.stopRecord();
+                currentFrameSize   = preRecordFrameSize;
+                currentQualityMode = preRecordQualityMode;
+            }
             systemState     = STATE_IDLE;
             uploadCancelled = true;
             toggleFan(false);
-            drainQueue(streamQueue);
-            drainQueue(recordQueue);
             cameraOff();
             Serial.println("WS Disconnected -> IDLE");
             break;
@@ -238,7 +244,6 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
             if (cmd == "AUTH_OK") {
                 isAuthenticated = true;
                 Serial.println("Auth OK");
-                // Wake upload task immediately — there may be pending files from before reboot
                 xTaskNotifyGive(uploadTaskHandle);
             }
             else if (cmd.startsWith("size:")) {
@@ -269,7 +274,6 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
                     if (systemState == STATE_STREAMING) {
                         systemState = STATE_IDLE;
                         toggleFan(false);
-                        drainQueue(streamQueue);
                         cameraOff();
                         xTaskNotifyGive(uploadTaskHandle);
                         Serial.println("IDLE");
@@ -306,42 +310,45 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
                         return;
                     }
 
-                    // Power on the camera (no-op if streaming, init from IDLE otherwise)
-                    if (!cameraOn()) {
-                        webSocket.sendTXT("record:error");
-                        return;
-                    }
-
                     unsigned long startTime = 0;
                     int col = part.indexOf(':');
                     if (col != -1) startTime = part.substring(col + 1).toInt();
 
                     uploadCancelled = true;
 
-                    // Seamless transition from streaming: drain leftover frames first
+                    // Stop stream first, then reinit at HD — same approach as original.
+                    // Full reinit is more reliable than on-the-fly framesize change.
                     if (systemState == STATE_STREAMING) {
-                        drainQueue(streamQueue);
+                        cameraOff();
                         webSocket.sendTXT("stream_state:off");
                     }
 
-                    // Drain any leftover frames in recordQueue before starting new recording
-                    drainQueue(recordQueue);
+                    // Save current quality so it can be restored after recording ends
+                    preRecordFrameSize   = currentFrameSize;
+                    preRecordQualityMode = currentQualityMode;
 
-                    // Switch to HD on-the-fly -- no camera reinit needed
-                    sensor_t* s = esp_camera_sensor_get();
-                    if (s) s->set_framesize(s, FRAMESIZE_HD);
+                    currentFrameSize   = FRAMESIZE_HD;
+                    currentQualityMode = 2;
 
-                    systemState = STATE_RECORDING;
+                    if (!cameraOn()) {
+                        currentFrameSize   = preRecordFrameSize;
+                        currentQualityMode = preRecordQualityMode;
+                        webSocket.sendTXT("record:error");
+                        return;
+                    }
+
                     toggleFan(true);
                     frameCount = 0;
 
                     if (videoManager.startRecord(startTime)) {
+                        systemState = STATE_RECORDING;
                         webSocket.sendTXT("record:started");
                         Serial.println("RECORDING");
                     } else {
-                        systemState = STATE_IDLE;
-                        toggleFan(false);
                         cameraOff();
+                        toggleFan(false);
+                        currentFrameSize   = preRecordFrameSize;
+                        currentQualityMode = preRecordQualityMode;
                         webSocket.sendTXT("record:error");
                     }
                 }
@@ -350,15 +357,16 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
                         webSocket.sendTXT("record:error:not_recording");
                         return;
                     }
+                    systemState        = STATE_IDLE;
+                    toggleFan(false);
+                    currentFrameSize   = preRecordFrameSize;
+                    currentQualityMode = preRecordQualityMode;
                     if (videoManager.stopRecord()) {
                         webSocket.sendTXT("record:stopped");
-                        Serial.printf("RECORDING stopped (%lu frames)\n", frameCount);
+                        Serial.printf("Stopped (%lu frames)\n", frameCount);
                     } else {
                         webSocket.sendTXT("record:error");
                     }
-                    systemState = STATE_IDLE;
-                    toggleFan(false);
-                    drainQueue(recordQueue);
                     cameraOff();
                     xTaskNotifyGive(uploadTaskHandle);
                     Serial.println("IDLE");
@@ -374,25 +382,22 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
     }
 }
 
-// Core 0, prio 5. Always alive.
-// WiFi stack lives on Core 0 -- keeping WS here avoids cross-core I/O overhead.
+// ──────────────────────────────────────────────────────────────
+// wsTask — Core 1, prio 5
+//
+// Handles WebSocket, camera capture, and SD write inline.
+// Single tight loop: no queue overhead, no cross-task frame passing.
+//
+// With fb_count=2 and GRAB_LATEST: while wsTask writes frame N to SD,
+// the camera driver captures frame N+1 into the second buffer. After
+// fb_return(N), fb_get() returns N+1 immediately (already ready).
+// Core 1 keeps SD writes away from WiFi task (prio 23) on Core 0.
+// ──────────────────────────────────────────────────────────────
 void wsTask(void* pvParameters) {
-    Serial.println("wsTask started (Core 0, prio 5)");
-    // Not in WDT — SSL handshake can legitimately take 10-30s
+    Serial.println("wsTask started (Core 1, prio 5)");
 
     while (true) {
         webSocket.loop();
-
-        if (sdWriteError) {
-            sdWriteError = false;
-            if (isConnected && isAuthenticated)
-                webSocket.sendTXT("record:error:sd_write");
-            // sdTask already set STATE_IDLE and called stopRecord().
-            // Camera lifecycle (drain + off) is handled here so it runs on one task only.
-            drainQueue(recordQueue);
-            cameraOff();
-            xTaskNotifyGive(uploadTaskHandle);
-        }
 
         if (uploadError) {
             uploadError = false;
@@ -400,21 +405,45 @@ void wsTask(void* pvParameters) {
                 webSocket.sendTXT("upload:error");
         }
 
-        if (systemState == STATE_STREAMING && isConnected && isAuthenticated) {
-            camera_fb_t* fb;
-            if (xQueueReceive(streamQueue, &fb, 0) == pdTRUE) {
-                webSocket.sendBIN(fb->buf, fb->len, false);
-                frameCount++;
-                esp_camera_fb_return(fb);
+        if (isConnected && isAuthenticated) {
+            if (systemState == STATE_RECORDING) {
+                camera_fb_t* fb = esp_camera_fb_get();
+                if (fb) {
+                    if (!videoManager.writeFrame(fb->buf, fb->len)) {
+                        // SD write failed — stop recording, power down camera, go IDLE
+                        esp_camera_fb_return(fb);
+                        systemState        = STATE_IDLE;
+                        toggleFan(false);
+                        currentFrameSize   = preRecordFrameSize;
+                        currentQualityMode = preRecordQualityMode;
+                        videoManager.stopRecord();
+                        cameraOff();
+                        xTaskNotifyGive(uploadTaskHandle);
+                        webSocket.sendTXT("record:error:write_failed");
+                    } else {
+                        frameCount++;
+                        esp_camera_fb_return(fb);
+                    }
+                }
+            } else if (systemState == STATE_STREAMING) {
+                camera_fb_t* fb = esp_camera_fb_get();
+                if (fb) {
+                    webSocket.sendBIN(fb->buf, fb->len, false);
+                    frameCount++;
+                    esp_camera_fb_return(fb);
+                }
             }
         }
 
+        // ── 5-second telemetry + timeout check ──
         if (millis() - lastFpsLog >= 5000) {
+            esp_task_wdt_reset();  // сброс WDT: раз в 5с, задолго до лимита 60с
             videoManager.checkRecordTimeout();
-            if (videoManager.timeoutOccurred()) {
-                systemState = STATE_IDLE;
+            if (videoManager.timeoutOccurred() && systemState == STATE_RECORDING) {
+                systemState        = STATE_IDLE;
                 toggleFan(false);
-                drainQueue(recordQueue);
+                currentFrameSize   = preRecordFrameSize;
+                currentQualityMode = preRecordQualityMode;
                 cameraOff();
                 xTaskNotifyGive(uploadTaskHandle);
                 if (isConnected && isAuthenticated)
@@ -436,106 +465,38 @@ void wsTask(void* pvParameters) {
             lastFpsLog = millis();
         }
 
-        vTaskDelay(2 / portTICK_PERIOD_MS);
+        // Only delay when idle — during capture fb_get() already yields the CPU
+        if (systemState == STATE_IDLE)
+            vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
-// Core 1, prio 3. No WiFi stack competition -- pure camera hardware throughput.
-// Drops frames rather than blocking if the consumer is slow.
-void cameraTask(void* pvParameters) {
-    Serial.println("cameraTask started (Core 1, prio 3)");
-    esp_task_wdt_add(NULL);
-
-    while (true) {
-        esp_task_wdt_reset();
-
-        SystemState state = systemState;
-        if (state == STATE_IDLE) {
-            vTaskDelay(20 / portTICK_PERIOD_MS);
-            continue;
-        }
-
-        cameraCapturing = true;
-        camera_fb_t* fb = esp_camera_fb_get();
-        cameraCapturing = false;
-
-        if (!fb) {
-            vTaskDelay(5 / portTICK_PERIOD_MS);
-            continue;
-        }
-
-        if (state == STATE_STREAMING) {
-            if (xQueueSend(streamQueue, &fb, 0) != pdTRUE)
-                esp_camera_fb_return(fb);
-        } else if (state == STATE_RECORDING) {
-            if (xQueueSend(recordQueue, &fb, 0) != pdTRUE)
-                esp_camera_fb_return(fb);
-        } else {
-            esp_camera_fb_return(fb);
-        }
-    }
-}
-
-// Core 1, prio 2. NOT registered with WDT -- SD writes can legitimately stall.
-// On failure: closes file, flags wsTask, goes IDLE.
-void sdTask(void* pvParameters) {
-    Serial.println("sdTask started (Core 1, prio 2)");
-
-    while (true) {
-        camera_fb_t* fb;
-        if (xQueueReceive(recordQueue, &fb, pdMS_TO_TICKS(100)) == pdTRUE) {
-            if (systemState == STATE_RECORDING) {
-                if (videoManager.writeFrame(fb->buf, fb->len)) {
-                    frameCount++;
-                    esp_camera_fb_return(fb);
-                } else {
-                    Serial.println("SD write failed -- stopping record");
-                    // Set IDLE first: shrinks the race window where wsTask also
-                    // sees STATE_RECORDING and enters stopRecord() concurrently.
-                    systemState = STATE_IDLE;
-                    toggleFan(false);
-                    esp_camera_fb_return(fb);   // camera still on here — safe
-                    videoManager.stopRecord();
-                    // drainQueue and cameraOff intentionally omitted: wsTask owns
-                    // camera lifecycle and will handle them via sdWriteError below.
-                    sdWriteError = true;
-                }
-            } else {
-                // STATE_IDLE: camera may already be deinitialized by wsTask.
-                if (cameraReady) esp_camera_fb_return(fb);
-            }
-        }
-    }
-}
-
-// Core 1, prio 1.
-// Wakes on notification (IDLE transition, AUTH_OK, SD error) OR every 30s autonomously.
-// Keeps retrying failed uploads — notifies server on each failure via uploadError flag.
-// Aborts between files when uploadCancelled (recording takes priority).
+// ──────────────────────────────────────────────────────────────
+// uploadTask — Core 0, prio 1
+//
+// Wakes on notification (record stop, stream stop, AUTH_OK) or every 30s.
+// Sends queued videos in the background while system is IDLE.
+// ──────────────────────────────────────────────────────────────
 void uploadTask(void* pvParameters) {
-    Serial.println("uploadTask started (Core 1, prio 1)");
+    Serial.println("uploadTask started (Core 0, prio 1)");
 
     while (true) {
-        // Wait for explicit notification or autonomous 30s check
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(30000));
-        vTaskDelay(pdMS_TO_TICKS(8000));  // дать WS SSL-сессии полностью устояться
+        vTaskDelay(pdMS_TO_TICKS(5000));  // let WS SSL session fully settle
 
         if (systemState != STATE_IDLE || !isAuthenticated) continue;
 
         uploadCancelled = false;
-        int pending = videoManager.pendingCount();
-        if (pending == 0) continue;
+        if (videoManager.pendingCount() == 0) continue;
 
-        Serial.printf("Upload: %d file(s) pending\n", pending);
+        Serial.printf("Upload: %d file(s) pending\n", videoManager.pendingCount());
 
         while (systemState == STATE_IDLE && !uploadCancelled && isAuthenticated) {
             if (videoManager.pendingCount() == 0) break;
 
             bool ok = videoManager.processQueue();
-
             if (!ok) {
-                uploadError = true;  // wsTask will send "upload:error" to server
-                // Back off before retrying — don't hammer a failing server
+                uploadError = true;
                 for (int i = 0; i < 10 && !uploadCancelled; i++)
                     vTaskDelay(pdMS_TO_TICKS(1000));
             } else {
@@ -543,10 +504,13 @@ void uploadTask(void* pvParameters) {
             }
         }
 
-        Serial.println("Upload: done or interrupted");
+        Serial.println("Upload done or interrupted");
     }
 }
 
+// ──────────────────────────────────────────────────────────────
+// setup / loop
+// ──────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
@@ -555,7 +519,7 @@ void setup() {
     pinMode(FAN_PIN, OUTPUT);
     digitalWrite(FAN_PIN, LOW);
 
-    // Keep camera powered down until first stream/record request.
+    // Keep camera powered down until first stream/record request
     pinMode(PWDN_GPIO_NUM, OUTPUT);
     digitalWrite(PWDN_GPIO_NUM, HIGH);
 
@@ -575,13 +539,8 @@ void setup() {
     if (!videoManager.begin())
         Serial.println("VideoManager init failed -- recording disabled");
 
-    // Queues must exist before tasks start
-    streamQueue = xQueueCreate(3, sizeof(camera_fb_t*));
-    recordQueue = xQueueCreate(3, sizeof(camera_fb_t*));
-
-    // Arduino core already inits TWDT — reconfigure with our timeout
     esp_task_wdt_config_t wdt_cfg = {
-        .timeout_ms     = 15000,  // 15s: enough for SSL handshake
+        .timeout_ms     = 60000,  // 60s: перезагрузка если плата зависла на минуту
         .idle_core_mask = 0,
         .trigger_panic  = true,
     };
@@ -594,12 +553,13 @@ void setup() {
     webSocket.onEvent(webSocketEvent);
     webSocket.setReconnectInterval(2000);
 
-    // Core 0: WiFi stack + wsTask (prio 5) + uploadTask (prio 1) -- all network I/O
-    // Core 1: cameraTask (prio 3) + sdTask (prio 2) -- all hardware I/O, no WiFi contention
-    xTaskCreatePinnedToCore(wsTask,     "ws",     12288, NULL, 5, &wsTaskHandle,    0);
-    xTaskCreatePinnedToCore(cameraTask, "cam",     8192, NULL, 3, &cameraTaskHandle, 1);
-    xTaskCreatePinnedToCore(sdTask,     "sd",      8192, NULL, 2, &sdTaskHandle,     1);
-    xTaskCreatePinnedToCore(uploadTask, "upload", 20480, NULL, 1, &uploadTaskHandle, 1);
+    // wsTask on Core 1: camera capture + SD write run without WiFi stack preemption.
+    // WiFi task (prio 23) lives on Core 0 — if wsTask were there too it would interrupt
+    // SD writes repeatedly, adding ~30-50ms per frame and halving recording FPS.
+    // uploadTask stays on Core 0 where HTTP/SSL naturally belongs.
+    xTaskCreatePinnedToCore(wsTask,     "ws",     12288, NULL, 5, &wsTaskHandle,     1);
+    xTaskCreatePinnedToCore(uploadTask, "upload", 20480, NULL, 1, &uploadTaskHandle, 0);
+    esp_task_wdt_add(wsTaskHandle);  // перезагрузка если wsTask завис дольше 60 секунд
 
     Serial.println("System ready");
 }
@@ -608,6 +568,9 @@ void loop() {
     vTaskDelay(portMAX_DELAY);
 }
 
+// ──────────────────────────────────────────────────────────────
+// Settings persistence (NVS)
+// ──────────────────────────────────────────────────────────────
 void loadSettings() {
     preferences.begin("camera", false);
     fanState           = preferences.getBool("fanState",   true);
