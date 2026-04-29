@@ -4,3 +4,4 @@
 *.log
 mosquitto/config/passwd
 __pycache__
+my_cam/.theia/launch.json

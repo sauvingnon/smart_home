@@ -38,7 +38,18 @@ bool fanState = true;
 WebSocketsClient webSocket;
 bool isConnected = false;
 bool isAuthenticated = false;
-bool isStreamActive = false;
+
+enum CamState { CAM_OFFLINE, CAM_IDLE, CAM_STREAMING, CAM_RECORDING };
+CamState camState = CAM_OFFLINE;
+
+const char* camStateStr() {
+  switch(camState) {
+    case CAM_IDLE:      return "IDLE";
+    case CAM_STREAMING: return "STREAMING";
+    case CAM_RECORDING: return "RECORDING";
+    default:            return "OFFLINE";
+  }
+}
 
 // Счётчик кадров и таймеры
 static unsigned long frameCount = 0;
@@ -226,15 +237,14 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
       isConnected = false;
       isAuthenticated = false;
 
-      // Если стрим или запись были активны - остановим и выключим камеру.
-      if (isStreamActive || videoManager.isRecording()) {
+      if (camState == CAM_STREAMING || camState == CAM_RECORDING) {
           stopCamera();
-          isStreamActive = false;
           videoManager.setStreamActive(false);
           videoManager.stopRecord();
           toggleFan(false);
           Serial.println("🛑 Camera stopped due to WS disconnect");
       }
+      camState = CAM_OFFLINE;
 
       Serial.println("❌ WS Disconnected");
       break;
@@ -250,6 +260,7 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
       
       if (cmd == "AUTH_OK") {
         isAuthenticated = true;
+        camState = CAM_IDLE;
         Serial.println("🔑 Auth OK! Streaming...");
       }
       // Установка качества с сервера
@@ -266,22 +277,20 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
       // Включить\выключить стрим
       else if (cmd.startsWith("stream_state:")) {
 
-        // Если сейчас запись - нельзя ничего делать.
-        if (videoManager.isRecording()) {
+        // Запись имеет наивысший приоритет — стримом нельзя управлять.
+        if (camState == CAM_RECORDING) {
           webSocket.sendTXT("stream_state:error:recording_active");
           return;
         }
 
-        String state = cmd.substring(13);
-        if (state == "on"){
+        String stateCmd = cmd.substring(13);
+        if (stateCmd == "on") {
 
           toggleFan(true);
 
-          if (!isStreamActive) {
-            // Инициализируем камеру заново
+          if (camState != CAM_STREAMING) {
             initCamera();
 
-            // Проверяем что камера реально поднялась
             if (!esp_camera_sensor_get()) {
               webSocket.sendTXT("stream_state:error:camera_init_failed");
               toggleFan(false);
@@ -289,7 +298,7 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
               return;
             }
 
-            isStreamActive = true;
+            camState = CAM_STREAMING;
             videoManager.setStreamActive(true);
             // setCpuFrequencyMhz(240);
             webSocket.sendTXT("stream_state:ok");
@@ -298,12 +307,11 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
             webSocket.sendTXT("stream_state:ok");
             Serial.println("Stream already active");
           }
-        } else if (state == "off") {
+        } else if (stateCmd == "off") {
           toggleFan(false);
-          if (isStreamActive) {
-            // Полностью выключаем камеру
+          if (camState == CAM_STREAMING) {
             stopCamera();
-            isStreamActive = false;
+            camState = CAM_IDLE;
             videoManager.setStreamActive(false);
             // setCpuFrequencyMhz(80);
             webSocket.sendTXT("stream_state:ok");
@@ -321,10 +329,8 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
         String fanCmd = cmd.substring(4);
         // Да, включается во время стрима или записи, иначе всегда молчит
         if (fanCmd == "on") {
-          // Установили новый статус
           fanState = true;
-          // Провеяем, есть ли нужда включить его прямо сейчас.
-          if (isStreamActive || videoManager.isRecording()) {
+          if (camState == CAM_STREAMING || camState == CAM_RECORDING) {
               toggleFan(true);
           }
           saveSettings();
@@ -356,18 +362,15 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
                   startTime = timeStr.toInt();
               }
               
-              // Уже запись, не можем.
-              if (videoManager.isRecording()) {
+              if (camState == CAM_RECORDING) {
                   webSocket.sendTXT("record:error:already");
               } else {
-                  // Включаем запись
-                  // Сохраняем текущее качество
                   int savedQualityMode = currentQualityMode;
 
-                  // Останавливаем стрим и выключаем камеру если активна
-                  if (isStreamActive) {
+                  // Запись важнее стрима — останавливаем стрим если шёл
+                  if (camState == CAM_STREAMING) {
                       stopCamera();
-                      isStreamActive = false;
+                      camState = CAM_IDLE;
                       videoManager.setStreamActive(false);
                       webSocket.sendTXT("stream_state:off");
                       delay(200);
@@ -376,21 +379,20 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
                   // Принудительно в HD (без сохранения в память)
                   currentQualityMode = 2;
                   currentFrameSize = FRAMESIZE_HD;
-                  
-                  // Инициализируем камеру для записи
+
                   initCamera();
                   toggleFan(true);
                   // setCpuFrequencyMhz(240);
-                  
+
                   if (videoManager.startRecord(startTime)) {
+                      camState = CAM_RECORDING;
                       webSocket.sendTXT("record:started");
                   } else {
-                      // Выключаем камеру при ошибке
                       stopCamera();
                       toggleFan(false);
+                      camState = CAM_IDLE;
                       // setCpuFrequencyMhz(80);
 
-                      // При ошибке возвращаем качество
                       currentQualityMode = savedQualityMode;
                       switch(savedQualityMode) {
                           case 0: currentFrameSize = FRAMESIZE_QVGA; break;
@@ -403,23 +405,22 @@ void webSocketEvent(const WStype_t& type, uint8_t * payload, const size_t& lengt
           }
           else if (recordPart == "stop") {
               if (videoManager.stopRecord()) {
-                  // Выключаем камеру
                   stopCamera();
                   toggleFan(false);
+                  camState = CAM_IDLE;
                   // setCpuFrequencyMhz(80);
-                  
-                  // Возвращаем качество из памяти
+
                   preferences.begin("camera", false);
                   int savedQuality = preferences.getInt("qualityMode", 1);
                   preferences.end();
-                  
+
                   currentQualityMode = savedQuality;
                   switch(savedQuality) {
                       case 0: currentFrameSize = FRAMESIZE_QVGA; break;
                       case 1: currentFrameSize = FRAMESIZE_VGA; break;
                       case 2: currentFrameSize = FRAMESIZE_HD; break;
                   }
-                  
+
                   webSocket.sendTXT("record:stopped");
               } else {
                   webSocket.sendTXT("record:error");
@@ -471,65 +472,57 @@ void webSocketTask(void * pvParameters) {
   while(1) {
     webSocket.loop();
 
-    // Если подключены и WS активен
-    if (isConnected && isAuthenticated) {
+    if (camState == CAM_RECORDING) {
 
-      // Если идет запись
-      if (videoManager.isRecording()) {
+      if (!esp_camera_sensor_get()) {
+        Serial.println("❌ FATAL: Recording but camera is OFF!");
+        videoManager.stopRecord();
+        camState = CAM_IDLE;
+        webSocket.sendTXT("record:error:camera_off");
+        vTaskDelay(1000);
+        continue;
+      }
 
-        // Камера выключена, а запись якобы идёт - КРИТИЧЕСКАЯ ОШИБКА
-        if (!esp_camera_sensor_get()) {
-          Serial.println("❌ FATAL: Recording but camera is OFF!");
-          videoManager.stopRecord();
-          webSocket.sendTXT("record:error:camera_off");
-          vTaskDelay(1000);
-          continue;
-        }        
-
-        camera_fb_t * fb = esp_camera_fb_get();
-        if (fb) {
-          // Пишем на карту
-          if (!videoManager.writeFrame(fb->buf, fb->len)) {
-              videoManager.stopRecord();
-              stopCamera();
-              toggleFan(false);
-              // setCpuFrequencyMhz(80);
-              webSocket.sendTXT("record:error:write_failed");
-          } else {
-              frameCount++;
-          }
-          esp_camera_fb_return(fb);
-        }
-      // Если идет стрим
-      } else if (isStreamActive) {
-
-        // Камера выключена, а флаг стрима true - КРИТИЧЕСКАЯ ОШИБКА
-        if (!esp_camera_sensor_get()) {
-          Serial.println("❌ FATAL: Streaming but camera is OFF!");
-          isStreamActive = false;
-          webSocket.sendTXT("stream_state:error:camera_off");
-          vTaskDelay(1000);
-          continue;
-        }
-
-        camera_fb_t * fb = esp_camera_fb_get();
-        if (fb) {
-            webSocket.sendBIN(fb->buf, fb->len, false);
+      camera_fb_t * fb = esp_camera_fb_get();
+      if (fb) {
+        if (!videoManager.writeFrame(fb->buf, fb->len)) {
+            videoManager.stopRecord();
+            stopCamera();
+            toggleFan(false);
+            camState = CAM_IDLE;
+            // setCpuFrequencyMhz(80);
+            webSocket.sendTXT("record:error:write_failed");
+        } else {
             frameCount++;
-            esp_camera_fb_return(fb);
         }
+        esp_camera_fb_return(fb);
+      }
+
+    } else if (camState == CAM_STREAMING) {
+
+      if (!esp_camera_sensor_get()) {
+        Serial.println("❌ FATAL: Streaming but camera is OFF!");
+        camState = CAM_IDLE;
+        webSocket.sendTXT("stream_state:error:camera_off");
+        vTaskDelay(1000);
+        continue;
+      }
+
+      camera_fb_t * fb = esp_camera_fb_get();
+      if (fb) {
+          webSocket.sendBIN(fb->buf, fb->len, false);
+          frameCount++;
+          esp_camera_fb_return(fb);
       }
     }
 
     if (millis() - lastFpsLog > 5000) {
       if (isConnected && isAuthenticated) {
-        byte isStreamActiveByte = isStreamActive ? 1 : 0;
-        String fpsMsg = "fps:" + String(frameCount / 5) + 
-                ";quality_mode:" + String(currentQualityMode) + 
-                ";tmp:" + String(getTemperature()) + 
-                ";isStreamActive:" + String(isStreamActiveByte) +
-                ";fan:" + String(fanState ? 1 : 0) +
-                ";isRecordActive:" + String(videoManager.isRecording() ? 1 : 0);
+        String fpsMsg = "fps:" + String(frameCount / 5) +
+                ";quality_mode:" + String(currentQualityMode) +
+                ";tmp:" + String(getTemperature()) +
+                ";state:" + String(camStateStr()) +
+                ";fan:" + String(fanState ? 1 : 0);
         webSocket.sendTXT(fpsMsg);
         Serial.printf("📊 Report: %s\n", fpsMsg.c_str());
       }
@@ -594,13 +587,14 @@ void loop() {
     if (videoManager.timeoutOccurred()) {
         stopCamera();
         toggleFan(false);
+        camState = CAM_IDLE;
         // setCpuFrequencyMhz(80);
-        if (isConnected && isAuthenticated) {  // ← добавить проверку
+        if (isConnected && isAuthenticated) {
             webSocket.sendTXT("record:stopped:timeout");
         }
     }
 
-    if (isConnected && isAuthenticated && !isStreamActive && !videoManager.isRecording()) {
+    if (isConnected && isAuthenticated && camState == CAM_IDLE) {
         videoManager.processQueue();
     }
 

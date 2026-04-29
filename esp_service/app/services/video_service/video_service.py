@@ -336,10 +336,16 @@ class VideoService:
         # Обновляем время последней активности
         state.last_seen = _get_izhevsk_time()
         
-        # ---- Метрики (fps:30;quality_mode:2;tmp:45.5;isStreamActive:1) ----
+        # ---- Метрики (fps:30;quality_mode:2;tmp:45.5;state:STREAMING;fan:1) ----
         if text.startswith("fps:"):
             try:
                 metrics = state.metrics
+                _STATE_MAP = {
+                    "STREAMING": CameraMode.STREAMING,
+                    "RECORDING": CameraMode.RECORDING,
+                    "IDLE":      CameraMode.CONNECTED,
+                    "OFFLINE":   CameraMode.OFFLINE,
+                }
                 for part in text.split(';'):
                     if ':' not in part:
                         continue
@@ -350,23 +356,13 @@ class VideoService:
                         metrics.quality_mode = int(val)
                     elif key == 'tmp':
                         metrics.temperature = float(val)
-                    elif key == 'isStreamActive':
-                        metrics.is_streaming = bool(int(val))
+                    elif key == 'state':
+                        state.mode = _STATE_MAP.get(val, CameraMode.CONNECTED)
                     elif key == 'fan':
                         metrics.is_fan_active = bool(int(val))
-                    elif key == 'isRecordActive':
-                        metrics.is_recording = bool(int(val))
-                
+
                 metrics.last_metrics_time = _get_izhevsk_time()
-                
-                # Обновляем режим камеры на основе isStreamActive
-                if metrics.is_streaming:
-                    state.mode = CameraMode.STREAMING
-                elif metrics.is_recording:
-                    state.mode = CameraMode.RECORDING
-                else:
-                    state.mode = CameraMode.CONNECTED
-                
+
             except Exception as e:
                 logger.error(f"❌ Ошибка парсинга метрик {camera_id}: {e}")
             return
@@ -378,7 +374,6 @@ class VideoService:
         elif text == "stream_state:off":
             logger.info(f"📹 [{camera_id}] Плата выключила стрим")
             if camera_id in self.cameras:
-                self.cameras[camera_id].metrics.is_streaming = False
                 if self.cameras[camera_id].mode == CameraMode.STREAMING:
                     self.cameras[camera_id].mode = CameraMode.CONNECTED
             return
@@ -389,18 +384,14 @@ class VideoService:
             logger.error(f"🔴 [{camera_id}] Камера не смогла инициализироваться")
             if camera_id in self.cameras:
                 self.cameras[camera_id].mode = CameraMode.CONNECTED
-                self.cameras[camera_id].metrics.is_streaming = False
             return
         elif text == "stream_state:error:camera_off":
             logger.error(f"🔴 [{camera_id}] КРИТИЧНО: стрим шёл но камера выключена")
             if camera_id in self.cameras:
                 self.cameras[camera_id].mode = CameraMode.CONNECTED
-                self.cameras[camera_id].metrics.is_streaming = False
             return
         elif text == "stream_state:error":
             logger.error(f"❌ [{camera_id}] Общая ошибка управления стримом")
-            if camera_id in self.cameras:
-                self.cameras[camera_id].metrics.is_streaming = False
             return
 
         # ---- record ----
@@ -410,7 +401,6 @@ class VideoService:
             if text == "record:started":
                 if camera_id in self.cameras:
                     self.cameras[camera_id].mode = CameraMode.RECORDING
-                    self.cameras[camera_id].metrics.is_recording = True
 
             elif text in ("record:stopped", "record:stopped:timeout"):
                 if text == "record:stopped:timeout":
@@ -420,7 +410,6 @@ class VideoService:
                 if old_task and not old_task.done():
                     old_task.cancel()
                 if camera_id in self.cameras:
-                    self.cameras[camera_id].metrics.is_recording = False
                     self.cameras[camera_id].mode = CameraMode.CONNECTED
                 if camera_id in self.viewers and len(self.viewers[camera_id]) > 0:
                     await self.send_command(camera_id, "stream_state:on")
@@ -432,7 +421,6 @@ class VideoService:
                 if old_task and not old_task.done():
                     old_task.cancel()
                 if camera_id in self.cameras:
-                    self.cameras[camera_id].metrics.is_recording = False
                     self.cameras[camera_id].mode = CameraMode.CONNECTED
 
             elif text == "record:error:already":
@@ -444,7 +432,6 @@ class VideoService:
                 if old_task and not old_task.done():
                     old_task.cancel()
                 if camera_id in self.cameras:
-                    self.cameras[camera_id].metrics.is_recording = False
                     self.cameras[camera_id].mode = CameraMode.CONNECTED
 
             elif text == "record:error:write_failed":
@@ -453,7 +440,6 @@ class VideoService:
                 if old_task and not old_task.done():
                     old_task.cancel()
                 if camera_id in self.cameras:
-                    self.cameras[camera_id].metrics.is_recording = False
                     self.cameras[camera_id].mode = CameraMode.CONNECTED
 
             elif text == "record:error":
@@ -462,7 +448,6 @@ class VideoService:
                 if old_task and not old_task.done():
                     old_task.cancel()
                 if camera_id in self.cameras:
-                    self.cameras[camera_id].metrics.is_recording = False
                     self.cameras[camera_id].mode = CameraMode.CONNECTED
 
             return
@@ -510,8 +495,6 @@ class VideoService:
         # Если все отвалились - выключаем стрим
         if len(self.viewers[camera_id]) == 0:
             await self.send_command(camera_id, "stream_state:off")
-            if camera_id in self.cameras:
-                self.cameras[camera_id].metrics.is_streaming = False
             del self.viewers[camera_id]
 
     async def _disconnect_camera(self, camera_id: str):
@@ -525,7 +508,6 @@ class VideoService:
         
         if camera_id in self.cameras:
             self.cameras[camera_id].mode = CameraMode.OFFLINE
-            self.cameras[camera_id].metrics.is_streaming = False
             logger.info(f"🔌 Камера {camera_id} отключена")
     
     # ---- Команды камере ----
