@@ -267,7 +267,7 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
             
             Serial.printf("📦 Chunk %d/%d (%zu bytes)\n", chunk, totalChunks, chunkSize);
             
-            String url = _serverUrl + "/esp_service/video/upload_chunk"
+            String url = _serverUrl + "/api/esp_service/video/upload_chunk"
                         + "?camera_id=" + _cameraId 
                         + "&start_time=" + String(startTime)
                         + "&duration=" + String(duration)
