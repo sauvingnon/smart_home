@@ -5,3 +5,4 @@
 mosquitto/config/passwd
 __pycache__
 my_cam/.theia/launch.json
+my_cam/config.h

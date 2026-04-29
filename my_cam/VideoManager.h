@@ -15,7 +15,7 @@ public:
     bool startRecord(unsigned long startTime = 0);  // начать запись (startTime = 0 - использовать своё время)
     bool writeFrame(uint8_t* data, size_t len);     // записать кадр
     bool stopRecord();                // завершить запись, сохранить запись в JSON
-    void processQueue();              // отправить одно неотправленное видео (вызывать в loop)
+    bool processQueue();              // отправить одно неотправленное видео; true = успех, false = ошибка/пусто
     int pendingCount();               // количество неотправленных видео
     bool isRecording() const { return _recording; }
     bool isSDReady() const { return _sdReady; }

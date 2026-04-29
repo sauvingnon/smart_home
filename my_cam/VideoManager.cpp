@@ -141,40 +141,40 @@ bool VideoManager::stopRecord() {
     return true;
 }
 
-void VideoManager::processQueue() {
-    if (_recording || _streamActive) return;
-    
+bool VideoManager::processQueue() {
+    if (_recording || _streamActive) return false;
+
     File queueFile = SD_MMC.open("/queue.txt", FILE_READ);
     if (!queueFile) {
         // Нет файла или пустой
-        return;
+        return false;
     }
-    
+
     // Читаем первую строку
     String line = queueFile.readStringUntil('\n');
     queueFile.close();
-    
-    if (line.length() == 0) return;
-    
+
+    if (line.length() == 0) return false;
+
     // Парсим: filename,startTime,duration,fileSize,sent
     int comma1 = line.indexOf(',');
     int comma2 = line.indexOf(',', comma1+1);
     int comma3 = line.indexOf(',', comma2+1);
     int comma4 = line.indexOf(',', comma3+1);
-    
+
     if (comma1 == -1 || comma2 == -1 || comma3 == -1 || comma4 == -1) {
         Serial.println("❌ Invalid queue line");
         // Удаляем битую строку
         removeFirstLine();
-        return;
+        return false;
     }
-    
+
     String filename = line.substring(0, comma1);
     unsigned long startTime = line.substring(comma1+1, comma2).toInt();
     unsigned long duration = line.substring(comma2+1, comma3).toInt();
     size_t fileSize = line.substring(comma3+1, comma4).toInt();
     bool sent = line.substring(comma4+1).toInt() == 1;
-    
+
     if (!sent) {
         Serial.printf("📤 Sending: %s\n", filename.c_str());
         if (sendVideo(filename, startTime, duration, fileSize)) {
@@ -182,14 +182,17 @@ void VideoManager::processQueue() {
             SD_MMC.remove(filename);
             removeFirstLine();
             Serial.printf("✅ Sent: %s\n", filename.c_str());
+            return true;
         } else {
             // Отмечаем как отправленное? Нет, пробуем заново в следующий раз
             // Просто не удаляем строку
             Serial.printf("⚠️ Send failed: %s\n", filename.c_str());
+            return false;
         }
     } else {
         // Уже отправлено, удаляем строку
         removeFirstLine();
+        return false;
     }
 }
 
