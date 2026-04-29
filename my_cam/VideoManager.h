@@ -22,12 +22,17 @@ public:
     void setStreamActive(bool active); // сообщить модулю, активен ли стрим (чтобы не отправлять во время записи)
     void setMaxRecordDuration(unsigned long seconds) { _maxRecordDuration = seconds; }
     void checkRecordTimeout();  // вызывать в loop()
-    bool timeoutOccurred() { 
-        bool ret = _timeoutOccurred; 
-        _timeoutOccurred = false; 
-        return ret; 
+    bool timeoutOccurred() {
+        bool ret = _timeoutOccurred;
+        _timeoutOccurred = false;
+        return ret;
     }
-    
+    void requestAbort();                        // прервать текущую отправку после текущего чанка
+    bool isUploading() const { return _uploading; }
+
+    static const int    MAX_QUEUE_FAILS  = 20;    // consecutive send failures before discarding
+    static const size_t MIN_RECORD_SIZE  = 1024;  // bytes — below this the recording is invalid
+
 private:
     bool _timeoutOccurred = false;
     String _cameraId;
@@ -42,6 +47,11 @@ private:
     unsigned long _maxRecordDuration = 300;  // 5 минут по умолчанию
     unsigned long _recordStartTimestamp; // для переданного от сервера времени
     unsigned long _recordStartTime = 0;
+    String _lastQueueFile  = "";  // filename at the head of queue during current upload attempts
+    int    _queueFailCount = 0;   // consecutive send failures for _lastQueueFile
+    volatile bool _uploading       = false; // true while sendVideo() is active
+    volatile bool _abortRequested  = false; // set by requestAbort(); checked between chunks
+    portMUX_TYPE  _stopMux = portMUX_INITIALIZER_UNLOCKED; // guards _recording in stopRecord()
     
     void addRecord(const String& filename, unsigned long startTime, unsigned long duration, size_t fileSize);
     void removeFirstLine();

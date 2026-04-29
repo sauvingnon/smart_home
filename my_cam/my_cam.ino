@@ -82,6 +82,19 @@ void uploadTask(void* pvParameters);
 bool cameraOn() {
     if (cameraReady) return true;
 
+    // If upload is active, abort it: the SSL context (~30-50 KB DRAM) must be
+    // released before esp_camera_init() can allocate its 32 KB DMA buffers.
+    if (videoManager.isUploading()) {
+        Serial.println("Aborting upload for camera init");
+        uploadCancelled = true;
+        videoManager.requestAbort();
+        unsigned long deadline = millis() + 10000;
+        while (videoManager.isUploading() && millis() < deadline)
+            vTaskDelay(pdMS_TO_TICKS(50));
+        // Extra pause: let WiFiClientSecure destructor finish SSL cleanup.
+        vTaskDelay(pdMS_TO_TICKS(300));
+    }
+
     if (cameraSettleNeeded) {
         // PWDN is already HIGH (set by cameraOff). Hold it there long enough
         // for the I2C peripheral and OV2640 to fully settle after deinit.
@@ -185,8 +198,11 @@ bool setFrameSize(const String& size, bool save) {
 
 void drainQueue(QueueHandle_t q) {
     camera_fb_t* fb;
-    while (xQueueReceive(q, &fb, 0) == pdTRUE)
-        esp_camera_fb_return(fb);
+    while (xQueueReceive(q, &fb, 0) == pdTRUE) {
+        // Guard: after esp_camera_deinit() the frame pool is freed;
+        // calling fb_return on it crashes with LoadProhibited.
+        if (cameraReady) esp_camera_fb_return(fb);
+    }
 }
 
 float getTemperature() {
@@ -371,6 +387,10 @@ void wsTask(void* pvParameters) {
             sdWriteError = false;
             if (isConnected && isAuthenticated)
                 webSocket.sendTXT("record:error:sd_write");
+            // sdTask already set STATE_IDLE and called stopRecord().
+            // Camera lifecycle (drain + off) is handled here so it runs on one task only.
+            drainQueue(recordQueue);
+            cameraOff();
             xTaskNotifyGive(uploadTaskHandle);
         }
 
@@ -470,18 +490,19 @@ void sdTask(void* pvParameters) {
                     esp_camera_fb_return(fb);
                 } else {
                     Serial.println("SD write failed -- stopping record");
-                    // Set IDLE first: closes the race window where wsTask also sees
-                    // STATE_RECORDING and calls stopRecord() on the server's "record:stop".
+                    // Set IDLE first: shrinks the race window where wsTask also
+                    // sees STATE_RECORDING and enters stopRecord() concurrently.
                     systemState = STATE_IDLE;
                     toggleFan(false);
-                    esp_camera_fb_return(fb);  // must happen before cameraOff/deinit
+                    esp_camera_fb_return(fb);   // camera still on here — safe
                     videoManager.stopRecord();
-                    drainQueue(recordQueue);
-                    cameraOff();
+                    // drainQueue and cameraOff intentionally omitted: wsTask owns
+                    // camera lifecycle and will handle them via sdWriteError below.
                     sdWriteError = true;
                 }
             } else {
-                esp_camera_fb_return(fb);
+                // STATE_IDLE: camera may already be deinitialized by wsTask.
+                if (cameraReady) esp_camera_fb_return(fb);
             }
         }
     }

@@ -109,8 +109,17 @@ bool VideoManager::writeFrame(uint8_t* data, size_t len) {
 }
 
 bool VideoManager::stopRecord() {
-    if (!_sdReady || !_recording) return false;
-    
+    if (!_sdReady) return false;
+
+    // Atomic check-and-clear: prevents two cores from both seeing _recording==true
+    // when sdTask (SD error) and wsTask (record:stop command) race to stop the same recording.
+    taskENTER_CRITICAL(&_stopMux);
+    bool wasRecording = _recording;
+    if (wasRecording) _recording = false;
+    taskEXIT_CRITICAL(&_stopMux);
+
+    if (!wasRecording) return false;
+
     _currentFile.close();
     
     unsigned long duration = (millis() - _recordStartTime) / 1000;
@@ -118,23 +127,24 @@ bool VideoManager::stopRecord() {
     // Проверяем существование файла
     if (!SD_MMC.exists(_currentFileName)) {
         Serial.printf("❌ File NOT found: %s\n", _currentFileName.c_str());
-        _recording = false;
         return false;
     }
-    
+
     File sizeFile = SD_MMC.open(_currentFileName, FILE_READ);
     size_t fileSize = sizeFile.size();
     sizeFile.close();
-    
-    Serial.printf("📝 Stopped: %s, duration=%lu, size=%zu\n", 
+
+    if (fileSize < MIN_RECORD_SIZE) {
+        Serial.printf("⚠️ Recording too small (%zu B), discarding: %s\n", fileSize, _currentFileName.c_str());
+        SD_MMC.remove(_currentFileName);
+        return false;
+    }
+
+    Serial.printf("📝 Stopped: %s, duration=%lu, size=%zu\n",
                   _currentFileName.c_str(), duration, fileSize);
-    
-    // Добавляем в очередь (просто пишем строку в файл)
+
     addRecord(_currentFileName, _recordStartTimestamp, duration, fileSize);
-    
-    _recording = false;
-    
-    // Проверяем очередь (читаем из файла)
+
     int queueSize = pendingCount();
     Serial.printf("✅ Queue size after stop: %d\n", queueSize);
     
@@ -145,55 +155,70 @@ bool VideoManager::processQueue() {
     if (_recording || _streamActive) return false;
 
     File queueFile = SD_MMC.open("/queue.txt", FILE_READ);
-    if (!queueFile) {
-        // Нет файла или пустой
-        return false;
-    }
+    if (!queueFile) return false;
 
-    // Читаем первую строку
     String line = queueFile.readStringUntil('\n');
     queueFile.close();
 
     if (line.length() == 0) return false;
 
-    // Парсим: filename,startTime,duration,fileSize,sent
+    // Парсим: filename,startTime,duration,fileSize,0
     int comma1 = line.indexOf(',');
     int comma2 = line.indexOf(',', comma1+1);
     int comma3 = line.indexOf(',', comma2+1);
     int comma4 = line.indexOf(',', comma3+1);
 
     if (comma1 == -1 || comma2 == -1 || comma3 == -1 || comma4 == -1) {
-        Serial.println("❌ Invalid queue line");
-        // Удаляем битую строку
+        Serial.println("❌ Invalid queue line, removing");
         removeFirstLine();
         return false;
     }
 
-    String filename = line.substring(0, comma1);
+    String        filename  = line.substring(0, comma1);
     unsigned long startTime = line.substring(comma1+1, comma2).toInt();
-    unsigned long duration = line.substring(comma2+1, comma3).toInt();
-    size_t fileSize = line.substring(comma3+1, comma4).toInt();
-    bool sent = line.substring(comma4+1).toInt() == 1;
+    unsigned long duration  = line.substring(comma2+1, comma3).toInt();
+    size_t        fileSize  = line.substring(comma3+1, comma4).toInt();
 
-    if (!sent) {
-        Serial.printf("📤 Sending: %s\n", filename.c_str());
-        if (sendVideo(filename, startTime, duration, fileSize)) {
-            // Удаляем файл и строку из очереди
-            SD_MMC.remove(filename);
-            removeFirstLine();
-            Serial.printf("✅ Sent: %s\n", filename.c_str());
-            return true;
-        } else {
-            // Отмечаем как отправленное? Нет, пробуем заново в следующий раз
-            // Просто не удаляем строку
-            Serial.printf("⚠️ Send failed: %s\n", filename.c_str());
-            return false;
-        }
-    } else {
-        // Уже отправлено, удаляем строку
+    // Файл пропал (удалили вручную, SD переформатировали и т.д.)
+    if (!SD_MMC.exists(filename)) {
+        Serial.printf("⚠️ File missing, removing queue entry: %s\n", filename.c_str());
         removeFirstLine();
+        _lastQueueFile  = "";
+        _queueFailCount = 0;
         return false;
     }
+
+    Serial.printf("📤 Sending: %s\n", filename.c_str());
+    if (sendVideo(filename, startTime, duration, fileSize)) {
+        SD_MMC.remove(filename);
+        removeFirstLine();
+        Serial.printf("✅ Sent: %s\n", filename.c_str());
+        _lastQueueFile  = "";
+        _queueFailCount = 0;
+        return true;
+    }
+
+    // Считаем последовательные неудачи для этого конкретного файла.
+    // Счётчик сбрасывается при смене файла или успехе.
+    // После MAX_QUEUE_FAILS подряд — файл удаляется, чтобы не блокировать очередь.
+    if (_lastQueueFile != filename) {
+        _lastQueueFile  = filename;
+        _queueFailCount = 1;
+    } else {
+        _queueFailCount++;
+    }
+    Serial.printf("⚠️ Send failed: %s (attempt %d/%d)\n",
+                  filename.c_str(), _queueFailCount, MAX_QUEUE_FAILS);
+
+    if (_queueFailCount >= MAX_QUEUE_FAILS) {
+        Serial.printf("❌ Giving up on %s after %d failures, discarding\n",
+                      filename.c_str(), _queueFailCount);
+        SD_MMC.remove(filename);
+        removeFirstLine();
+        _lastQueueFile  = "";
+        _queueFailCount = 0;
+    }
+    return false;
 }
 
 void VideoManager::removeFirstLine() {
@@ -218,20 +243,29 @@ void VideoManager::removeFirstLine() {
     SD_MMC.rename("/queue.tmp", "/queue.txt");
 }
 
-bool VideoManager::sendVideo(const String& filename, unsigned long startTime, 
+void VideoManager::requestAbort() {
+    _abortRequested = true;
+}
+
+bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
                              unsigned long duration, size_t fileSize) {
     if (_recording) return false;
-    
+
+    _abortRequested = false;
+    _uploading      = true;
+
     File file = SD_MMC.open(filename, FILE_READ);
     if (!file) {
         Serial.println("❌ Cannot open file for sending");
+        _uploading = false;
         return false;
     }
-    
+
     size_t actualSize = file.size();
     if (actualSize == 0) {
         file.close();
-        Serial.println("⚠️ Empty file, keeping for investigation");
+        Serial.println("⚠️ Empty file, discarding");
+        _uploading = false;
         return true;
     }
     
@@ -251,10 +285,11 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
     if (!buffer) {
         Serial.println("❌ Failed to allocate buffer");
         file.close();
+        _uploading = false;
         return false;
     }
-    
-    for (int chunk = 1; chunk <= totalChunks && success; chunk++) {
+
+    for (int chunk = 1; chunk <= totalChunks && success && !_abortRequested; chunk++) {
         size_t chunkStart = (chunk - 1) * CHUNK_SIZE;
         size_t chunkSize = (chunk == totalChunks) ? (actualSize - chunkStart) : CHUNK_SIZE;
         
@@ -330,10 +365,15 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
     
     free(buffer);
     file.close();
-    
+    _uploading = false;
+
+    if (_abortRequested) {
+        Serial.printf("⚠️ Upload aborted: %s\n", filename.c_str());
+        return false;
+    }
+
     if (success && totalSent == actualSize) {
         Serial.printf("✅ Video fully sent: %s\n", filename.c_str());
-        SD_MMC.remove(filename);
         return true;
     } else {
         Serial.printf("❌ Upload failed (sent %zu/%zu)\n", totalSent, actualSize);
