@@ -15,9 +15,10 @@ class CameraMetrics(BaseModel):
     fps: int = 0
     quality_mode: int = 1   # 0=QVGA, 1=VGA, 2=HD
     temperature: float = 0.0
-    is_streaming: bool = False   # флаг из прошивки
+    is_streaming: bool = False
     is_recording: bool = False
     is_fan_active: bool = False
+    free_heap: int = 0
     last_metrics_time: datetime = Field(default_factory=datetime.now)
 
 class CameraState(BaseModel):

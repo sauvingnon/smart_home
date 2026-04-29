@@ -342,7 +342,7 @@ async def start_camera_recording(
 @router.post("/camera/{camera_id}/record/stop")
 async def stop_camera_recording(
     camera_id: str,
-    user_id: int = Depends(get_current_user_id_dep)
+    # user_id: int = Depends(get_current_user_id_dep)
 ):
     """
     Остановить запись на камере.

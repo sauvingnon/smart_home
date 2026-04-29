@@ -350,16 +350,18 @@ class VideoService:
                         metrics.quality_mode = int(val)
                     elif key == 'tmp':
                         metrics.temperature = float(val)
-                    elif key == 'isStreamActive':
-                        metrics.is_streaming = bool(int(val))
+                    elif key == 'state':
+                        # 0=IDLE, 1=STREAMING, 2=RECORDING
+                        s_val = int(val)
+                        metrics.is_streaming = (s_val == 1)
+                        metrics.is_recording = (s_val == 2)
                     elif key == 'fan':
                         metrics.is_fan_active = bool(int(val))
-                    elif key == 'isRecordActive':
-                        metrics.is_recording = bool(int(val))
-                
+                    elif key == 'heap':
+                        metrics.free_heap = int(val)
+
                 metrics.last_metrics_time = _get_izhevsk_time()
-                
-                # Обновляем режим камеры на основе isStreamActive
+
                 if metrics.is_streaming:
                     state.mode = CameraMode.STREAMING
                 elif metrics.is_recording:
