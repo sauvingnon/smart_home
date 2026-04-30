@@ -263,7 +263,7 @@ export const VideosPage = () => {
           initial="hidden"
           animate="visible"
         >
-          <motion.div variants={itemVar} className="videos-section">
+          <motion.div variants={itemVar} className="videos-section glass-card">
             <div className="section-header">
               <Video size={20} className="section-icon" />
               <h2>Записи</h2>
