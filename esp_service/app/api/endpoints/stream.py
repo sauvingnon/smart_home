@@ -320,7 +320,7 @@ async def upload_chunk(
 @router.post("/camera/{camera_id}/record/start")  # 🔧 ДОБАВЛЕНО: эндпоинт запуска записи
 async def start_camera_recording(
     camera_id: str,
-    # user_id: int = Depends(get_current_user_id_dep)
+    user_id: int = Depends(get_current_user_id_dep)
 ):
     """
     Запустить запись на камере.

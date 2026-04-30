@@ -24,32 +24,25 @@ interface ThemeProviderProps {
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  const [theme, setTheme] = useState<Theme>('light')
-
-  // Функция для определения темы по времени суток
-  const getSystemTheme = (): Theme => {
+  const getThemeByTime = (): Theme => {
     const hour = new Date().getHours()
     return hour >= 6 && hour < 18 ? 'light' : 'dark'
   }
 
-  // Инициализация темы при загрузке
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') as Theme | null
-    
-    if (savedTheme) {
-      // Если есть сохраненная тема - используем её
-      setTheme(savedTheme)
-    } else {
-      // Иначе ставим по времени суток
-      setTheme(getSystemTheme())
-    }
-  }, [])
+  const [theme, setTheme] = useState<Theme>(getThemeByTime)
 
-  // Сохраняем тему в localStorage и применяем к документу
+  // Применяем тему к документу
   useEffect(() => {
-    localStorage.setItem('theme', theme)
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
+
+  // Автоматически переключаем тему по времени суток каждую минуту
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTheme(getThemeByTime())
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [])
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light')

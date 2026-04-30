@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, DoorOpen, HardDrive
+  Sunrise, Sunset, Moon, Wind, DoorOpen, HardDrive, RefreshCw
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
@@ -96,7 +96,7 @@ const itemVar = {
 }
 
 export default function HomePage() {
-  const { theme, toggleTheme } = useTheme()
+  const { theme } = useTheme()
   const [data, setData] = useState<GeneralResponse | null>(null)
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -192,13 +192,16 @@ export default function HomePage() {
           
           <div className="header-actions">
             <motion.button
-              whileHover={{ scale: 1.1, rotate: theme === 'light' ? 180 : -180 }}
+              whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
-              onClick={toggleTheme}
+              animate={{ rotate: loading ? 360 : 0 }}
+              transition={{ repeat: loading ? Infinity : 0, duration: 0.8, ease: 'linear' }}
+              onClick={() => { fetchData(); fetchWeather(); }}
               className="theme-button"
-              title={theme === 'light' ? 'Переключить на тёмную тему' : 'Переключить на светлую тему'}
+              title="Обновить данные"
+              disabled={loading}
             >
-              {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
+              <RefreshCw size={20} />
             </motion.button>
           </div>
         </header>
@@ -392,7 +395,7 @@ export default function HomePage() {
                     background: !data?.disk_usage ? undefined :
                       data.disk_usage.free_gb <= 0.5 ? '#f87171' :
                       data.disk_usage.free_gb <= 2 ? '#fbbf24' :
-                      undefined,
+                      '#34d399',
                   }}
                 />
               </div>
