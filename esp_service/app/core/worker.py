@@ -472,7 +472,7 @@ class BackgroundWorker:
             central_board_status=self.device_status.value if self.device_status else "offline",
             camera_status=camera_status.mode.value if camera_status else "offline",
             sensor_status=self.sensor_status.value if self.sensor_status else "offline",
-            toilet_status=self.sensor_status.value if self.sensor_status else "offline",
+            toilet_status="dead",
             disk_usage=disk_usage,
         )
     

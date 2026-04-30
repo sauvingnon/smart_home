@@ -8,7 +8,7 @@ const int reedPin = 5;       // D1 (геркон)
 // ========== WiFi & MQTT ==========
 const char* ssid = "TP-Link_8343";
 const char* password = "64826424";
-const char* mqtt_server = "api.tgapp.dotnetdon.ru";
+const char* mqtt_server = "tgapp.dotnetdon.ru";
 // const char* ssid = "TP-Link_297F";
 // const char* password = "23598126";
 // const char* mqtt_server = "192.168.1.100";
