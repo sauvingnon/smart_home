@@ -358,7 +358,7 @@ export const VideosPage = () => {
                                     </div>
                                     <div className="video-card-footer">
                                       <div className="video-card-subtitle">
-                                        {formatDate(video.last_modified)}
+                                        {formatDate(video.start_time || video.last_modified)}
                                       </div>
                                       <button
                                         className="download-btn small"
@@ -471,12 +471,6 @@ export const VideosPage = () => {
             <div className="video-modal-header">
               <button className="modal-close-btn" onClick={closeModal}>
                 ✕
-              </button>
-              <button 
-                className="modal-fullscreen-btn" 
-                onClick={() => videoRef.current?.requestFullscreen()}
-              >
-                ⛶
               </button>
             </div>
             {selectedVideo.url ? (
