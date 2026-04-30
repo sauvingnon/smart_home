@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useCamera } from '../../hooks/useCamera';
 import './StreamCamera.css';
 import { WifiOff, Power, Video, Radio } from 'lucide-react';
@@ -19,12 +19,19 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   } = useCamera(cameraId);
 
   const imgRef = useRef<HTMLImageElement>(null);
+  const [hasFrame, setHasFrame] = useState(false);
+
+  // Сбрасываем флаг при потере соединения
+  useEffect(() => {
+    if (connectionState !== 'connected') setHasFrame(false);
+  }, [connectionState]);
 
   // Обновление изображения при новом кадре
   useEffect(() => {
     if (frameBlob && imgRef.current) {
       const url = URL.createObjectURL(frameBlob);
       imgRef.current.src = url;
+      if (!hasFrame) setHasFrame(true);
       return () => URL.revokeObjectURL(url);
     }
   }, [frameBlob]);
@@ -80,11 +87,20 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
       {/* Видео */}
       <div className="camera-viewport">
         {connectionState === 'connected' && (
-          <img
-            ref={imgRef}
-            className="camera-image"
-            alt="Поток с камеры"
-          />
+          <>
+            {!hasFrame && (
+              <div className="camera-state">
+                <div className="spinner" />
+                <span>Загружаем поток...</span>
+              </div>
+            )}
+            <img
+              ref={imgRef}
+              className="camera-image"
+              alt=""
+              style={{ opacity: hasFrame ? 1 : 0, transition: 'opacity 0.4s ease' }}
+            />
+          </>
         )}
         
         {/* Состояния подключения */}
