@@ -594,6 +594,48 @@ class S3Manager:
             logger.exception(f"❌ Ошибка удаления: {e}")
             return False
 
+    async def get_video_presigned_url(self, key: str, expires_in: int = 3600) -> Optional[str]:
+        """Генерирует presigned URL для скачивания видео."""
+        if not await self._ensure_connection():
+            return None
+        try:
+            url = await self._client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': self.bucket_name,
+                    'Key': key,
+                    'ResponseContentDisposition': f'attachment; filename="{os.path.basename(key)}"',
+                },
+                ExpiresIn=expires_in,
+            )
+            return url
+        except Exception as e:
+            logger.exception(f"❌ Ошибка генерации presigned URL для {key}: {e}")
+            return None
+
+    async def get_video_stream(self, key: str):
+        """
+        Стриминг видео из S3 без загрузки в память.
+        Возвращает (async_generator, file_size) или (None, 0) при ошибке.
+        """
+        if not await self._ensure_connection():
+            return None, 0
+        try:
+            head = await self._client.head_object(Bucket=self.bucket_name, Key=key)
+            file_size = head['ContentLength']
+
+            response = await self._client.get_object(Bucket=self.bucket_name, Key=key)
+
+            async def _stream():
+                body = response['Body']
+                async for chunk in body.iter_chunks(chunk_size=64 * 1024):
+                    yield chunk[0] if isinstance(chunk, tuple) else chunk
+
+            return _stream(), file_size
+        except Exception as e:
+            logger.exception(f"❌ Ошибка стриминга видео {key}: {e}")
+            return None, 0
+
     async def get_video_by_id(self, camera_id: str, video_id: str) -> Optional[bytes]:
         """Скачать полное видео по video_id"""
         if not await self._ensure_connection():

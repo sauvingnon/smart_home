@@ -44,6 +44,8 @@ export const VideosPage = () => {
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [downloadProgress, setDownloadProgress] = useState(0) // -1 = подготовка, 0-100 = прогресс
 
   const toggleDay = (dayKey: string) => {
     setExpandedDays(prev => {
@@ -158,39 +160,52 @@ export const VideosPage = () => {
 
   const handleDownload = async (video: VideoItem, e: React.MouseEvent) => {
       e.stopPropagation()
+      const videoId = video.video_id || video.key.split('/').pop()?.replace('.mp4', '')
+      const cameraId = video.camera_id
+      if (!videoId || !cameraId) return
+
+      setDownloadingId(videoId)
+      setDownloadProgress(-1)
+
       try {
-          // 🔧 Используем video_id и camera_id вместо key
-          const videoId = video.video_id || video.key.split('/').pop()?.replace('.mp4', '')
-          const cameraId = video.camera_id
-          
-          if (!videoId || !cameraId) {
-              throw new Error('Missing video_id or camera_id')
-          }
-          
           const response = await apiClient.fetchRaw(
               `/esp_service/videos/download?video_id=${encodeURIComponent(videoId)}&camera_id=${encodeURIComponent(cameraId)}`
           )
-          
-          if (!response.ok) {
-              throw new Error(`Download failed: ${response.status}`)
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          if (!response.body) throw new Error('No response body')
+
+          const contentLength = response.headers.get('Content-Length')
+          const total = contentLength ? parseInt(contentLength) : 0
+
+          const reader = response.body.getReader()
+          const chunks: BlobPart[] = []
+          let received = 0
+          setDownloadProgress(0)
+
+          while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              chunks.push(value)
+              received += value.length
+              if (total) setDownloadProgress(Math.round(received / total * 100))
           }
-          
-          const blob = await response.blob()
-          const downloadUrl = URL.createObjectURL(blob)
-          const safeFileName = `${cameraId}_${video.start_time?.replace(/[:T]/g, '-') || Date.now()}.mp4`
-          
+
+          const blob = new Blob(chunks, { type: 'video/mp4' })
+          const url = URL.createObjectURL(blob)
           const link = document.createElement('a')
-          link.href = downloadUrl
-          link.download = safeFileName
+          link.href = url
+          link.download = `${cameraId}_${video.start_time?.replace(/[:T]/g, '-') || Date.now()}.mp4`
           document.body.appendChild(link)
           link.click()
           document.body.removeChild(link)
-          URL.revokeObjectURL(downloadUrl)
-          
+          URL.revokeObjectURL(url)
+
       } catch (error) {
           console.error('Failed to download video:', error)
-          // 🔧 Можно показать уведомление пользователю
           alert('Не удалось скачать видео')
+      } finally {
+          setDownloadingId(null)
+          setDownloadProgress(0)
       }
   }
 
@@ -349,8 +364,12 @@ export const VideosPage = () => {
                                         className="download-btn small"
                                         onClick={(e) => handleDownload(video, e)}
                                         title="Скачать"
+                                        disabled={downloadingId !== null}
                                       >
-                                        <Download size={18} />
+                                        {downloadingId === (video.video_id || video.key.split('/').pop()?.replace('.mp4', ''))
+                                          ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ display: 'flex' }}><RefreshCw size={18} /></motion.div>
+                                          : <Download size={18} />
+                                        }
                                       </button>
                                     </div>
                                   </div>
@@ -401,6 +420,47 @@ export const VideosPage = () => {
           </motion.div>
         </motion.div>
       </div>
+
+      <AnimatePresence>
+        {downloadingId && (
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            style={{
+              position: 'fixed', bottom: 90, left: 16, right: 16, zIndex: 100,
+              background: 'rgba(15, 23, 42, 0.92)',
+              backdropFilter: 'blur(16px)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 16,
+              padding: '14px 16px',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}
+          >
+            <Download size={18} style={{ color: '#a78bfa', flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: '0 0 6px', fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
+                {downloadProgress < 0
+                  ? 'Подготовка скачивания...'
+                  : downloadProgress < 100
+                    ? `Скачивание ${downloadProgress}%`
+                    : 'Завершение...'}
+              </p>
+              <div style={{ height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 2 }}>
+                <motion.div
+                  style={{ height: '100%', background: 'linear-gradient(90deg, #a78bfa, #06b6d4)', borderRadius: 2 }}
+                  animate={{ width: downloadProgress < 0 ? '35%' : `${downloadProgress}%` }}
+                  transition={downloadProgress < 0
+                    ? { repeat: Infinity, repeatType: 'reverse', duration: 1, ease: 'easeInOut' }
+                    : { duration: 0.15 }
+                  }
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <BottomNavBar />
 

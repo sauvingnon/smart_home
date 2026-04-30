@@ -851,24 +851,28 @@ class VideoService:
         self,
         camera_id: str,
         video_id: str,
-        user_id: Optional[int] = None,  # 🔧 ИСПРАВЛЕНИЕ: сделали опциональным
+        user_id: Optional[int] = None,
         expires_in: int = 3600
     ) -> Optional[str]:
+        """Получить presigned URL для скачивания видео."""
+        if not self.s3_manager:
+            return None
+        key = await self.s3_manager.get_video_key_by_id(camera_id, video_id)
+        if not key:
+            return None
+        return await self.s3_manager.get_video_presigned_url(key, expires_in)
+
+    async def stream_video_download(self, camera_id: str, video_id: str):
         """
-        Получить подписанную ссылку на видео.
+        Стриминг видео напрямую из S3 без буферизации в памяти.
+        Возвращает (async_generator, file_size).
         """
-        if not self.s3_manager:  # 🔧 ИСПРАВЛЕНИЕ: было self._s3_manager
-            raise ValueError("S3 manager не доступен")
-        
-        # TODO: Проверка прав если user_id передан
-        
-        all_videos = await self.s3_manager.list_videos(camera_id=camera_id)
-        
-        for video in all_videos:
-            if video.get('video_id') == video_id:
-                return await self.s3_manager.get_video_presigned_url(video['key'], expires_in)
-        
-        return None
+        if not self.s3_manager:
+            return None, 0
+        key = await self.s3_manager.get_video_key_by_id(camera_id, video_id)
+        if not key:
+            return None, 0
+        return await self.s3_manager.get_video_stream(key)
 
     async def get_video_by_id(self, camera_id: str, video_id: str) -> Optional[bytes]:
         """Скачать полное видео по video_id"""

@@ -1,5 +1,4 @@
 # app/api/esp_service.py
-import io
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, Depends, Header, UploadFile, File
@@ -183,27 +182,26 @@ async def get_video_presigned_url(
 
 @router.get("/videos/download")
 async def download_video(
-    video_id: str = Query(..., description="UUID видео"),  # 🔧 ИСПРАВЛЕНИЕ: video_id вместо key
+    video_id: str = Query(..., description="UUID видео"),
     camera_id: str = Query(..., description="ID камеры"),
     user_id: int = Depends(get_current_user_id_dep)
 ):
     """
-    Скачать видео по video_id.
-    
-    🔧 ИСПРАВЛЕНИЕ: Использует video_id вместо прямого ключа S3
+    Скачать видео — стриминг напрямую из S3 без буферизации на сервере.
+    Content-Length известен заранее, поэтому клиент может отображать прогресс.
     """
     worker = BackgroundWorker.get_instance()
-    
-    video_data = await worker.video_service.get_video_by_id(camera_id, video_id)
-    if not video_data:
-        raise HTTPException(status_code=503, detail="Video not found")
-    
+
+    stream, file_size = await worker.video_service.stream_video_download(camera_id, video_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Video not found")
+
     return StreamingResponse(
-        io.BytesIO(video_data),
+        stream,
         media_type="video/mp4",
         headers={
             "Content-Disposition": f"attachment; filename={camera_id}_{video_id}.mp4",
-            "Content-Length": str(len(video_data))
+            "Content-Length": str(file_size),
         }
     )
 
