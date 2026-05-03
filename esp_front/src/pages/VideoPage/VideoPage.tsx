@@ -116,9 +116,11 @@ export const VideosPage = () => {
     })
   }
 
-  const formatDayHeader = (dateString: string) => {
-    const date = new Date(dateString)
+  const formatDayHeader = (dayKey: string) => {
+    const [y, m, d] = dayKey.split('-').map(Number)
+    const date = new Date(Date.UTC(y, m - 1, d))
     return date.toLocaleDateString('ru-RU', {
+      timeZone: 'Europe/Samara',
       day: 'numeric',
       month: 'long',
       weekday: 'long'
@@ -220,9 +222,18 @@ export const VideosPage = () => {
     setSelectedVideo(null)
   }
 
-  // Группировка видео по дням (по дате из start_time или last_modified)
+  const toSamaraDate = (dateStr: string) => {
+    const utcMs = new Date(dateStr).getTime()
+    return new Date(utcMs + 4 * 60 * 60 * 1000) // UTC+4 Самара
+  }
+
+  // Группировка видео по дням (UTC+4, Самара)
   const groupedVideos = videos.reduce<Record<string, VideoItem[]>>((groups, video) => {
-    const dateKey = getVideoSortDate(video).slice(0, 10) // YYYY-MM-DD
+    const date = toSamaraDate(video.start_time || video.last_modified)
+    const y = date.getUTCFullYear()
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+    const d = String(date.getUTCDate()).padStart(2, '0')
+    const dateKey = `${y}-${m}-${d}`
     if (!groups[dateKey]) groups[dateKey] = []
     groups[dateKey].push(video)
     return groups
