@@ -32,7 +32,7 @@ const char* get_config_topic  = "config/get"; // запрос настроек �
 const char* set_time_topic    = "toilet_module/time/set";   // синхронизация времени (прием)
 const char* send_config_topic = "greenhouse_01/config/update";            // центральная плата прислала настройки (прием)
 const char* status_topic          = "status";           // публикуется как toilet_module/status - heartbeat и состояние (отправка)
-const char* silence_ended  = "toilet_module/silence/ended";  // публикуется при отключении режима тишины после реального визита (отправка)
+const char* silence_ended  = "silence/ended";  // публикуется как toilet_module/silence/ended
 
 // ============================================================
 //  Настройки (только RAM, сбрасываются при перезагрузке)
