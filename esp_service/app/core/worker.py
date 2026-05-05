@@ -306,6 +306,68 @@ class BackgroundWorker:
             logger.info(f"⏳ Жду {self.update_time_interval} сек до следующей проверки")
             await asyncio.sleep(self.update_time_interval)
 
+    async def sync_time_now(self, timeout: float = 30.0) -> dict:
+        """Принудительная синхронизация времени для обоих устройств."""
+        now = _get_izhevsk_time()
+        time_data = {
+            "year": now.year,
+            "month": now.month,
+            "day": now.day,
+            "hour": now.hour,
+            "minute": now.minute,
+            "second": now.second
+        }
+
+        greenhouse_future = asyncio.Future()
+        toilet_future = asyncio.Future()
+
+        async def on_greenhouse_time(device_id: str, _data: dict):
+            if device_id == self.device_id and not greenhouse_future.done():
+                self._record_device_activity("forced_time_sync")
+                await self.cache.mark_sync_completed(device_id)
+                greenhouse_future.set_result(True)
+
+        async def on_toilet_time(device_id: str, _data: dict):
+            if device_id == self.toilet_id and not toilet_future.done():
+                self._record_toilet_activity("forced_time_sync")
+                toilet_future.set_result(True)
+
+        self.mqtt_service.set_time_callback(on_greenhouse_time)
+        self.mqtt_service.set_time_callback_toilet(on_toilet_time)
+
+        greenhouse_sent = self.can_send_to_device(self.device_status)
+        toilet_sent = self.can_send_to_device(self.toilet_status)
+
+        if greenhouse_sent:
+            await self.mqtt_service.send_time_to_device(device_id=self.device_id, payload=time_data)
+        else:
+            greenhouse_future.set_result(False)
+
+        if toilet_sent:
+            await self.mqtt_service.send_time_to_toilet(payload=time_data)
+        else:
+            toilet_future.set_result(False)
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(greenhouse_future, toilet_future, return_exceptions=True),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            self.mqtt_service.remove_time_callback()
+            self.mqtt_service.remove_time_callback_toilet()
+
+        greenhouse_ok = greenhouse_future.done() and greenhouse_future.result() is True
+        toilet_ok = toilet_future.done() and toilet_future.result() is True
+
+        logger.info(f"⏰ Принудительная синхронизация: greenhouse={greenhouse_ok}, toilet={toilet_ok}")
+        return {
+            "greenhouse": "ok" if greenhouse_ok else ("offline" if not greenhouse_sent else "timeout"),
+            "toilet": "ok" if toilet_ok else ("offline" if not toilet_sent else "timeout"),
+        }
+
     def can_send_to_device(self, device_status: DeviceStatus) -> bool:
         """Можно ли отправлять команды на устройство?"""
         return device_status == DeviceStatus.ONLINE

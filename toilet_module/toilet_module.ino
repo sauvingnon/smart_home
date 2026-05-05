@@ -3,6 +3,7 @@
 //  Управление светом и вентилятором в туалете
 // ============================================================
 #include <ESP8266WiFi.h>
+#include <Ticker.h>
 #include <Wire.h>
 #include <RTClib.h>
 #include <ArduinoJson.h>
@@ -23,6 +24,21 @@
 //  Константы
 // ============================================================
 #define LIGHT_THRESHOLD  300
+
+// ============================================================
+//  WDT — программный watchdog (60 секунд)
+// ============================================================
+Ticker wdtTicker;
+
+void IRAM_ATTR wdtReset() {
+  Serial.println("[WDT] Timeout — restarting");
+  ESP.restart();
+}
+
+void feedWdt() {
+  wdtTicker.detach();
+  wdtTicker.once(60, wdtReset);
+}
 
 // ============================================================
 //  MQTT топики
@@ -121,6 +137,7 @@ void runFanForced(int minutes) {
     for (int s = 0; s < 60; s++) {
       delay(1000);
       mqtt.loop();
+      feedWdt();
     }
   }
   fanOff();
@@ -251,6 +268,7 @@ void setup() {
       cfg.timeBeforeCool, cfg.timeAfterCool, cfg.silentOn);
   }
 
+  feedWdt();
   Serial.println("[BOOT] Ready");
   ledBlink(3, 300, 300);
 }
@@ -259,6 +277,7 @@ void setup() {
 //  Loop
 // ============================================================
 void loop() {
+  feedWdt();
   mqtt.loop();
   checkBlinkPattern();
 
@@ -331,6 +350,7 @@ void loop() {
         delay(1000);
         afterTimer++;
         mqtt.loop();
+        feedWdt();
       }
       Serial.println("[FAN] Cooldown done");
     }

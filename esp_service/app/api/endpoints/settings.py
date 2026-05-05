@@ -51,3 +51,13 @@ async def update_settings_endpoint(
     if settings.forcedVentilationTimeout > 0:
         reset = settings.model_copy(update={'forcedVentilationTimeout': 0})
         await worker.send_to_board_settings(reset)
+
+
+@router.post("/sync_time")
+async def sync_time_endpoint():
+    """
+    Принудительная синхронизация времени для всех плат (без авторизации).
+    """
+    worker = BackgroundWorker.get_instance()
+    result = await worker.sync_time_now(timeout=30.0)
+    return result
