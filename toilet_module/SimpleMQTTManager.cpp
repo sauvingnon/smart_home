@@ -29,7 +29,7 @@ bool SimpleMQTTManager::begin() {
   mqttClient->setServer(mqttServer.c_str(), mqttPort);
   mqttClient->setKeepAlive(60);
   
-  mqttClient->setBufferSize(512);
+  mqttClient->setBufferSize(1024);
   
   tryConnect();  // первое подключение сразу, не ждём RECONNECT_INTERVAL
 

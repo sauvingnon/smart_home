@@ -8,8 +8,8 @@
 
 #define MAX_HANDLERS 30
 #define MQTT_LOOP_TIMEOUT 50     // Максимум 50мс на mqtt.loop()
-#define RECONNECT_INTERVAL 60000 // Переподключение раз в 60 секунд
-#define CONNECT_TIMEOUT 500      // Таймаут подключения 500мс
+#define RECONNECT_INTERVAL 5000  // Переподключение раз в 5 секунд
+#define CONNECT_TIMEOUT 5000     // Таймаут подключения 5 секунд
 
 struct TopicHandler {
   String topic;

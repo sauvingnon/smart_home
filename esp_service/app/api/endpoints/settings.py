@@ -45,3 +45,9 @@ async def update_settings_endpoint(
     """
     worker = BackgroundWorker.get_instance()
     await worker.send_to_board_settings(settings)
+
+    # forcedVentilationTimeout — одноразовая команда, сразу сбрасываем до 0
+    # чтобы центральная плата не хранила это в EEPROM и туалет не запускал вентиляцию повторно
+    if settings.forcedVentilationTimeout > 0:
+        reset = settings.model_copy(update={'forcedVentilationTimeout': 0})
+        await worker.send_to_board_settings(reset)

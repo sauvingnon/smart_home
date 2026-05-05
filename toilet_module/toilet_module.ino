@@ -145,15 +145,16 @@ void ledBlink(int times, int onMs, int offMs) {
 //  Вспышка считается если она длится BLINK_MIN_MS..BLINK_MAX_MS.
 //  Обе вспышки должны уложиться в BLINK_WINDOW_MS.
 // ============================================================
-#define BLINK_MIN_MS     300
-#define BLINK_MAX_MS    2500
-#define BLINK_WINDOW_MS 8000
+// Паттерн: тьма → короткая вспышка → тьма → свет включился → активировано
+#define BLINK_MIN_MS    100   // минимальная длина вспышки
+#define BLINK_MAX_MS   1000   // максимальная длина вспышки
+#define BLINK_WINDOW_MS 3000  // окно ожидания после вспышки
 
 struct {
-  bool          lastState    = false;
-  unsigned long onStartMs    = 0;
-  int           count        = 0;
-  unsigned long firstBlinkMs = 0;
+  bool          lastState  = false;
+  unsigned long onStartMs  = 0;
+  bool          flashSeen  = false;  // была короткая вспышка
+  unsigned long flashEndMs = 0;      // когда вспышка закончилась
 } blinkDetector;
 
 void checkBlinkPattern() {
@@ -164,33 +165,34 @@ void checkBlinkPattern() {
 
   bool on = (analogRead(PIN_SENSOR) > LIGHT_THRESHOLD);
 
-  // Сброс если окно истекло
-  if (blinkDetector.count > 0 && now - blinkDetector.firstBlinkMs > BLINK_WINDOW_MS) {
-    Serial.println("[BLINK] Window expired, reset counter");
-    blinkDetector.count = 0;
+  // Сброс если окно ожидания истекло
+  if (blinkDetector.flashSeen && now - blinkDetector.flashEndMs > BLINK_WINDOW_MS) {
+    blinkDetector.flashSeen = false;
+    Serial.println("[BLINK] Window expired, reset");
   }
 
   if (on && !blinkDetector.lastState) {
-    // Фронт: свет включился — запоминаем момент
+    // Свет включился (нарастающий фронт)
+    if (blinkDetector.flashSeen) {
+      // Была вспышка → свет снова включился → активируем
+      cfg.silentOn = true;
+      blinkDetector.flashSeen = false;
+      Serial.println("[BLINK] Pattern detected -> SILENT MODE ON");
+      ledBlink(5, 100, 100);
+    }
     blinkDetector.onStartMs = now;
   }
 
   if (!on && blinkDetector.lastState) {
-    // Спад: свет выключился — оцениваем длительность вспышки
+    // Свет выключился (спадающий фронт)
     unsigned long duration = now - blinkDetector.onStartMs;
     if (duration >= BLINK_MIN_MS && duration <= BLINK_MAX_MS) {
-      if (blinkDetector.count == 0) blinkDetector.firstBlinkMs = now;
-      blinkDetector.count++;
-      Serial.printf("[BLINK] Flash #%d, duration: %lums\n", blinkDetector.count, duration);
-      if (blinkDetector.count >= 2) {
-        cfg.silentOn = true;
-        blinkDetector.count = 0;
-        Serial.println("[BLINK] Pattern detected -> SILENT MODE ON");
-        ledBlink(5, 100, 100);
-      }
+      blinkDetector.flashSeen = true;
+      blinkDetector.flashEndMs = now;
+      Serial.printf("[BLINK] Flash detected (%lums) — waiting for light\n", duration);
     } else if (duration > BLINK_MAX_MS) {
-      Serial.printf("[BLINK] Flash too long (%lums), reset counter\n", duration);
-      blinkDetector.count = 0;
+      blinkDetector.flashSeen = false;
+      Serial.printf("[BLINK] Not a flash (%lums), reset\n", duration);
     }
   }
 
@@ -401,12 +403,12 @@ void setupMQTTHandlers() {
     StaticJsonDocument<128> doc;
     if (deserializeJson(doc, msg)) return;
 
-    int year   = doc["year"]   | 2024;
-    int month  = doc["month"]  | 1;
-    int day    = doc["day"]    | 1;
-    int hour   = doc["hour"]   | 0;
-    int minute = doc["minute"] | 0;
-    int second = doc["second"] | 0;
+    int year   = doc["year"];
+    int month  = doc["month"];
+    int day    = doc["day"];
+    int hour   = doc["hour"];
+    int minute = doc["minute"];
+    int second = doc["second"];
 
     rtc.adjust(DateTime(year, month, day, hour, minute, second));
     currentHour   = hour;
