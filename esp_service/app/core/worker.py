@@ -25,6 +25,7 @@ DEFAULT_TIME_UPDATE_INTERVAL = 43200  # 12 часов
 DEFAULT_HEARTBEAT_INTERVAL = 60
 DEFAULT_DEVICE_ID = "greenhouse_01"
 DEFAULT_SENSOR_ID = "sensor_door_pir"
+DEFAULT_TOILET_ID = "toilet_module"
 
 # =================== ФОНОВЫЙ ВОРКЕР ===================
 class BackgroundWorker:
@@ -55,11 +56,14 @@ class BackgroundWorker:
         self.heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL
         self.device_id = DEFAULT_DEVICE_ID
         self.sensor_id = DEFAULT_SENSOR_ID
+        self.toilet_id = DEFAULT_TOILET_ID
         self.current_telemetry: Optional[TelemetryData] = None
         self.last_activity_timestamp: Optional[datetime] = None  # Любое сообщение от платы
         self.device_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
         self.last_activity_timestamp_sensor: Optional[datetime] = None  # Любое сообщение от дверного датчика
         self.sensor_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
+        self.last_activity_timestamp_toilet: Optional[datetime] = None  # Любое сообщение от датчика туалета
+        self.toilet_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
         self.counter_for_telemetry = 0
         init_auth_manager(cache_manager)
         self._initialization_complete = False  # Флаг: сервис полностью инициализирован
@@ -119,6 +123,8 @@ class BackgroundWorker:
         self.mqtt_service.set_weather_request_callback(self.handle_weather_request)
         self.mqtt_service.set_door_motion_callback(self.handle_door_event)
         self.mqtt_service.set_heartbeat_sensor_callback(self.handle_sensor_healthcheck)
+        self.mqtt_service.set_toilet_activity_callback(self.handle_toilet_telemetry)
+        self.mqtt_service.set_silence_ended_callback(self.handle_toilet_silence_ended)
         logger.info("Установлены обработчики сообщений от платы.")
         
         # 🔧 РАЗРЕШАЕМ ОБРАБОТКУ РЕАЛЬНЫХ СООБЩЕНИЙ (не retained)
@@ -162,20 +168,39 @@ class BackgroundWorker:
             new_status = DeviceStatus.NEVER_CONNECTED
         else:
             seconds_ago = (_get_izhevsk_time() - self.last_activity_timestamp_sensor).total_seconds()
-            
+
             if seconds_ago < 600:  # < 10 минут
                 new_status = DeviceStatus.ONLINE
             elif seconds_ago < 1200:  # 20 минут
                 new_status = DeviceStatus.OFFLINE
-            else:  # > 5 минут
+            else:
                 new_status = DeviceStatus.DEAD
-        
-        # Логируем изменение статуса
+
         if new_status != self.sensor_status:
-            logger.info(f"📱 Статус устройства изменился: {self.sensor_status.value} → {new_status.value}")
+            logger.info(f"📱 Статус датчика двери изменился: {self.sensor_status.value} → {new_status.value}")
             self.sensor_status = new_status
-        
+
         return self.sensor_status
+
+    def _update_toilet_status(self) -> DeviceStatus:
+        """Обновление статуса туалетной платы на основе активности"""
+        if self.last_activity_timestamp_toilet is None:
+            new_status = DeviceStatus.NEVER_CONNECTED
+        else:
+            seconds_ago = (_get_izhevsk_time() - self.last_activity_timestamp_toilet).total_seconds()
+
+            if seconds_ago < 120:  # < 2 минут (heartbeat каждую минуту)
+                new_status = DeviceStatus.ONLINE
+            elif seconds_ago < 300:
+                new_status = DeviceStatus.OFFLINE
+            else:
+                new_status = DeviceStatus.DEAD
+
+        if new_status != self.toilet_status:
+            logger.info(f"🚽 Статус туалета изменился: {self.toilet_status.value} → {new_status.value}")
+            self.toilet_status = new_status
+
+        return self.toilet_status
 
     async def _check_time_update_loop(self, timeout: float = 30.0):
         """
@@ -186,12 +211,12 @@ class BackgroundWorker:
             try:
                 logger.info(f"⏰ Проверка синхронизации времени для {self.device_id}")
 
-                if not self.can_send_to_device():
+                if not self.can_send_to_device(self.device_status):
                     logger.warning(f"⚠️ Пропускаем синхронизацию времени: устройство {self.device_status.value}")
                     await asyncio.sleep(self.update_time_interval)
                     continue
                 
-                # 1. Проверяем, нужна ли синхронизация (прошло ли 7+ дней)
+                # 1. Проверяем, нужна ли синхронизация (прошло ли 2+ дней)
                 need_sync = await self.cache.should_sync_time(device_id=self.device_id)
                 
                 if not need_sync:
@@ -201,30 +226,29 @@ class BackgroundWorker:
                 
                 logger.info(f"🕐 Устройство {self.device_id} требует синхронизации времени")
                 
-                # 2. Колбэк для обработки ответа от устройства
-                response_future = asyncio.Future()
-                
-                async def on_time_sync_response(device_id: str, data: dict):
-                    """Обработчик подтверждения синхронизации от ESP"""
-                    
-                    if device_id == self.device_id:
-                        # Записываем активность устройства
+                # 2. Колбэки для обработки ответов от обоих устройств
+                greenhouse_future = asyncio.Future()
+                toilet_future = asyncio.Future()
+
+                async def on_greenhouse_time(device_id: str, data: dict):
+                    if device_id == self.device_id and not greenhouse_future.done():
                         self._record_device_activity("time_sync_response")
-                        logger.info(f"✅ Устройство {device_id} подтвердило синхронизацию")
-                        
-                        # Помечаем синхронизацию как завершенную
                         await self.cache.mark_sync_completed(device_id)
-                        
-                        # Завершаем Future
-                        if not response_future.done():
-                            response_future.set_result(True)
-                
-                # Регистрируем колбэк
-                self.mqtt_service.set_time_callback(on_time_sync_response)
-                
+                        logger.info(f"✅ {device_id} подтвердил синхронизацию времени")
+                        greenhouse_future.set_result(True)
+
+                async def on_toilet_time(device_id: str, data: dict):
+                    if device_id == self.toilet_id and not toilet_future.done():
+                        self._record_toilet_activity("time_sync_response")
+                        logger.info(f"✅ {device_id} подтвердил синхронизацию времени")
+                        toilet_future.set_result(True)
+
+                self.mqtt_service.set_time_callback(on_greenhouse_time)
+                self.mqtt_service.set_time_callback_toilet(on_toilet_time)
+
                 # 3. Получаем текущее время Ижевска
                 now = _get_izhevsk_time()
-                
+
                 # 4. Формируем данные для ESP
                 time_data = {
                     "year": now.year,
@@ -234,29 +258,41 @@ class BackgroundWorker:
                     "minute": now.minute,
                     "second": now.second
                 }
-                
-                logger.info(f"📤 Отправляю время для {self.device_id}: "
+
+                logger.info(f"📤 Отправляю время на обе платы: "
                         f"{now.hour:02d}:{now.minute:02d} "
                         f"{now.day:02d}.{now.month:02d}.{now.year}")
-                
-                # 5. Отправляем время устройству
+
+                # 5. Отправляем время обоим устройствам
                 await self.mqtt_service.send_time_to_device(
                     device_id=self.device_id,
                     payload=time_data
                 )
-                
-                # 6. Ждём ответа 30 секунд
+                if self.can_send_to_device(self.toilet_status):
+                    await self.mqtt_service.send_time_to_toilet(payload=time_data)
+                else:
+                    logger.warning(f"⚠️ Туалет недоступен, пропускаем синхронизацию времени")
+                    toilet_future.set_result(False)
+
+                # 6. Ждём ответов от обоих с общим таймаутом
                 try:
-                    await asyncio.wait_for(response_future, timeout=timeout)
-                    logger.info(f"✅ Синхронизация времени для {self.device_id} завершена")
-                    
+                    await asyncio.wait_for(
+                        asyncio.gather(greenhouse_future, toilet_future, return_exceptions=True),
+                        timeout=timeout
+                    )
+                    logger.info("✅ Синхронизация времени завершена")
                 except asyncio.TimeoutError:
-                    logger.warning(f"⏳ Устройство {self.device_id} не подтвердило синхронизацию "
-                                f"(ждал {timeout} секунд)")
-                    # Ничего не делаем, попробуем через сутки
-                
-                # 7. Очищаем колбэк
+                    if not greenhouse_future.done():
+                        logger.warning(f"⏳ {self.device_id} не подтвердил синхронизацию")
+                    if not toilet_future.done():
+                        logger.warning(f"⏳ {self.toilet_id} не подтвердил синхронизацию")
+
+                # 7. Помечаем синхронизацию завершённой для центральной платы
+                await self.cache.mark_sync_completed(self.device_id)
+
+                # 8. Очищаем колбэки
                 self.mqtt_service.remove_time_callback()
+                self.mqtt_service.remove_time_callback_toilet()
                 
             except asyncio.CancelledError:
                 logger.info(f"🚫 Цикл синхронизации для {self.device_id} отменен")
@@ -270,16 +306,23 @@ class BackgroundWorker:
             logger.info(f"⏳ Жду {self.update_time_interval} сек до следующей проверки")
             await asyncio.sleep(self.update_time_interval)
 
-    def can_send_to_device(self) -> bool:
+    def can_send_to_device(self, device_status: DeviceStatus) -> bool:
         """Можно ли отправлять команды на устройство?"""
-        return self.device_status == DeviceStatus.ONLINE
+        return device_status == DeviceStatus.ONLINE
 
     def _record_device_activity(self, activity_name: str = ""):
-        """Запиcать активность устройства (любое сообщение)"""
+        """Записать активность центральной платы (любое сообщение)"""
         self.last_activity_timestamp = _get_izhevsk_time()
         self.device_status = self._update_device_status()
         if activity_name:
             logger.debug(f"📍 Активность: {activity_name}. Статус устройства {self.device_status.value}")
+
+    def _record_toilet_activity(self, activity_name: str = ""):
+        """Записать активность туалетной платы (любое сообщение)"""
+        self.last_activity_timestamp_toilet = _get_izhevsk_time()
+        self.toilet_status = self._update_toilet_status()
+        if activity_name:
+            logger.debug(f"🚽 Активность туалета: {activity_name}. Статус {self.toilet_status.value}")
 
     async def _check_heartbeat_esp_loop(self):
         """Периодическая проверка статусов устройств"""
@@ -304,14 +347,21 @@ class BackgroundWorker:
                 old_status = self.sensor_status
                 new_status = self._update_sensor_status()
 
-                # Логируем критические состояния
-                if new_status == DeviceStatus.DEAD:
+                if new_status == DeviceStatus.DEAD and self.last_activity_timestamp_sensor:
                     seconds_ago = (_get_izhevsk_time() - self.last_activity_timestamp_sensor).total_seconds()
-                    minutes_ago = int(seconds_ago / 60)
-                    logger.error(f"🚨 Датчик двери МЕРТВ {minutes_ago} минут!")
+                    logger.error(f"🚨 Датчик двери МЕРТВ {int(seconds_ago / 60)} минут!")
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
-                    # Только что подключился
-                    logger.info(f"✅ Датчик двери ОНЛАЙН")
+                    logger.info("✅ Датчик двери ОНЛАЙН")
+
+                # Проверяем туалет
+                old_status = self.toilet_status
+                new_status = self._update_toilet_status()
+
+                if new_status == DeviceStatus.DEAD and self.last_activity_timestamp_toilet:
+                    seconds_ago = (_get_izhevsk_time() - self.last_activity_timestamp_toilet).total_seconds()
+                    logger.error(f"🚨 Туалет МЕРТВ {int(seconds_ago / 60)} минут!")
+                elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
+                    logger.info("✅ Туалет ОНЛАЙН")
                 
             except Exception as e:
                 logger.exception(f"❌ Ошибка в проверке heartbeat: {e}")
@@ -400,7 +450,7 @@ class BackgroundWorker:
         """Отправка данных на аппаратную плату"""
         try:
 
-            if not self.can_send_to_device():
+            if not self.can_send_to_device(self.device_status):
                 logger.warning(f"⚠️ Пропускаем отправку погоды: устройство {self.device_status.value}")
                 return
 
@@ -434,7 +484,7 @@ class BackgroundWorker:
         """Отправка настроек на аппаратную плату"""
         try:
 
-            if not self.can_send_to_device():
+            if not self.can_send_to_device(self.device_status):
                 logger.warning(f"⚠️ Пропускаем отправку настроек: устройство {self.device_status.value}")
                 return
 
@@ -472,7 +522,7 @@ class BackgroundWorker:
             central_board_status=self.device_status.value if self.device_status else "offline",
             camera_status=camera_status.mode.value if camera_status else "offline",
             sensor_status=self.sensor_status.value if self.sensor_status else "offline",
-            toilet_status="dead",
+            toilet_status=self.toilet_status.value if self.toilet_status else "offline",
             disk_usage=disk_usage,
         )
     
@@ -480,7 +530,7 @@ class BackgroundWorker:
         """Получить текущие настройки (синхронный запрос-ответ)"""
         try:
             
-            if not self.can_send_to_device():
+            if not self.can_send_to_device(self.device_status):
                 logger.warning(f"⚠️ Пропускаем получение настроек: устройство {self.device_status.value}")
                 return None
 
@@ -829,8 +879,18 @@ class BackgroundWorker:
         logger.info(f"🚪 Плата {device_id} сообщила об открытии двери")
 
     async def handle_sensor_healthcheck(self, sensor_id: str, data: dict):
-        """Проверка датчика, что он в порядке."""
+        """Проверка датчика двери, что он в порядке."""
         self.last_activity_timestamp_sensor = _get_izhevsk_time()
+
+    async def handle_toilet_telemetry(self, device_id: str, data: dict):
+        """Обработчик телеметрии туалетной платы (heartbeat раз в минуту)."""
+        self._record_toilet_activity("telemetry")
+        logger.debug(f"🚽 Телеметрия туалета: light={data.get('lightOn')} fan={data.get('fanOn')} silent={data.get('silentMode')}")
+
+    async def handle_toilet_silence_ended(self, device_id: str, data: dict):
+        """Туалет сообщил об окончании режима тишины. Центральная плата сама сбрасывает у себя — мы только логируем."""
+        self._record_toilet_activity("silence_ended")
+        logger.info("🚽 Режим тишины в туалете завершён (центральная плата уведомлена напрямую)")
 
     async def handle_telemetry(self, device_id: str, data: dict):
         """Обработчик телеметрии от платы"""

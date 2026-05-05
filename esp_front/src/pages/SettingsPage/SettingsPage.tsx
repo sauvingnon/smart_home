@@ -11,6 +11,7 @@ import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 type Settings = {
   displayMode: number
+  clockMode: number
   dayOnHour: number
   dayOnMinute: number
   dayOffHour: number
@@ -717,6 +718,54 @@ export default function SettingsPage() {
                       step={5}
                     />
                   </div>
+                </div>
+
+                <div className="section">
+                  <div className="section-header">
+                    <Monitor className="section-icon blue" />
+                    <h2>Режим часов</h2>
+                  </div>
+
+                  <div className="mode-buttons">
+                    <motion.button
+                      className={`mode-btn ${settings.clockMode === 0 ? 'active' : ''}`}
+                      onClick={() => update('clockMode', 0)}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      Постоянный
+                    </motion.button>
+
+                    <motion.button
+                      className={`mode-btn ${settings.clockMode === 1 ? 'active' : ''}`}
+                      onClick={() => update('clockMode', 1)}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      Ночью тусклее
+                    </motion.button>
+
+                    <motion.button
+                      className={`mode-btn ${settings.clockMode === 2 ? 'active' : ''}`}
+                      onClick={() => update('clockMode', 2)}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      Ночью нет
+                    </motion.button>
+                  </div>
+
+                  <motion.p
+                    className="mode-description"
+                    key={settings.clockMode}
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {settings.clockMode === 0 && '🕐 Часы всегда светятся'}
+                    {settings.clockMode === 1 && '🌙 Ночью яркость снижается'}
+                    {settings.clockMode === 2 && '⚫ Ночью часы гаснут полностью'}
+                  </motion.p>
                 </div>
 
                 <div className="section">

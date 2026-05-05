@@ -118,6 +118,8 @@ const char* set_config_topic = "greenhouse_01/config/set";
 const char* get_config_topic = "greenhouse_01/config/get";
 // Бекенд хочет отправить время
 const char* set_time_topic = "greenhouse_01/time/set";
+// Отправить настройки на бекенд
+const char* send_config_topic = "config/update";
 
 // На плате
 struct WeatherData {
@@ -2406,6 +2408,17 @@ void setupMQTTHandlers() {
 
   });
 
+  // Туалет запрашивает настройки напрямую у центра (минуя бек)
+  mqtt.addHandler("toilet_module/config/get", [](const String& topic, const String& msg) {
+    sendSettings();
+  });
+
+  // Туалет сообщил об окончании режима тишины — синхронизируем у себя
+  mqtt.addHandler("toilet_module/silence/ended", [](const String& topic, const String& msg) {
+    settings.setSilentMode(false);
+    settings.save();
+  });
+
   // Бекенд высылает время
   mqtt.addHandler(set_time_topic, [](const String& topic, const String& msg) {
 
@@ -2441,7 +2454,7 @@ void sendSettings() {
 
   String json = settings.toJSON(false);
   
-  mqtt.publish("config/update", json);
+  mqtt.publish(send_config_topic, json);
 
 }
 
@@ -2644,11 +2657,11 @@ void clockLoop() {
   }
 
   // Днем да ночью нет.
-  if (clockMode  == 2) {                    
+  if (clockMode  == 2) {
     if (!(Hour >= dayRelay.startHour && (Hour != dayRelay.startHour || Minute >= dayRelay.startMinute) && Hour <= dayRelay.stopHour && (Hour != dayRelay.stopHour || Minute < dayRelay.stopMinute))) {  // Если ночь, то:
-      display.setBrightness(0);
-    } else {  
-      display.setBrightness(0x0f);
+      display.setBrightness(0, false);  // false = display off (setBrightness(0) без флага только притушит, не выключит)
+    } else {
+      display.setBrightness(0x0f, true);
     }
   }
 

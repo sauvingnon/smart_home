@@ -32,35 +32,49 @@ class MQTTService:
         self._listening_task: Optional[asyncio.Task] = None
         self.device_id = "greenhouse_01"
         self.sensor_id = "sensor_door"
+        self.toilet_id = "toilet_module"
 
         self._startup_time = None
         self._startup_ignore_seconds = 3
 
         # Топики
         self.topics = {
-            # От платы к бекенду
+            # От центральной платы к бекенду
             "telemetry": f"{self.device_id}/telemetry", # heartbeat + датчики
             "config_update": f"{self.device_id}/config/update", # плата изменила настройки
             "weather_request": f"{self.device_id}/weather/request", # запрос погоды
             "time_ready": f"{self.device_id}/time/ready", # плата пингует что время установлено
-            "motion_detected": f"{self.sensor_id}/door/state", # датчик движения на двери
-            "sensor_telemetry": f"{self.sensor_id}/door/heartbeat", # датчик heartbeat
+            # От датчика двери к бекенду
+            "motion_detected": f"{self.sensor_id}/door/state", # есть активность
+            "sensor_telemetry": f"{self.sensor_id}/door/heartbeat", # heartbeat от датчика двери
+            # От датчика туалета к бекенду
+            "config_get_toilet": f"{self.toilet_id}/config/get", # запрос настроек от туалета
+            "toilet_telemetry": f"{self.toilet_id}/status", # heartbeat от туалета
+            "silence_ended": f"{self.toilet_id}/silence/ended", # уведомление от туалета что режим тишины закончился
+            "time_ready_toilet": f"{self.toilet_id}/time/ready", # уведомление от туалета что время установлено
 
-            # от бекенда к плате
+            # от бекенда к плате центральной плате
             "weather_send": f"{self.device_id}/weather",  # погода
             "config_get": f"{self.device_id}/config/get",
             "config_set": f"{self.device_id}/config/set", # установить настройки
             "time_set": f"{self.device_id}/time/set", # установить время
+
+            # От бекенда к уборной
+            "time_set_toilet": f"{self.toilet_id}/time/set", # установить время
         }
         
         # Callback-функции
         self.callbacks = {
-            "time_ready": None,
-            "telemetry": None,
-            "config_update": None,
-            "weather_request": None,
-            "door_motion": None,
-            "sensor_telemetry": None
+            "time_ready": None, # уведомление от центральной платы что время установлено
+            "telemetry": None, # heartbeat от центральной платы
+            "config_update": None, # обновление настроек от центральной платы
+            "weather_request": None, # запрос погоды от центральной платы
+            "door_motion": None, # уведомление от датчика двери что есть движение
+            "sensor_telemetry": None, # heartbeat от датчика двери
+            "toilet_telemetry": None, # heartbeat от туалета
+            "silence_ended": None, # уведомление от туалета что режим тишины закончился
+            "time_ready_toilet": None, # уведомление от туалета что время установлено
+            "config_update_toilet": None # обновление настроек от туалета
         }
 
         # Тайминги последних сообщений
@@ -110,6 +124,9 @@ class MQTTService:
             (f"{self.device_id}/time/ready", 1), # уведомление от платы что время установлено
             (f"{self.sensor_id}/door/state", 1), # уведомление от датчика двери
             (f"{self.sensor_id}/door/heartbeat", 1), # heartbeat от датчика двери
+            (f"{self.toilet_id}/status", 1), # heartbeat от туалета
+            (f"{self.toilet_id}/silence/ended", 1), # уведомление от туалета что режим тишины закончился
+            (f"{self.toilet_id}/time/ready", 1), # уведомление от туалета что время установлено
         ]
         
         for topic, qos in topics_to_subscribe:
@@ -165,8 +182,11 @@ class MQTTService:
                 await self.callbacks["weather_request"](device_id, payload)
                 return
 
-            if topic_type == "time/ready" and self.callbacks["time_ready"]:
-                await self.callbacks["time_ready"](device_id, payload)
+            if topic_type == "time/ready":
+                if device_id == self.device_id and self.callbacks["time_ready"]:
+                    await self.callbacks["time_ready"](device_id, payload)
+                elif device_id == self.toilet_id and self.callbacks["time_ready_toilet"]:
+                    await self.callbacks["time_ready_toilet"](device_id, payload)
                 return
             if topic_type == "door/state" and self.callbacks["door_motion"]:
                 logger.info(f"🚪 Движение на двери обнаружено от {device_id}!")
@@ -177,6 +197,15 @@ class MQTTService:
             if topic_type == "door/heartbeat" and self.callbacks["sensor_telemetry"]:
                 logger.info("Датчик двери прислал heartbeat")
                 await self.callbacks["sensor_telemetry"](device_id, payload)
+                return
+            
+            if topic_type == "status" and device_id == self.toilet_id and self.callbacks["toilet_telemetry"]:
+                await self.callbacks["toilet_telemetry"](device_id, payload)
+                return
+
+            if topic_type == "silence/ended" and device_id == self.toilet_id and self.callbacks["silence_ended"]:
+                logger.info("Туалет сообщил о завершении режима тишины")
+                await self.callbacks["silence_ended"](device_id, payload)
                 return
 
             logger.debug(f"📨 Необработанный топик: {topic_type}")
@@ -190,8 +219,12 @@ class MQTTService:
     # ========== МЕТОДЫ ДЛЯ ОТПРАВКИ НА ПЛАТУ ==========
 
     async def send_time_to_device(self, device_id: str, payload: dict):
-        """Отправка времени на плату."""
+        """Отправка времени на центральную плату."""
         return await self._send_to_device("time_set", device_id, payload, "Отправлено время")
+
+    async def send_time_to_toilet(self, payload: dict):
+        """Отправка времени на туалетную плату."""
+        return await self._send_to_device("time_set_toilet", self.toilet_id, payload, "Отправлено время туалету")
 
     async def send_settings_request_to_device(self, device_id: str):
         """Отправка запроса о текущих настройках на плату."""
@@ -276,6 +309,31 @@ class MQTTService:
         """Установить обработчик heartbeat для сенсора"""
         self.callbacks["sensor_telemetry"] = callback
         logger.debug("✅ Установлен обработчик heartbeat для сенсора")
+
+    def set_silence_ended_callback(self, callback: Callable):
+        """Установить обработчик завершения режима тишины туалета"""
+        self.callbacks["silence_ended"] = callback
+        logger.debug("✅ Установлен обработчик silence/ended туалета")
+
+    def set_time_callback_toilet(self, callback: Callable):
+        """Установить обработчик подтверждения времени от туалета"""
+        self.callbacks["time_ready_toilet"] = callback
+        logger.debug("✅ Установлен обработчик времени туалета")
+
+    def remove_time_callback_toilet(self):
+        """Удалить обработчик подтверждения времени от туалета"""
+        self.callbacks["time_ready_toilet"] = None
+        logger.debug("✅ Удален обработчик времени туалета")
+
+    def set_toilet_activity_callback(self, callback: Callable):
+        """Установить обработчик телеметрии туалета"""
+        self.callbacks["toilet_telemetry"] = callback
+        logger.debug("✅ Установлен обработчик телеметрии туалета")
+
+    def set_toilet_config_callback(self, callback: Callable):
+        """Установить обработчик настроек от туалета"""
+        self.callbacks["config_update_toilet"] = callback
+        logger.debug("✅ Установлен обработчик настроек от туалета")
 
     # ========== УПРАВЛЕНИЕ ЖИЗНЕННЫМ ЦИКЛОМ ==========
 

@@ -9,6 +9,9 @@ class SettingsData(BaseModel):
     
     # Режим экрана (0-постоянный, 1-авто, 2-умный)
     displayMode: int = Field(default=1, ge=0, le=2, description="Режим экрана: 0-постоянный, 1-авто, 2-умный")
+
+    # Режим часов (0-постоянный, 1-ночью тусклее, 2-ночью нет)
+    clockMode: int = Field(default=0, ge=0, le=2, description="Режим часов: 0-постоянный, 1-ночью тусклее, 2-ночью нет")
     
     # Дневное реле расписание
     dayOnHour: int = Field(default=8, ge=0, le=23, description="Час включения дневного реле")
