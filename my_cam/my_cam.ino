@@ -585,7 +585,7 @@ void loadSettings() {
         default: currentQualityMode = 1;
         case 1:  currentFrameSize = FRAMESIZE_VGA;  break;
     }
-    Serial.printf("Loaded: fan=%d, quality=%d\n", fanState, currentQualityMode);
+    Serial.printf("Loaded: fan=%d, quality=%d\n", fanMode, currentQualityMode);
 }
 
 void saveSettings() {

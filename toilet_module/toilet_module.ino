@@ -84,6 +84,15 @@ bool fanRunning   = false;
 unsigned long lastTick    = 0;
 bool          configReady = false;  // true после первого успешного запроса конфига
 
+// State machine вместо блокирующих while-циклов
+enum ToiletState { TS_IDLE, TS_LIGHT_ON, TS_COOLDOWN, TS_FORCED };
+ToiletState   toiletState       = TS_IDLE;
+unsigned long lightOnStartMs    = 0;  // когда свет включился
+unsigned long fanStateStartMs   = 0;  // когда стартовал cooldown или forced
+int           forcedVentMinutes = 0;
+bool          fromCooldown      = false;  // вошли в TS_LIGHT_ON прямо из cooldown
+unsigned long cooldownElapsedMs = 0;      // сколько cooldown уже отработало до прерывания
+
 // ============================================================
 //  RTC — DS1307
 // ============================================================
@@ -131,19 +140,13 @@ void fanOff() { digitalWrite(PIN_FAN, HIGH); fanRunning = false; Serial.println(
 // ============================================================
 #define FAN_FORCED_MAX_MIN  30
 
-void runFanForced(int minutes) {
+void startFanForced(int minutes) {
   minutes = constrain(minutes, 1, FAN_FORCED_MAX_MIN);
-  Serial.printf("[FAN] Forced ventilation: %d min\n", minutes);
+  Serial.printf("[FAN] Forced ventilation started: %d min\n", minutes);
   fanOn();
-  for (int m = 0; m < minutes; m++) {
-    for (int s = 0; s < 60; s++) {
-      delay(1000);
-      mqtt.loop();
-      feedWdt();
-    }
-  }
-  fanOff();
-  Serial.println("[FAN] Forced ventilation done");
+  forcedVentMinutes = minutes;
+  fanStateStartMs   = millis();
+  toiletState       = TS_FORCED;
 }
 
 // ============================================================
@@ -337,50 +340,95 @@ void loop() {
   // Дневное / ночное реле света
   digitalWrite(PIN_LIGHT, day ? LOW : HIGH);
 
-  // --- Свет горит ---
-  if (lightOn) {
-    if (!lightWasOn) Serial.printf("[LIGHT] ON  sensor=%d  silent=%d  day=%d\n", sensorVal, cfg.silentOn, day);
-    lightOnTimer++;
-    lightWasOn = true;
-    // >= с гардом !fanRunning — не пропустим тик и не спамим
-    if (lightOnTimer >= cfg.timeBeforeCool && !fanRunning) {
-      if (day && !cfg.silentOn) {
-        Serial.printf("[LIGHT] Timer reached %ds -> fan on\n", cfg.timeBeforeCool);
-        fanOn();
-      } else {
-        Serial.printf("[LIGHT] Timer reached %ds, fan skipped (day=%d silent=%d)\n", cfg.timeBeforeCool, day, cfg.silentOn);
-      }
-    }
-  }
+  // --- State machine вентилятора ---
+  switch (toiletState) {
 
-  // --- Свет погас ---
-  if (!lightOn && lightWasOn) {
-    bool realVisit   = (lightOnTimer >= cfg.timeBeforeCool);
-    bool silentWasOn = cfg.silentOn;
-    Serial.printf("[LIGHT] OFF  timer=%ds  realVisit=%d  silent=%d  day=%d\n", lightOnTimer, realVisit, silentWasOn, day);
-    if (realVisit && day) {
-      // Тишина при кулдауне не учитывается — только день/ночь
-      fanOn();  // включаем явно (мог не гореть если был silent во время визита)
-      Serial.printf("[FAN] Cooldown: %d min\n", cfg.timeAfterCool);
-      int afterTimer = 0;
-      while (afterTimer < cfg.timeAfterCool * 60) {
-        delay(1000);
-        afterTimer++;
-        mqtt.loop();
-        feedWdt();
+    case TS_IDLE:
+      if (lightOn) {
+        Serial.printf("[LIGHT] ON  sensor=%d  silent=%d  day=%d\n", sensorVal, cfg.silentOn, day);
+        lightOnStartMs = millis();
+        lightOnTimer   = 0;
+        lightWasOn     = true;
+        toiletState    = TS_LIGHT_ON;
       }
-      Serial.println("[FAN] Cooldown done");
-    }
-    if (realVisit) {
-      cfg.silentOn = false;
-      if (silentWasOn) {
-        Serial.println("[SILENT] Reset after visit, notifying center");
-        mqtt.publish(silence_ended, "{\"silentMode\":false}");
+      break;
+
+    case TS_LIGHT_ON:
+      lightOnTimer = (int)((millis() - lightOnStartMs) / 1000);
+      if (lightOn) {
+        if (lightOnTimer >= cfg.timeBeforeCool && !fanRunning) {
+          if (day && !cfg.silentOn) {
+            Serial.printf("[LIGHT] Timer reached %ds -> fan on\n", cfg.timeBeforeCool);
+            fanOn();
+          } else {
+            Serial.printf("[LIGHT] Timer reached %ds, fan skipped (day=%d silent=%d)\n", cfg.timeBeforeCool, day, cfg.silentOn);
+          }
+        }
+      } else {
+        // Свет погас
+        bool realVisit   = (lightOnTimer >= cfg.timeBeforeCool);
+        bool silentWasOn = cfg.silentOn;
+        Serial.printf("[LIGHT] OFF  timer=%ds  realVisit=%d  silent=%d  day=%d\n", lightOnTimer, realVisit, silentWasOn, day);
+        if (realVisit) {
+          cfg.silentOn = false;
+          if (silentWasOn) {
+            Serial.println("[SILENT] Reset after visit, notifying center");
+            mqtt.publish(silence_ended, "{\"silentMode\":false}");
+          }
+        }
+        if (realVisit && day) {
+          fanOn();  // включаем явно (мог не гореть если silent во время визита)
+          Serial.printf("[FAN] Cooldown: %d min\n", cfg.timeAfterCool);
+          fanStateStartMs   = millis();  // реальный визит — cooldown с нуля
+          fromCooldown      = false;
+          cooldownElapsedMs = 0;
+          toiletState       = TS_COOLDOWN;
+        } else if (fromCooldown) {
+          // Быстрый проход прервал cooldown — возобновляем с того места где остановились
+          Serial.println("[FAN] Quick pass, resuming cooldown");
+          fanStateStartMs   = millis() - cooldownElapsedMs;
+          fromCooldown      = false;
+          cooldownElapsedMs = 0;
+          toiletState       = TS_COOLDOWN;
+        } else {
+          fanOff();
+          toiletState = TS_IDLE;
+        }
+        lightOnTimer = 0;
+        lightWasOn   = false;
       }
-    }
-    fanOff();
-    lightOnTimer = 0;
-    lightWasOn   = false;
+      break;
+
+    case TS_COOLDOWN:
+      if (millis() - fanStateStartMs >= (unsigned long)cfg.timeAfterCool * 60000UL) {
+        Serial.println("[FAN] Cooldown done");
+        fanOff();
+        toiletState = TS_IDLE;
+      } else if (lightOn) {
+        Serial.printf("[LIGHT] ON (re-entry during cooldown)  sensor=%d\n", sensorVal);
+        fromCooldown      = true;
+        cooldownElapsedMs = millis() - fanStateStartMs;  // сколько cooldown уже отработал
+        lightOnStartMs    = millis();
+        lightOnTimer      = 0;
+        lightWasOn        = true;
+        toiletState       = TS_LIGHT_ON;
+      }
+      break;
+
+    case TS_FORCED:
+      if (millis() - fanStateStartMs >= (unsigned long)forcedVentMinutes * 60000UL) {
+        Serial.println("[FAN] Forced ventilation done");
+        fanOff();
+        toiletState = TS_IDLE;
+      } else if (lightOn) {
+        // Свет включился во время forced — переходим на обычное отслеживание
+        Serial.printf("[LIGHT] ON (during forced vent)  sensor=%d\n", sensorVal);
+        lightOnStartMs = millis();
+        lightOnTimer   = 0;
+        lightWasOn     = true;
+        toiletState    = TS_LIGHT_ON;
+      }
+      break;
   }
 
   static int statusTickCounter = 0;
@@ -417,7 +465,7 @@ void applyConfig(const String& payload) {
     cfg.timeBeforeCool, cfg.timeAfterCool, cfg.silentOn);
 
   byte forced = doc["forcedVentilationTimeout"] | 0;
-  if (forced > 0) runFanForced(forced);
+  if (forced > 0) startFanForced(forced);
 }
 
 // ============================================================
