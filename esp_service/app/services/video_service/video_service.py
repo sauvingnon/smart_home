@@ -44,14 +44,17 @@ class VideoService:
         asyncio.create_task(self._cleanup_loop())
 
     async def _cleanup_loop(self):
-        """Раз в сутки удаляет видео старше 7 дней"""
+        """Раз в сутки удаляет видео старше 7 дней (запускается в 00:00 по Ижевску)"""
         while True:
+            now = _get_izhevsk_time()
+            next_midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            wait_seconds = (next_midnight - now).total_seconds()
+            logger.info(f"🕐 Очистка видео запланирована через {wait_seconds / 3600:.1f}ч ({next_midnight.strftime('%Y-%m-%d %H:%M')} UTC+4)")
+            await asyncio.sleep(wait_seconds)
             try:
                 await self._cleanup_old_videos()
             except Exception as e:
                 logger.error(f"❌ Ошибка в cleanup loop: {e}")
-            
-            await asyncio.sleep(24 * 60 * 60)  # 24 часа
 
     async def _cleanup_old_videos(self):
         """Удаляет видео старше 7 дней из S3"""
