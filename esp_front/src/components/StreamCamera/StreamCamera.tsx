@@ -6,17 +6,31 @@ import { WifiOff, Power, Video, Radio } from 'lucide-react';
 interface CameraStreamProps {
   cameraId?: string;
   cameraStatus?: string;
+  onFrameStall?: () => void;
 }
 
 export const CameraStream: React.FC<CameraStreamProps> = ({
   cameraId = 'cam1',
   cameraStatus = 'offline',
+  onFrameStall,
 }) => {
   const {
     frameBlob,
     connectionState,
+    frameStalled,
     error,
   } = useCamera(cameraId);
+
+  // Вызываем onFrameStall один раз при начале зависания кадров во время стрима
+  const stalledFiredRef = useRef(false);
+  useEffect(() => {
+    if (frameStalled && cameraStatus === 'streaming' && !stalledFiredRef.current) {
+      stalledFiredRef.current = true;
+      onFrameStall?.();
+    } else if (!frameStalled) {
+      stalledFiredRef.current = false;
+    }
+  }, [frameStalled, cameraStatus, onFrameStall]);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const [hasFrame, setHasFrame] = useState(false);

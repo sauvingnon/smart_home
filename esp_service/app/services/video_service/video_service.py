@@ -588,7 +588,7 @@ class VideoService:
         status = self.cameras.get(camera_id)
         if not status:
             return None
-        status.viewers = len(self.viewers)
+        status.viewers = len(self.viewers.get(camera_id, set()))
         return status
     
     def verify_camera(self, camera_id: str, access_key: str) -> bool:

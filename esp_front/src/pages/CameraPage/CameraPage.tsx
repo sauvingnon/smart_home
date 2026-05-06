@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback  } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import {
   Camera as CameraIcon,
@@ -134,34 +134,31 @@ export const CameraPage: React.FC = () => {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
 
+  const fetchStatus = useCallback(async () => {
+    try {
+      if (!cameraId) return
+      const status = await apiClient.getCameraStatus(cameraId)
+      setCameraStatus(status)
+
+      if (status?.metrics?.quality_mode !== undefined) {
+        setSelectedResolution(qualityToResolution(status.metrics.quality_mode))
+      }
+      if (status?.metrics?.fan_mode !== undefined) {
+        setFanMode(status.metrics.fan_mode as 0 | 1 | 2)
+      }
+    } catch (e) {
+      console.error('Failed to fetch camera status:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [cameraId])
+
   // Загружаем статус при монтировании
   useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        if (!cameraId) return
-        const status = await apiClient.getCameraStatus(cameraId)
-        setCameraStatus(status)
-        
-        // 🔧 Разрешение берем из metrics.quality_mode
-        if (status?.metrics?.quality_mode !== undefined) {
-          setSelectedResolution(qualityToResolution(status.metrics.quality_mode))
-        }
-
-        if (status?.metrics?.fan_mode !== undefined) {
-          setFanMode(status.metrics.fan_mode as 0 | 1 | 2)
-        }
-        
-      } catch (e) {
-        console.error('Failed to fetch camera status:', e)
-      } finally {
-        setLoading(false)
-      }
-    }
-
     fetchStatus()
     const interval = setInterval(fetchStatus, STATUS_UPDATE_INTERVAL)
     return () => clearInterval(interval)
-  }, [cameraId])
+  }, [fetchStatus])
 
   const handleFanMode = async (mode: 0 | 1 | 2) => {
     if (isChangingFan || !cameraId) return
@@ -340,9 +337,10 @@ export const CameraPage: React.FC = () => {
           {/* Видеопоток */}
           <motion.div variants={itemVar} className="camera-stream-wrapper glass-card" ref={videoContainerRef}>
             <div className="video-tap-area" onClick={handleVideoTap}>
-              <CameraStream 
+              <CameraStream
                 cameraId={cameraId}
                 cameraStatus={cameraStatus?.mode}
+                onFrameStall={fetchStatus}
               />
             </div>
 
@@ -534,9 +532,10 @@ export const CameraPage: React.FC = () => {
           </div>
           
           <div className="simulated-fullscreen-video">
-            <CameraStream 
+            <CameraStream
               cameraId={cameraId}
               cameraStatus={cameraStatus?.mode}
+              onFrameStall={fetchStatus}
             />
           </div>
           

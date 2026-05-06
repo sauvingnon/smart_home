@@ -172,9 +172,12 @@ class CacheManager:
                 weather.model_dump_json()
             )
             
-            # Обновляем счетчик вызовов за день
+            # Обновляем счетчик вызовов за день (TTL 2 дня — старые ключи не нужны)
             today = datetime.now().strftime("%Y-%m-%d")
-            await self.redis_client.incr(f"api_calls:{today}")
+            pipe = self.redis_client.pipeline()
+            pipe.incr(f"api_calls:{today}")
+            pipe.expire(f"api_calls:{today}", 60 * 60 * 24 * 2)
+            await pipe.execute()
         except Exception as e:
             logger.exception(f"Ошибка сохранения в кэш: {e}")
     

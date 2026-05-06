@@ -43,6 +43,13 @@ limits_config:
   max_streams_per_user: 500
   max_global_streams_per_user: 1000
 
+compactor:
+  working_directory: /loki/compactor
+  shared_store: filesystem
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+
 querier:
   max_concurrent: 2
 
@@ -54,7 +61,3 @@ ingester:
       replication_factor: 1
   chunk_idle_period: 30m
   chunk_retain_period: 5m
-
-table_manager:
-  retention_deletes_enabled: true
-  retention_period: 72h

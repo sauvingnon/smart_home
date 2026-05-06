@@ -330,15 +330,15 @@ void loop() {
       dusk, cfg.nightHour, cfg.nightMinute, day);
   }
 
+  // Дневное / ночное реле света
+  digitalWrite(PIN_LIGHT, day ? LOW : HIGH);
+
   // Принт при смене день/ночь
   static bool prevDay = false;
   if (day != prevDay) {
     prevDay = day;
     Serial.printf("[DAY] Changed -> %s  time=%02d:%02d\n", day ? "DAY" : "NIGHT", currentHour, currentMinute);
   }
-
-  // Дневное / ночное реле света
-  digitalWrite(PIN_LIGHT, day ? LOW : HIGH);
 
   // --- State machine вентилятора ---
   switch (toiletState) {
