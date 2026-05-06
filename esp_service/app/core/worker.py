@@ -483,12 +483,12 @@ class BackgroundWorker:
                 await self.send_to_board_weather_from_cache()
 
                 cached = await self.cache.get_cached_weather()
-
-                await self.storage.save_weather_reading(
-                    temp=cached.current_temp,
-                    hum=cached.humidity,
-                    timestamp=_get_izhevsk_time()
-                )
+                if cached:
+                    await self.storage.save_weather_reading(
+                        temp=cached.current_temp,
+                        hum=cached.humidity,
+                        timestamp=_get_izhevsk_time()
+                    )
             
             except Exception as e:
                 logger.exception(f"❌ Ошибка в цикле обновления погоды: {e}")

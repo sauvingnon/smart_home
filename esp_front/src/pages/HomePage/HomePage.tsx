@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, DoorOpen, HardDrive, RefreshCw
+  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
@@ -281,10 +281,10 @@ export default function HomePage() {
                 {/* Датчик двери */}
                 <div className="stat-item">
                   <div className={`stat-icon ${getStatusIconClass(data?.sensor_status || 'offline')}`}
-                      style={getStatusIconClass(data?.sensor_status || 'offline') !== 'active' 
-                        ? { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' } 
+                      style={getStatusIconClass(data?.sensor_status || 'offline') !== 'active'
+                        ? { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }
                         : {}}>
-                    <DoorOpen size={18} />
+                    <Eye size={18} />
                     {getStatusIconClass(data?.sensor_status || 'offline') !== 'active' && (
                       <span className="stat-icon-pulse" />
                     )}
@@ -300,10 +300,10 @@ export default function HomePage() {
                 {/* Уборная */}
                 <div className="stat-item">
                   <div className={`stat-icon ${getStatusIconClass(data?.toilet_status || 'offline')}`}
-                      style={getStatusIconClass(data?.toilet_status || 'offline') === 'active' 
-                        ? { background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80' } 
+                      style={getStatusIconClass(data?.toilet_status || 'offline') === 'active'
+                        ? { background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80' }
                         : { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
-                    <DoorOpen size={18} />
+                    <Bath size={18} />
                     {getStatusIconClass(data?.toilet_status || 'offline') !== 'active' && (
                       <span className="stat-icon-pulse" />
                     )}
@@ -402,7 +402,11 @@ export default function HomePage() {
             </motion.div>
 
             <motion.div variants={itemVar} className="system-card">
-              <div className="card-icon icon-indigo">
+              <div className="card-icon" style={
+                (weather?.wind_speed ?? 0) >= 12 ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' } :
+                (weather?.wind_speed ?? 0) >= 8  ? { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' } :
+                { background: 'rgba(99,102,241,0.15)', color: '#818cf8' }
+              }>
                 <Wind size={20} />
               </div>
               <div>
@@ -410,7 +414,15 @@ export default function HomePage() {
                 <div className="card-label">Метры/Сек</div>
               </div>
               <div className="progress-bar">
-                <div className="progress-fill fill-indigo" style={{ width: '40%' }} />
+                <div
+                  className="progress-fill"
+                  style={{
+                    width: `${Math.min((weather?.wind_speed ?? 0) / 20 * 100, 100)}%`,
+                    background: (weather?.wind_speed ?? 0) >= 12 ? '#f87171' :
+                                (weather?.wind_speed ?? 0) >= 8  ? '#fbbf24' :
+                                '#818cf8',
+                  }}
+                />
               </div>
             </motion.div>
           </div>
