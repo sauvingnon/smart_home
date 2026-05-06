@@ -86,9 +86,9 @@ bool cameraOn() {
         Serial.println("Aborting upload for camera init");
         uploadCancelled = true;
         videoManager.requestAbort();
-        unsigned long deadline = millis() + 10000;
+        unsigned long deadline = millis() + 2000;  // stop() closes socket immediately — 2s is generous
         while (videoManager.isUploading() && millis() < deadline)
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(20));
         vTaskDelay(pdMS_TO_TICKS(300));
     }
 

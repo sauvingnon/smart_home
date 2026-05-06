@@ -245,6 +245,7 @@ void VideoManager::removeFirstLine() {
 
 void VideoManager::requestAbort() {
     _abortRequested = true;
+    _sslClient.stop();  // закрываем сокет немедленно — POST() вернёт ошибку за ~50ms
 }
 
 bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
@@ -297,34 +298,34 @@ bool VideoManager::sendVideo(const String& filename, unsigned long startTime,
         const int MAX_RETRIES = 3;
         bool chunkSuccess = false;
         
-        for (int retry = 0; retry < MAX_RETRIES && !chunkSuccess; retry++) {
+        for (int retry = 0; retry < MAX_RETRIES && !chunkSuccess && !_abortRequested; retry++) {
             if (retry > 0) {
                 Serial.printf("🔄 Retry %d/%d for chunk %d\n", retry + 1, MAX_RETRIES, chunk);
-                delay(1000 * retry);  // Экспоненциальная задержка
+                for (int i = 0; i < 1000 * retry && !_abortRequested; i++) delay(1);
             }
-            
+
+            if (_abortRequested) break;
             Serial.printf("📦 Chunk %d/%d (%zu bytes)\n", chunk, totalChunks, chunkSize);
-            
+
             String url = _serverUrl + "/api/esp_service/video/upload_chunk"
-                        + "?camera_id=" + _cameraId 
+                        + "?camera_id=" + _cameraId
                         + "&start_time=" + String(startTime)
                         + "&duration=" + String(duration)
                         + "&chunk=" + String(chunk)
                         + "&total_chunks=" + String(totalChunks)
                         + "&filename=" + encodedFilename;
-            
+
             int code = -1;
-            
-            // 🔥🔥🔥 ВОТ ТУТ ФИКС: client на стеке, без new/delete 🔥🔥🔥
+
             if (useSSL) {
-                WiFiClientSecure client;
-                client.setInsecure();
+                _sslClient.stop();   // сброс состояния перед новым соединением
+                _sslClient.setInsecure();
                 HTTPClient http;
-                http.begin(client, url);
+                http.begin(_sslClient, url);
                 http.setTimeout(30000);
                 http.addHeader("X-Access-Key", _accessKey);
                 http.addHeader("Content-Type", "application/octet-stream");
-                
+
                 file.seek(chunkStart);
                 size_t bytesRead = file.read(buffer, chunkSize);
                 if (bytesRead > 0) {
