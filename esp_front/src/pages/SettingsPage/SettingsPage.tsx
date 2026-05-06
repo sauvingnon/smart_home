@@ -550,7 +550,7 @@ export default function SettingsPage() {
                       initial={{ opacity: 0, y: -5 }}
                       animate={{ opacity: 1, y: 0 }}
                     >
-                      Теплица: {syncResult.greenhouse === 'ok' ? '✓' : syncResult.greenhouse} &nbsp;·&nbsp; Уборная: {syncResult.toilet === 'ok' ? '✓' : syncResult.toilet}
+                      Центральная плата: {syncResult.greenhouse === 'ok' ? '✓' : syncResult.greenhouse} &nbsp;·&nbsp; Уборная: {syncResult.toilet === 'ok' ? '✓' : syncResult.toilet}
                     </motion.p>
                   )}
                 </div>
