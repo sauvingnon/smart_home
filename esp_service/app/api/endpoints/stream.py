@@ -14,7 +14,7 @@ class ResolutionRequest(BaseModel):
     resolution: str
 
 class FanControlRequest(BaseModel):
-    enable: bool
+    mode: int  # 0=off, 1=on-with-camera, 2=auto(>60°C)
 
 @router.websocket("/ws/camera")
 async def websocket_camera(websocket: WebSocket):
@@ -49,14 +49,14 @@ async def set_camera_fan(
     request: FanControlRequest,
     user_id: int = Depends(get_current_user_id_dep)
 ):
-    """Включить/выключить вентилятор на камере."""
+    """Установить режим вентилятора (0=выкл, 1=вкл с камерой, 2=авто по температуре)."""
     worker = BackgroundWorker.get_instance()
-    success = await worker.video_service.set_fan(camera_id, request.enable)
-    
+    success = await worker.video_service.set_fan_mode(camera_id, request.mode)
+
     if not success:
         raise HTTPException(status_code=400, detail="Failed to control fan")
-    
-    return {"status": "ok", "camera_id": camera_id, "fan": "on" if request.enable else "off"}
+
+    return {"status": "ok", "camera_id": camera_id, "fan_mode": request.mode}
 
 @router.get("/camera/{camera_id}/status")
 async def get_camera_status(

@@ -45,7 +45,7 @@ interface CameraStatus {
     temperature: number
     is_streaming: boolean
     is_recording: boolean
-    is_fan_active: boolean
+    fan_mode: number  // 0=off, 1=on-with-camera, 2=auto(>60°C)
     last_metrics_time: string
   }
 }
@@ -66,8 +66,7 @@ export const CameraPage: React.FC = () => {
   // 👇 Добавляем локальный стейт для разрешения
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('VGA')
 
-   // 👇 Добавляем локальный стейт для вентилятора (синхронизируется с бэком)
-  const [isFanActive, setIsFanActive] = useState(false)
+  const [fanMode, setFanMode] = useState<0 | 1 | 2>(1)
   const [isChangingFan, setIsChangingFan] = useState(false)
 
   // Состояние для имитации fullscreen на iOS
@@ -148,8 +147,8 @@ export const CameraPage: React.FC = () => {
           setSelectedResolution(qualityToResolution(status.metrics.quality_mode))
         }
 
-        if (status?.metrics?.is_fan_active !== undefined) {
-          setIsFanActive(status.metrics.is_fan_active)
+        if (status?.metrics?.fan_mode !== undefined) {
+          setFanMode(status.metrics.fan_mode as 0 | 1 | 2)
         }
         
       } catch (e) {
@@ -164,22 +163,18 @@ export const CameraPage: React.FC = () => {
     return () => clearInterval(interval)
   }, [cameraId])
 
-  const handleFanToggle = async (newState: boolean) => {
+  const handleFanMode = async (mode: 0 | 1 | 2) => {
     if (isChangingFan || !cameraId) return
-    
     setIsChangingFan(true)
-    
     try {
-      await apiClient.setCameraFan(cameraId, newState)
-      setIsFanActive(newState)
-      
-      // Запросить свежий статус
+      await apiClient.setCameraFan(cameraId, mode)
+      setFanMode(mode)
       const status = await apiClient.getCameraStatus(cameraId)
-      if (status?.metrics?.is_fan_active !== undefined) {
-        setIsFanActive(status.metrics.is_fan_active)
+      if (status?.metrics?.fan_mode !== undefined) {
+        setFanMode(status.metrics.fan_mode as 0 | 1 | 2)
       }
     } catch (e) {
-      console.error('Failed to toggle fan:', e)
+      console.error('Failed to set fan mode:', e)
     } finally {
       setIsChangingFan(false)
     }
@@ -406,47 +401,33 @@ export const CameraPage: React.FC = () => {
               </div>
 
               <div className="resolution-grid">
-                <motion.button
-                  className={`resolution-card ${isFanActive ? 'active' : ''}`}
-                  onClick={() => handleFanToggle(true)}
-                  disabled={isChangingFan}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  {isFanActive && (
-                    <motion.div 
-                      className="resolution-check"
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ type: "spring", stiffness: 400, damping: 17 }}
-                    >
-                      <Check size={16} />
-                    </motion.div>
-                  )}
-                  <span className="resolution-label">Включить</span>
-                  <span className="resolution-description">Активное охлаждение</span>
-                </motion.button>
-
-                <motion.button
-                  className={`resolution-card ${!isFanActive ? 'active' : ''}`}
-                  onClick={() => handleFanToggle(false)}
-                  disabled={isChangingFan}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  {!isFanActive && (
-                    <motion.div 
-                      className="resolution-check"
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ type: "spring", stiffness: 400, damping: 17 }}
-                    >
-                      <Check size={16} />
-                    </motion.div>
-                  )}
-                  <span className="resolution-label">Выключить</span>
-                  <span className="resolution-description">Тишина всегда</span>
-                </motion.button>
+                {([
+                  { mode: 1, label: 'С камерой', description: 'Активное охлаждение' },
+                  { mode: 2, label: 'Авто', description: 'Вкл при >60°C' },
+                  { mode: 0, label: 'Выключить', description: 'Тишина всегда' },
+                ] as const).map(({ mode, label, description }) => (
+                  <motion.button
+                    key={mode}
+                    className={`resolution-card ${fanMode === mode ? 'active' : ''}`}
+                    onClick={() => handleFanMode(mode)}
+                    disabled={isChangingFan}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    {fanMode === mode && (
+                      <motion.div
+                        className="resolution-check"
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                      >
+                        <Check size={16} />
+                      </motion.div>
+                    )}
+                    <span className="resolution-label">{label}</span>
+                    <span className="resolution-description">{description}</span>
+                  </motion.button>
+                ))}
               </div>
 
               {isChangingFan && (

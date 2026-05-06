@@ -362,7 +362,7 @@ class VideoService:
                     elif key == 'state':
                         state.mode = _STATE_MAP.get(val, CameraMode.CONNECTED)
                     elif key == 'fan':
-                        metrics.is_fan_active = bool(int(val))
+                        metrics.fan_mode = int(val)
 
                 metrics.last_metrics_time = _get_izhevsk_time()
 
@@ -554,14 +554,13 @@ class VideoService:
         await self.send_command(camera_id, "queue:status")
         return None
 
-    async def set_fan(self, camera_id: str, enable: bool) -> bool:
-        """Включить/выключить вентилятор на камере"""
-        command = f"fan:{'on' if enable else 'off'}"
-        success = await self.send_command(camera_id, command)
-        
+    async def set_fan_mode(self, camera_id: str, mode: int) -> bool:
+        """Установить режим вентилятора: 0=выкл, 1=вкл с камерой, 2=авто по температуре"""
+        if mode not in (0, 1, 2):
+            return False
+        success = await self.send_command(camera_id, f"fan:{mode}")
         if success:
-            logger.info(f"🌀 [{camera_id}] Отправлена команда: {'Вкл' if enable else 'Выкл'} вентилятора")
-        
+            logger.info(f"🌀 [{camera_id}] Режим вентилятора: {mode}")
         return success
 
     async def _schedule_stop_recording(self, camera_id: str, delay: int = 15):

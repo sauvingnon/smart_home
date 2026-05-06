@@ -73,10 +73,10 @@ class ApiClient {
     return response.blob();
   }
 
-  async setCameraFan(cameraId: string, enable: boolean): Promise<any> {
+  async setCameraFan(cameraId: string, mode: 0 | 1 | 2): Promise<any> {
     return this.fetch(`/esp_service/camera/${cameraId}/fan`, {
       method: 'POST',
-      body: JSON.stringify({ enable }),
+      body: JSON.stringify({ mode }),
     });
   }
 

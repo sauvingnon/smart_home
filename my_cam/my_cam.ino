@@ -34,7 +34,7 @@ Preferences preferences;
 VideoManager videoManager(CAMERA_ID, ACCESS_KEY, HTTP_HOST);
 WebSocketsClient webSocket;
 
-bool fanState = true;
+int fanMode = 1;  // 0=off, 1=on-with-camera, 2=auto(>60°C)
 volatile bool isConnected     = false;
 volatile bool isAuthenticated = false;
 volatile bool uploadCancelled = false;
@@ -61,7 +61,7 @@ TaskHandle_t uploadTaskHandle;
 // ──────────────────────────────────────────────────────────────
 void loadSettings();
 void saveSettings();
-void toggleFan(bool active);
+void applyFanMode();
 bool cameraOn();
 void cameraOff();
 bool setFrameSize(const String& size, bool save = true);
@@ -187,8 +187,13 @@ void cameraOff() {
 // ──────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────
-void toggleFan(bool active) {
-    digitalWrite(FAN_PIN, (fanState && active) ? HIGH : LOW);
+void applyFanMode() {
+    switch (fanMode) {
+        case 0: digitalWrite(FAN_PIN, LOW); break;
+        case 1: digitalWrite(FAN_PIN, systemState != STATE_IDLE ? HIGH : LOW); break;
+        case 2: digitalWrite(FAN_PIN, getTemperature() > 60.0f ? HIGH : LOW); break;
+        default: break;
+    }
 }
 
 bool setFrameSize(const String& size, bool save) {
@@ -228,7 +233,7 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
             }
             systemState     = STATE_IDLE;
             uploadCancelled = true;
-            toggleFan(false);
+            digitalWrite(FAN_PIN, LOW);  // при дисконнекте всегда выключаем
             cameraOff();
             Serial.println("WS Disconnected -> IDLE");
             break;
@@ -267,14 +272,14 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
                             return;
                         }
                         systemState = STATE_STREAMING;
-                        toggleFan(true);
+                        applyFanMode();
                         Serial.println("STREAMING");
                     }
                     webSocket.sendTXT("stream_state:ok");
                 } else if (val == "off") {
                     if (systemState == STATE_STREAMING) {
                         systemState = STATE_IDLE;
-                        toggleFan(false);
+                        applyFanMode();
                         cameraOff();
                         xTaskNotifyGive(uploadTaskHandle);
                         Serial.println("IDLE");
@@ -285,15 +290,10 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
                 }
             }
             else if (cmd.startsWith("fan:")) {
-                String fc = cmd.substring(4);
-                if (fc == "on") {
-                    fanState = true;
-                    if (systemState != STATE_IDLE) toggleFan(true);
-                    saveSettings();
-                    webSocket.sendTXT("fan:ok");
-                } else if (fc == "off") {
-                    fanState = false;
-                    toggleFan(false);
+                int mode = cmd.substring(4).toInt();
+                if (mode >= 0 && mode <= 2) {
+                    fanMode = mode;
+                    applyFanMode();
                     saveSettings();
                     webSocket.sendTXT("fan:ok");
                 }
@@ -338,7 +338,7 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
                         return;
                     }
 
-                    toggleFan(true);
+                    applyFanMode();
                     frameCount = 0;
 
                     if (videoManager.startRecord(startTime)) {
@@ -347,7 +347,7 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
                         Serial.println("RECORDING");
                     } else {
                         cameraOff();
-                        toggleFan(false);
+                        applyFanMode();
                         currentFrameSize   = preRecordFrameSize;
                         currentQualityMode = preRecordQualityMode;
                         webSocket.sendTXT("record:error");
@@ -359,7 +359,7 @@ void webSocketEvent(const WStype_t& type, uint8_t* payload, const size_t& length
                         return;
                     }
                     systemState        = STATE_IDLE;
-                    toggleFan(false);
+                    applyFanMode();
                     currentFrameSize   = preRecordFrameSize;
                     currentQualityMode = preRecordQualityMode;
                     if (videoManager.stopRecord()) {
@@ -414,7 +414,7 @@ void wsTask(void* pvParameters) {
                         // SD write failed — stop recording, power down camera, go IDLE
                         esp_camera_fb_return(fb);
                         systemState        = STATE_IDLE;
-                        toggleFan(false);
+                        applyFanMode();
                         currentFrameSize   = preRecordFrameSize;
                         currentQualityMode = preRecordQualityMode;
                         videoManager.stopRecord();
@@ -439,10 +439,11 @@ void wsTask(void* pvParameters) {
         // ── 5-second telemetry + timeout check ──
         if (millis() - lastFpsLog >= 5000) {
             esp_task_wdt_reset();  // сброс WDT: раз в 5с, задолго до лимита 60с
+            applyFanMode();        // режим 2: ре-чек температуры каждые 5с
             videoManager.checkRecordTimeout();
             if (videoManager.timeoutOccurred() && systemState == STATE_RECORDING) {
                 systemState        = STATE_IDLE;
-                toggleFan(false);
+                applyFanMode();
                 currentFrameSize   = preRecordFrameSize;
                 currentQualityMode = preRecordQualityMode;
                 cameraOff();
@@ -457,7 +458,7 @@ void wsTask(void* pvParameters) {
                            + ";quality_mode:" + String(currentQualityMode)
                            + ";tmp:"          + String(getTemperature(), 1)
                            + ";state:"        + String((int)systemState)
-                           + ";fan:"          + String(fanState ? 1 : 0)
+                           + ";fan:"          + String(fanMode)
                            + ";heap:"         + String(ESP.getFreeHeap());
                 webSocket.sendTXT(msg);
                 Serial.printf("Report: %s\n", msg.c_str());
@@ -574,7 +575,7 @@ void loop() {
 // ──────────────────────────────────────────────────────────────
 void loadSettings() {
     preferences.begin("camera", false);
-    fanState           = preferences.getBool("fanState",   true);
+    fanMode            = preferences.getInt("fanMode",     1);
     currentQualityMode = preferences.getInt("qualityMode", 1);
     preferences.end();
 
@@ -589,7 +590,7 @@ void loadSettings() {
 
 void saveSettings() {
     preferences.begin("camera", false);
-    preferences.putBool("fanState",   fanState);
+    preferences.putInt("fanMode",     fanMode);
     preferences.putInt("qualityMode", currentQualityMode);
     preferences.end();
 }

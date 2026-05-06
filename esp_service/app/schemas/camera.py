@@ -15,7 +15,7 @@ class CameraMetrics(BaseModel):
     fps: int = 0
     quality_mode: int = 1   # 0=QVGA, 1=VGA, 2=HD
     temperature: float = 0.0
-    is_fan_active: bool = False
+    fan_mode: int = 1  # 0=off, 1=on-with-camera, 2=auto(>60°C)
     last_metrics_time: datetime = Field(default_factory=datetime.now)
 
 class CameraState(BaseModel):
