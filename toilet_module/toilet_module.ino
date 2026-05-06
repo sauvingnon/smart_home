@@ -68,12 +68,13 @@ Config cfg;
 // ============================================================
 //  Рабочее состояние
 // ============================================================
-RTC_DS1307        rtc;
+RTC_DS3231        rtc;
 WiFiClient        wifiClient;
 SimpleMQTTManager mqtt(&wifiClient, MQTT_SERVER, MQTT_PORT, MQTT_USER, MQTT_PASS);
 
 byte currentHour   = 0;
 byte currentMinute = 0;
+bool timeReady     = false;  // true когда RTC имеет валидное время
 
 int  sensorVal    = 0;
 bool lightWasOn   = false;
@@ -100,6 +101,7 @@ void setTime(byte hour, byte minute) {
 }
 
 bool isDay() {
+  if (!timeReady) return true;  // пока время не синхронизировано — считаем день (свет выключен)
   int cur  = currentHour * 60 + currentMinute;
   int dawn = cfg.dayHour   * 60 + cfg.dayMinute;
   int dusk = cfg.nightHour * 60 + cfg.nightMinute;
@@ -246,6 +248,21 @@ void setup() {
   Wire.begin();
 
   rtc.begin();
+
+  if (rtc.lostPower()) {
+    Serial.println("[RTC] Lost power — waiting for time sync");
+  } else {
+    DateTime now = rtc.now();
+    if (now.year() >= 2020) {
+      timeReady = true;
+      currentHour   = now.hour();
+      currentMinute = now.minute();
+      Serial.printf("[RTC] Valid: %04d-%02d-%02d %02d:%02d:%02d\n",
+        now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
+    } else {
+      Serial.printf("[RTC] Invalid year (%d) — battery dead? Waiting for sync\n", now.year());
+    }
+  }
 
   setupWiFi();
 
@@ -433,6 +450,7 @@ void setupMQTTHandlers() {
     rtc.adjust(DateTime(year, month, day, hour, minute, second));
     currentHour   = hour;
     currentMinute = minute;
+    timeReady     = true;
     Serial.printf("[TIME] Set to %04d-%02d-%02d %02d:%02d:%02d\n", year, month, day, hour, minute, second);
 
     mqtt.publish("time/ready", "{}");  // публикуется как toilet_module/time/ready

@@ -54,9 +54,11 @@ async def update_settings_endpoint(
 
 
 @router.post("/sync_time")
-async def sync_time_endpoint():
+async def sync_time_endpoint(
+    user_id: int = Depends(get_current_user_id_dep)
+):
     """
-    Принудительная синхронизация времени для всех плат (без авторизации).
+    Принудительная синхронизация времени для всех плат.
     """
     worker = BackgroundWorker.get_instance()
     result = await worker.sync_time_now(timeout=30.0)

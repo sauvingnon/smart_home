@@ -699,6 +699,10 @@
   to { transform: rotate(360deg); }
 }
 
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 .loading-text {
   color: var(--text-secondary);
   margin: 0;

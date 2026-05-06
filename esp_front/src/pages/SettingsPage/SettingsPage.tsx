@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
-  Settings2, AlertCircle, Save, Calendar, Power, VolumeX
+  Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './SettingsPage.css'
@@ -228,6 +228,8 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('schedule')
   const [showSuccess, setShowSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<{ greenhouse: string; toilet: string } | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -255,6 +257,20 @@ export default function SettingsPage() {
    const update = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     if (settings) {
       setSettings(prev => prev ? { ...prev, [key]: value } : prev)
+    }
+  }
+
+  const syncTime = async () => {
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const result = await apiClient.fetch('/esp_service/sync_time', { method: 'POST' })
+      setSyncResult(result)
+      setTimeout(() => setSyncResult(null), 5000)
+    } catch (e) {
+      console.error('Sync time failed:', e)
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -511,6 +527,32 @@ export default function SettingsPage() {
                       />
                     </div>
                   </div>
+                </div>
+
+                <div className="section">
+                  <div className="section-header">
+                    <RefreshCw className="section-icon blue" />
+                    <h2>Синхронизация времени</h2>
+                  </div>
+                  <motion.button
+                    className={`silent-button ${syncing ? 'active' : ''}`}
+                    onClick={syncTime}
+                    disabled={syncing}
+                    whileHover={{ scale: syncing ? 1 : 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <RefreshCw size={18} className={syncing ? 'spin' : ''} />
+                    {syncing ? 'Синхронизация...' : 'Синхронизировать время'}
+                  </motion.button>
+                  {syncResult && (
+                    <motion.p
+                      className="mode-description"
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                    >
+                      Теплица: {syncResult.greenhouse === 'ok' ? '✓' : syncResult.greenhouse} &nbsp;·&nbsp; Уборная: {syncResult.toilet === 'ok' ? '✓' : syncResult.toilet}
+                    </motion.p>
+                  )}
                 </div>
 
               </div>
