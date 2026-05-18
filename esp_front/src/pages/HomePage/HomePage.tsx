@@ -25,6 +25,20 @@ type VisitStats = {
   days: Record<string, string[]>
 }[]
 
+type DayDowntime = {
+  intervals: { start: string; end: string | null }[]
+  downtime_seconds: number
+  uptime_pct: number
+}
+
+type DeviceDowntime = {
+  name: string
+  days: Record<string, DayDowntime>
+  total_downtime_seconds: number
+}
+
+type DowntimeStats = Record<string, DeviceDowntime>
+
 type DiskUsage = {
   total_gb: number;
   free_gb: number;
@@ -63,32 +77,22 @@ const getWeatherIcon = (condition: string, size = 24) => {
   return <Sun {...props} className="weather-icon" />;
 }
 
-// Маппинг статусов на русский
-const getBoardStatusText = (status: string): string => {
-  const map: Record<string, string> = {
-    'online': 'Онлайн',
-    'offline': 'Нет связи',
-    'dead': 'Не отвечает',
-    'never_connected': 'Не подключена'
-  };
-  return map[status.toLowerCase()] || status;
-};
-
-const getCameraStatusText = (status: string): string => {
-  const map: Record<string, string> = {
-    'connected': 'Подключена',
-    'streaming': 'Стрим',
-    'recording': 'Запись',
-    'offline': 'Нет связи',
-    'never_connected': 'Не подключена'
-  };
-  return map[status.toLowerCase()] || status;
-};
-
-// Определение цвета иконки для статуса
-const getStatusIconClass = (status: string): string => {
-  const activeStatuses = ['online', 'connected', 'streaming', 'recording'];
-  return activeStatuses.includes(status.toLowerCase()) ? 'active' : 'inactive';
+const getStatusStyle = (status: string) => {
+  switch (status.toLowerCase()) {
+    case 'online':
+    case 'connected':
+      return { text: 'Онлайн',       active: true,  color: '#4ade80', bg: 'rgba(34,197,94,0.15)' }
+    case 'streaming':
+      return { text: 'Стрим',        active: true,  color: '#818cf8', bg: 'rgba(99,102,241,0.15)' }
+    case 'recording':
+      return { text: 'Запись',       active: true,  color: '#fb923c', bg: 'rgba(251,146,60,0.15)' }
+    case 'offline':
+      return { text: 'Нет связи',    active: false, color: '#f87171', bg: 'rgba(239,68,68,0.15)' }
+    case 'dead':
+      return { text: 'Не отвечает',  active: false, color: '#f87171', bg: 'rgba(239,68,68,0.15)' }
+    default:
+      return { text: 'Не подключена', active: false, color: '#94a3b8', bg: 'rgba(148,163,184,0.1)' }
+  }
 };
 
 const containerVar = {
@@ -106,6 +110,7 @@ export default function HomePage() {
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
   const [visitStats, setVisitStats] = useState<VisitStats | null>(null)
+  const [downtimeStats, setDowntimeStats] = useState<DowntimeStats | null>(null)
 
   const fetchData = async () => {
     try {
@@ -131,44 +136,25 @@ export default function HomePage() {
     } catch {}
   }
 
-  // Функция проверки - все ли устройства онлайн
+  const fetchDowntime = async () => {
+    try {
+      const res = await apiClient.fetch('/esp_service/downtime')
+      setDowntimeStats(res)
+    } catch {}
+  }
+
   const isAllOnline = (): boolean => {
     if (!data) return false;
-    
-    const allStatuses = [
-      data.central_board_status,
-      data.camera_status,
-      data.sensor_status,
-      data.toilet_status
-    ];
-    
-    // Все должны быть online или connected/streaming/recording для камеры
-    return allStatuses.every(status => {
-      const activeStatuses = ['online', 'connected', 'streaming', 'recording'];
-      return activeStatuses.includes(status?.toLowerCase() || '');
-    });
+    return [data.central_board_status, data.camera_status, data.sensor_status, data.toilet_status]
+      .every(s => getStatusStyle(s || '').active);
   };
 
-  // Функция получения текста статуса
   const getGlobalStatusText = (): string => {
     if (loading) return 'Обновление...';
     if (!data) return 'Нет данных';
-    
-    const allOnline = isAllOnline();
-    
-    if (allOnline) return 'Всё работает';
-    
-    // Считаем сколько офлайн
-    const offlineCount = [
-      data.central_board_status,
-      data.camera_status,
-      data.sensor_status,
-      data.toilet_status
-    ].filter(status => {
-      const activeStatuses = ['online', 'connected', 'streaming', 'recording'];
-      return !activeStatuses.includes(status?.toLowerCase() || '');
-    }).length;
-    
+    if (isAllOnline()) return 'Всё работает';
+    const offlineCount = [data.central_board_status, data.camera_status, data.sensor_status, data.toilet_status]
+      .filter(s => !getStatusStyle(s || '').active).length;
     if (offlineCount === 4) return 'Нет связи';
     if (offlineCount >= 2) return 'Частично недоступно';
     return 'Есть проблемы';
@@ -178,6 +164,7 @@ export default function HomePage() {
     fetchData();
     fetchWeather();
     fetchLoginStats();
+    fetchDowntime();
   }, [])
 
   return (
@@ -256,81 +243,28 @@ export default function HomePage() {
               </div>
 
               <div className="stats-grid">
-                {/* Центральная плата */}
-                <div className="stat-item">
-                  <div className={`stat-icon ${getStatusIconClass(data?.central_board_status || 'offline')}`} 
-                      style={getStatusIconClass(data?.central_board_status || 'offline') === 'active' 
-                        ? { background: 'rgba(147, 51, 234, 0.2)', color: '#c084fc' } 
-                        : { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
-                    <Cpu size={18} />
-                    {getStatusIconClass(data?.central_board_status || 'offline') !== 'active' && (
-                      <span className="stat-icon-pulse" />
-                    )}
-                  </div>
-                  <div className="stat-info">
-                    <span className="stat-label">Центральная плата</span>
-                    <span className={`stat-value ${getStatusIconClass(data?.central_board_status || 'offline') !== 'active' ? 'offline-text' : ''}`}>
-                      {getBoardStatusText(data?.central_board_status || 'offline')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Камера */}
-                <div className="stat-item">
-                  <div className={`stat-icon ${getStatusIconClass(data?.camera_status || 'offline')}`}
-                      style={getStatusIconClass(data?.camera_status || 'offline') !== 'active' 
-                        ? { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' } 
-                        : {}}>
-                    <Camera size={18} />
-                    {getStatusIconClass(data?.camera_status || 'offline') !== 'active' && (
-                      <span className="stat-icon-pulse" />
-                    )}
-                  </div>
-                  <div className="stat-info">
-                    <span className="stat-label">Камера</span>
-                    <span className={`stat-value ${getStatusIconClass(data?.camera_status || 'offline') !== 'active' ? 'offline-text' : ''}`}>
-                      {getCameraStatusText(data?.camera_status || 'offline')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Датчик двери */}
-                <div className="stat-item">
-                  <div className={`stat-icon ${getStatusIconClass(data?.sensor_status || 'offline')}`}
-                      style={getStatusIconClass(data?.sensor_status || 'offline') !== 'active'
-                        ? { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }
-                        : {}}>
-                    <Eye size={18} />
-                    {getStatusIconClass(data?.sensor_status || 'offline') !== 'active' && (
-                      <span className="stat-icon-pulse" />
-                    )}
-                  </div>
-                  <div className="stat-info">
-                    <span className="stat-label">Датчик двери</span>
-                    <span className={`stat-value ${getStatusIconClass(data?.sensor_status || 'offline') !== 'active' ? 'offline-text' : ''}`}>
-                      {getBoardStatusText(data?.sensor_status || 'offline')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Уборная */}
-                <div className="stat-item">
-                  <div className={`stat-icon ${getStatusIconClass(data?.toilet_status || 'offline')}`}
-                      style={getStatusIconClass(data?.toilet_status || 'offline') === 'active'
-                        ? { background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80' }
-                        : { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
-                    <Bath size={18} />
-                    {getStatusIconClass(data?.toilet_status || 'offline') !== 'active' && (
-                      <span className="stat-icon-pulse" />
-                    )}
-                  </div>
-                  <div className="stat-info">
-                    <span className="stat-label">Уборная</span>
-                    <span className={`stat-value ${getStatusIconClass(data?.toilet_status || 'offline') !== 'active' ? 'offline-text' : ''}`}>
-                      {getBoardStatusText(data?.toilet_status || 'offline')}
-                    </span>
-                  </div>
-                </div>
+                {([
+                  { key: data?.central_board_status, label: 'Центральная плата', Icon: Cpu },
+                  { key: data?.camera_status,         label: 'Камера',            Icon: Camera },
+                  { key: data?.sensor_status,         label: 'Датчик двери',      Icon: Eye },
+                  { key: data?.toilet_status,         label: 'Уборная',           Icon: Bath },
+                ] as const).map(({ key, label, Icon }) => {
+                  const s = getStatusStyle(key || 'never_connected')
+                  return (
+                    <div className="stat-item" key={label}>
+                      <div className="stat-icon" style={{ background: s.bg, color: s.color }}>
+                        <Icon size={18} />
+                        {!s.active && <span className="stat-icon-pulse" />}
+                      </div>
+                      <div className="stat-info">
+                        <span className="stat-label">{label}</span>
+                        <span className="stat-value" style={!s.active ? { color: '#f87171' } : { color: s.color }}>
+                          {s.text}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </motion.div>
@@ -446,6 +380,86 @@ export default function HomePage() {
           <TemperatureChart theme={theme} />
 
           <AIReport theme={theme} />
+
+          {downtimeStats && (
+            <motion.div variants={itemVar} className="glass-card">
+              <div className="card-content">
+                <div className="stat-item" style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div className="stat-icon" style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399' }}>
+                    <Eye size={18} />
+                  </div>
+                  <div className="stat-info">
+                    <span className="stat-label">Доступность · 7 дней</span>
+                    <span className="stat-value">Мониторинг устройств</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {Object.entries(downtimeStats).map(([deviceId, device]) => {
+                    const sortedDays = Object.entries(device.days).sort(([a], [b]) => a.localeCompare(b))
+                    const totalMin = Math.round(device.total_downtime_seconds / 60)
+                    const avgUptime = sortedDays.length
+                      ? Math.round(sortedDays.reduce((s, [, d]) => s + d.uptime_pct, 0) / sortedDays.length * 10) / 10
+                      : 100
+
+                    return (
+                      <div key={deviceId} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{device.name}</span>
+                          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                            {totalMin > 0 && (
+                              <span style={{ fontSize: '11px', color: '#f87171' }}>
+                                ↓ {totalMin >= 60 ? `${Math.floor(totalMin / 60)}ч ${totalMin % 60}м` : `${totalMin}м`}
+                              </span>
+                            )}
+                            <span style={{
+                              fontSize: '12px', fontWeight: 700,
+                              color: avgUptime >= 99 ? '#34d399' : avgUptime >= 95 ? '#fbbf24' : '#f87171'
+                            }}>
+                              {avgUptime}%
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Тайм-лайн: по одной полоске на день */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {sortedDays.map(([dateStr, dayData]) => {
+                            const label = dateStr.slice(5) // "MM-DD"
+                            const dayStart = new Date(dateStr + 'T00:00:00+04:00').getTime()
+                            const dayEnd = dayStart + 86400000
+
+                            return (
+                              <div key={dateStr} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '36px', flexShrink: 0 }}>{label}</span>
+                                <div style={{ flex: 1, height: '8px', borderRadius: '4px', background: 'rgba(52,211,153,0.25)', position: 'relative', overflow: 'hidden' }}>
+                                  {dayData.intervals.map((iv, i) => {
+                                    const s = Math.max(new Date(iv.start).getTime(), dayStart)
+                                    const e = Math.min(iv.end ? new Date(iv.end).getTime() : Date.now(), dayEnd)
+                                    const left = ((s - dayStart) / 86400000) * 100
+                                    const width = Math.max(((e - s) / 86400000) * 100, 0.5)
+                                    return (
+                                      <div key={i} style={{
+                                        position: 'absolute', top: 0, bottom: 0,
+                                        left: `${left}%`, width: `${width}%`,
+                                        background: 'rgba(248,113,113,0.85)', borderRadius: '2px'
+                                      }} />
+                                    )
+                                  })}
+                                </div>
+                                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '36px', textAlign: 'right', flexShrink: 0 }}>
+                                  {dayData.uptime_pct}%
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {visitStats !== null && (
             <motion.div variants={itemVar} className="glass-card">

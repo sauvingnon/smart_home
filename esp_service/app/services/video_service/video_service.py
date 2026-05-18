@@ -275,11 +275,11 @@ class VideoService:
             
             # ---- Сохраняем новое соединение ----
             self.connections[camera_id] = websocket
-            
+
             # ---- Инициализируем или обновляем состояние ----
             if camera_id not in self.cameras:
                 self.cameras[camera_id] = CameraState(camera_id=camera_id)
-            
+
             self.cameras[camera_id].mode = CameraMode.CONNECTED
             self.cameras[camera_id].connected_at = _get_izhevsk_time()
             self.cameras[camera_id].last_seen = _get_izhevsk_time()
@@ -288,9 +288,10 @@ class VideoService:
             if camera_id in self.viewers and len(self.viewers[camera_id]) > 0:
                 await self.send_command(camera_id, "stream_state:on")
                 logger.info(f"📹 [{camera_id}] Включаем стрим после реконнекта (есть {len(self.viewers[camera_id])} зрителей)")
-            
+
             logger.info(f"✅ Камера {camera_id} подключена")
             await websocket.send_text("AUTH_OK")
+            await self.cache_manager.record_downtime_end(camera_id)
             
             # ---- Цикл приёма сообщений ----
             while websocket.client_state == WebSocketState.CONNECTED:
@@ -508,10 +509,11 @@ class VideoService:
                 await ws.close()
             except:
                 pass
-        
+
         if camera_id in self.cameras:
             self.cameras[camera_id].mode = CameraMode.OFFLINE
             logger.info(f"🔌 Камера {camera_id} отключена")
+            await self.cache_manager.record_downtime_start(camera_id)
     
     # ---- Команды камере ----
     async def send_command(self, camera_id: str, command: str) -> bool:
@@ -810,6 +812,14 @@ class VideoService:
                 else:
                     ttl = timedelta(days=8)
                 await self.cache_manager.set_video_list_for_day(camera_id, day, day_videos, ttl)
+                # Кэшируем video_id → S3-ключ для быстрого стриминга
+                for v in day_videos:
+                    if v.get('video_id') and v.get('key'):
+                        await self.cache_manager.set_video_key(
+                            v.get('camera_id') or camera_id or 'unknown',
+                            v['video_id'],
+                            v['key']
+                        )
                 logger.debug(f"📋 День {day}: {len(day_videos)} видео загружено из S3, TTL={ttl}")
             else:
                 logger.debug(f"📋 День {day}: {len(day_videos)} видео из кэша")
@@ -831,6 +841,16 @@ class VideoService:
 
         return all_videos
 
+    async def _get_video_key(self, camera_id: str, video_id: str) -> Optional[str]:
+        """Получить S3-ключ видео: сначала из кэша Redis, потом полный скан S3."""
+        key = await self.cache_manager.get_cached_video_key(camera_id, video_id)
+        if not key:
+            logger.debug(f"🔍 Ключ для {video_id} не в кэше, ищем в S3...")
+            key = await self.s3_manager.get_video_key_by_id(camera_id, video_id)
+            if key:
+                await self.cache_manager.set_video_key(camera_id, video_id, key)
+        return key
+
     async def stream_video(
         self,
         camera_id: str,
@@ -839,20 +859,20 @@ class VideoService:
     ) -> tuple[Optional[bytes], int, Optional[str], Optional[str]]:
         """
         Получить видео чанк для стриминга
-        
+
         Args:
             camera_id: ID камеры
             video_id: ID видео
             range_header: Заголовок Range (например "bytes=0-1024")
-        
+
         Returns:
             (data, file_size, content_range, error_message)
         """
         if not self.s3_manager:
             return None, 0, None, "S3 manager не доступен"
-        
-        # Находим ключ видео
-        video_key = await self.s3_manager.get_video_key_by_id(camera_id, video_id)
+
+        # Находим ключ видео (Redis кэш → S3 скан)
+        video_key = await self._get_video_key(camera_id, video_id)
         if not video_key:
             return None, 0, None, "Видео не найдено"
         
@@ -896,7 +916,7 @@ class VideoService:
         """Получить presigned URL для скачивания видео."""
         if not self.s3_manager:
             return None
-        key = await self.s3_manager.get_video_key_by_id(camera_id, video_id)
+        key = await self._get_video_key(camera_id, video_id)
         if not key:
             return None
         return await self.s3_manager.get_video_presigned_url(key, expires_in)
@@ -908,7 +928,7 @@ class VideoService:
         """
         if not self.s3_manager:
             return None, 0
-        key = await self.s3_manager.get_video_key_by_id(camera_id, video_id)
+        key = await self._get_video_key(camera_id, video_id)
         if not key:
             return None, 0
         return await self.s3_manager.get_video_stream(key)

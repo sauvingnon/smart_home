@@ -106,11 +106,14 @@ class BackgroundWorker:
     async def initialize_services(self):
         """Инициализирует асинхронные сервисы (вызывается ПОСЛЕ создания worker)"""
         logger.info("🎬 Инициализирую асинхронные сервисы...")
-        
+
         # Запускаем VideoService observer loop в фоне
         asyncio.create_task(self.video_service.start())
         logger.info("✅ VideoService инициализирован (observer loop запущен)")
-        
+
+        # Восстанавливаем даунтайм сервера по последнему heartbeat
+        await self.cache.recover_server_downtime()
+
         # Готовимся к приему MQTT сообщений (будет в start())
         self._initialization_complete = True
         
@@ -131,14 +134,12 @@ class BackgroundWorker:
         self._initialization_complete = True
         logger.info("✅ Инициализация завершена, обработка реальных событий включена")
         
-        # Запускаем три задачи параллельно
+        # Запускаем задачи параллельно
         await asyncio.gather(
-            # Запускаем цикл обновления данных погоды.
             self._update_weather_loop(),
-            # Запускаем цикл слежения за состоянием плат.
             self._check_heartbeat_esp_loop(),
-            # Запускаем цикл синхронизации времени.
-            self._check_time_update_loop()
+            self._check_time_update_loop(),
+            self._server_heartbeat_loop(),
         )
 
     def _update_device_status(self) -> DeviceStatus:
@@ -386,26 +387,37 @@ class BackgroundWorker:
         if activity_name:
             logger.debug(f"🚽 Активность туалета: {activity_name}. Статус {self.toilet_status.value}")
 
-    async def _check_heartbeat_esp_loop(self):
-        """Периодическая проверка статусов устройств"""
-        logger.info("👁️ Начинаем мониторинг центральной платы и датчика двери.")
-        
+    async def _server_heartbeat_loop(self):
+        """Раз в 5 минут пишем heartbeat сервера в Redis."""
         while self.is_running:
             try:
-                # Проверим центральную плату
+                await self.cache.update_server_heartbeat()
+            except Exception as e:
+                logger.error(f"❌ Ошибка server heartbeat: {e}")
+            await asyncio.sleep(300)
+
+    async def _check_heartbeat_esp_loop(self):
+        """Периодическая проверка статусов устройств + трекинг даунтайма."""
+        logger.info("👁️ Начинаем мониторинг центральной платы и датчика двери.")
+
+        while self.is_running:
+            try:
+                # Центральная плата
                 old_status = self.device_status
                 new_status = self._update_device_status()
-                
-                # Логируем критические состояния
+
                 if new_status == DeviceStatus.DEAD and self.current_telemetry:
                     seconds_ago = (_get_izhevsk_time() - self.current_telemetry.timestamp).total_seconds()
-                    minutes_ago = int(seconds_ago / 60)
-                    logger.error(f"🚨 Центральная плата МЕРТВА {minutes_ago} минут!")
+                    logger.error(f"🚨 Центральная плата МЕРТВА {int(seconds_ago / 60)} минут!")
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
-                    # Только что подключился
-                    logger.info(f"✅ Центральная плата ОНЛАЙН")
+                    logger.info("✅ Центральная плата ОНЛАЙН")
 
-                # Проверяем входной датчик
+                if old_status == DeviceStatus.ONLINE and new_status != DeviceStatus.ONLINE:
+                    await self.cache.record_downtime_start(self.device_id)
+                elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
+                    await self.cache.record_downtime_end(self.device_id)
+
+                # Датчик двери
                 old_status = self.sensor_status
                 new_status = self._update_sensor_status()
 
@@ -415,7 +427,12 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Датчик двери ОНЛАЙН")
 
-                # Проверяем туалет
+                if old_status == DeviceStatus.ONLINE and new_status != DeviceStatus.ONLINE:
+                    await self.cache.record_downtime_start(self.sensor_id)
+                elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
+                    await self.cache.record_downtime_end(self.sensor_id)
+
+                # Туалет
                 old_status = self.toilet_status
                 new_status = self._update_toilet_status()
 
@@ -424,10 +441,15 @@ class BackgroundWorker:
                     logger.error(f"🚨 Туалет МЕРТВ {int(seconds_ago / 60)} минут!")
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Туалет ОНЛАЙН")
-                
+
+                if old_status == DeviceStatus.ONLINE and new_status != DeviceStatus.ONLINE:
+                    await self.cache.record_downtime_start(self.toilet_id)
+                elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
+                    await self.cache.record_downtime_end(self.toilet_id)
+
             except Exception as e:
                 logger.exception(f"❌ Ошибка в проверке heartbeat: {e}")
-            
+
             await asyncio.sleep(self.heartbeat_interval)
 
     async def _update_weather_loop(self):
@@ -687,6 +709,12 @@ class BackgroundWorker:
         esp_records = daily_stats['records']['esp']
         weather_records = daily_stats['records']['weather']
         
+        def fmt(val, decimals=1):
+            try:
+                return f"{float(val):.{decimals}f}"
+            except (TypeError, ValueError):
+                return '—'
+
         # Формируем понятный промпт для ИИ
         prompt = f"""Вы — аналитическая система "Домовой", предназначенная для генерации отчетов о состоянии умного дома. Напишите структурированный отчет о показателях за вчерашний день ({daily_stats['date']}).
 
@@ -697,12 +725,12 @@ class BackgroundWorker:
 📊 **СТАТИСТИКА ЗА ОТЧЕТНЫЙ ПЕРИОД:**
 
 Внутренние показатели:
-├─ Температура: средняя {temp_in_avg:.1f}°C (минимум {temp_in_min}°C, максимум {temp_in_max}°C)
-└─ Влажность: средняя {hum_in_avg:.1f}% (минимум {hum_in_min}%, максимум {hum_in_max}%)
+├─ Температура: средняя {fmt(temp_in_avg)}°C (минимум {fmt(temp_in_min)}°C, максимум {fmt(temp_in_max)}°C)
+└─ Влажность: средняя {fmt(hum_in_avg)}% (минимум {fmt(hum_in_min)}%, максимум {fmt(hum_in_max)}%)
 
 Внешние показатели:
-├─ Температура: средняя {temp_out_avg:.1f}°C (минимум {temp_out_min}°C, максимум {temp_out_max}°C)
-└─ Влажность: средняя {hum_out_avg:.1f}% (минимум {hum_out_min}%, максимум {hum_out_max}%)
+├─ Температура: средняя {fmt(temp_out_avg)}°C (минимум {fmt(temp_out_min)}°C, максимум {fmt(temp_out_max)}°C)
+└─ Влажность: средняя {fmt(hum_out_avg)}% (минимум {fmt(hum_out_min)}%, максимум {fmt(hum_out_max)}%)
 
 🔍 **ДИНАМИКА ПОКАЗАТЕЛЕЙ:**
 {records_text}

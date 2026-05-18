@@ -9,6 +9,7 @@ from app.schemas.telemetry_history import (
 )
 from app.core.auth import get_current_user_id_dep
 from app.utils.time import _get_izhevsk_time
+from config import CAMERA_ID
 
 router = APIRouter(
     prefix="/esp_service",
@@ -65,5 +66,25 @@ async def get_stats_endpoint(
     """Получить статистику за период"""
     worker = BackgroundWorker.get_instance()
     stats = await worker.storage.get_stats(hours, worker.device_id)
-    
+    return stats
+
+
+@router.get("/downtime")
+async def get_downtime_endpoint(
+    days: int = Query(7, ge=1, le=7),
+    user_id: int = Depends(get_current_user_id_dep)
+):
+    """Даунтайм всех устройств за последние N дней."""
+    worker = BackgroundWorker.get_instance()
+    device_ids = [
+        worker.device_id,
+        worker.sensor_id,
+        worker.toilet_id,
+        CAMERA_ID,
+        "server",
+    ]
+    stats = await worker.cache.get_downtime_stats(device_ids, days)
+    # Подставляем имя камеры отдельно (ID берётся из ENV)
+    if CAMERA_ID in stats:
+        stats[CAMERA_ID]["name"] = "Камера"
     return stats

@@ -579,7 +579,7 @@ class CacheManager:
         """Проверяет токен, возвращает user_id"""
         if not await self._ensure_connection():
             return None
-        
+
         user_id = await self.redis_client.get(f"{self.video_token_prefix}{token}")
         if user_id:
             # Продлеваем жизнь токену
@@ -588,3 +588,256 @@ class CacheManager:
             await self.redis_client.expire(f"user_token:{int(user_id)}", self.video_token_ttl)
             return int(user_id)
         return None
+
+    # ───────────────────── DOWNTIME TRACKING ─────────────────────
+
+    DEVICE_NAMES: dict = {
+        "greenhouse_01": "Центральная плата",
+        "sensor_door_pir": "Датчик двери",
+        "toilet_module": "Туалет",
+        "server": "Сервер",
+    }
+
+    async def record_downtime_start(self, device_id: str) -> bool:
+        """Зафиксировать начало даунтайма устройства."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            current_key = f"downtime_current:{device_id}"
+            if await self.redis_client.exists(current_key):
+                return False  # Уже в даунтайме
+
+            now = datetime.now(tz=self.IZHEVSK_TZ)
+            now_iso = now.isoformat()
+            today = now.strftime("%Y-%m-%d")
+
+            await self.redis_client.set(current_key, now_iso)
+
+            day_key = f"downtime:{device_id}:{today}"
+            raw = await self.redis_client.get(day_key)
+            intervals = json.loads(raw) if raw else []
+            intervals.append({"start": now_iso, "end": None})
+            await self.redis_client.setex(day_key, timedelta(days=8), json.dumps(intervals))
+
+            logger.info(f"🔴 Даунтайм начат: {device_id} в {now.strftime('%H:%M')}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка записи начала даунтайма [{device_id}]: {e}")
+            return False
+
+    async def record_downtime_end(self, device_id: str) -> bool:
+        """Зафиксировать конец даунтайма устройства."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            current_key = f"downtime_current:{device_id}"
+            start_iso = await self.redis_client.get(current_key)
+            if not start_iso:
+                return False  # Даунтайма не было
+
+            now = datetime.now(tz=self.IZHEVSK_TZ)
+            start_dt = datetime.fromisoformat(start_iso)
+            await self.redis_client.delete(current_key)
+
+            start_date = start_dt.strftime("%Y-%m-%d")
+            today = now.strftime("%Y-%m-%d")
+
+            if start_date == today:
+                # Даунтайм в пределах одного дня
+                day_key = f"downtime:{device_id}:{start_date}"
+                raw = await self.redis_client.get(day_key)
+                intervals = json.loads(raw) if raw else []
+                for iv in reversed(intervals):
+                    if iv.get("end") is None:
+                        iv["end"] = now.isoformat()
+                        break
+                else:
+                    intervals.append({"start": start_iso, "end": now.isoformat()})
+                await self.redis_client.setex(day_key, timedelta(days=8), json.dumps(intervals))
+            else:
+                # Даунтайм пересёк полночь — разбиваем по дням
+                current = start_dt
+                end_dt = now
+                while current.strftime("%Y-%m-%d") <= today:
+                    d_str = current.strftime("%Y-%m-%d")
+                    next_midnight = (current + timedelta(days=1)).replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    )
+                    seg_end = min(next_midnight, end_dt)
+
+                    day_key = f"downtime:{device_id}:{d_str}"
+                    raw = await self.redis_client.get(day_key)
+                    intervals = json.loads(raw) if raw else []
+                    if d_str == start_date:
+                        # Первый день: закрываем открытый интервал
+                        for iv in reversed(intervals):
+                            if iv.get("end") is None:
+                                iv["end"] = seg_end.isoformat()
+                                break
+                        else:
+                            intervals.append({"start": start_iso, "end": seg_end.isoformat()})
+                    else:
+                        # Промежуточные/последний день: добавляем полный сегмент
+                        intervals.append({"start": current.isoformat(), "end": seg_end.isoformat()})
+                    await self.redis_client.setex(day_key, timedelta(days=8), json.dumps(intervals))
+
+                    if seg_end >= end_dt:
+                        break
+                    current = next_midnight
+
+            duration = now - start_dt
+            logger.info(
+                f"🟢 Даунтайм закрыт: {device_id}, длился {int(duration.total_seconds() // 60)} мин"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка записи конца даунтайма [{device_id}]: {e}")
+            return False
+
+    async def get_downtime_stats(self, device_ids: list, days: int = 7) -> dict:
+        """Статистика даунтайма за N дней для списка устройств."""
+        if not await self._ensure_connection():
+            return {}
+        try:
+            now = datetime.now(tz=self.IZHEVSK_TZ)
+            today = now.date()
+            result = {}
+
+            for device_id in device_ids:
+                day_stats: dict = {}
+                total_down = 0
+
+                for i in range(days):
+                    day = today - timedelta(days=i)
+                    day_str = day.strftime("%Y-%m-%d")
+
+                    raw = await self.redis_client.get(f"downtime:{device_id}:{day_str}")
+                    intervals = json.loads(raw) if raw else []
+
+                    # Если сегодня и есть незакрытый даунтайм — дополняем «до сейчас»
+                    if i == 0:
+                        start_iso = await self.redis_client.get(f"downtime_current:{device_id}")
+                        if start_iso:
+                            has_open = any(iv.get("end") is None for iv in intervals)
+                            if not has_open:
+                                intervals.append({"start": start_iso, "end": None})
+
+                    # Считаем суммарный даунтайм дня
+                    day_seconds = 0.0
+                    day_start = datetime(day.year, day.month, day.day, tzinfo=self.IZHEVSK_TZ)
+                    day_end = day_start + timedelta(days=1) if i > 0 else now
+
+                    for iv in intervals:
+                        try:
+                            s = datetime.fromisoformat(iv["start"])
+                            e = datetime.fromisoformat(iv["end"]) if iv.get("end") else now
+                            # Обрезаем до границ дня
+                            s = max(s, day_start)
+                            e = min(e, day_end)
+                            day_seconds += max(0.0, (e - s).total_seconds())
+                        except Exception:
+                            pass
+
+                    total_seconds_in_day = (day_end - day_start).total_seconds()
+                    uptime_pct = round(
+                        max(0.0, (total_seconds_in_day - day_seconds) / total_seconds_in_day * 100), 1
+                    )
+
+                    day_stats[day_str] = {
+                        "intervals": intervals,
+                        "downtime_seconds": int(day_seconds),
+                        "uptime_pct": uptime_pct,
+                    }
+                    total_down += int(day_seconds)
+
+                result[device_id] = {
+                    "name": self.DEVICE_NAMES.get(device_id, device_id),
+                    "days": day_stats,
+                    "total_downtime_seconds": total_down,
+                }
+
+            return result
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения статистики даунтайма: {e}")
+            return {}
+
+    async def update_server_heartbeat(self) -> bool:
+        """Обновить heartbeat сервера (раз в 5 минут)."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            now_iso = datetime.now(tz=self.IZHEVSK_TZ).isoformat()
+            await self.redis_client.set("server:heartbeat", now_iso)
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка обновления heartbeat сервера: {e}")
+            return False
+
+    async def recover_server_downtime(self) -> bool:
+        """
+        При старте сервера: восстановить даунтайм сервера по последнему heartbeat.
+        Вызывать один раз в initialize_services().
+        """
+        if not await self._ensure_connection():
+            return False
+        try:
+            last_beat = await self.redis_client.get("server:heartbeat")
+            now = datetime.now(tz=self.IZHEVSK_TZ)
+
+            if last_beat:
+                last_dt = datetime.fromisoformat(last_beat)
+                gap = (now - last_dt).total_seconds()
+
+                if gap > 600:  # > 10 минут — сервер был не онлайн
+                    logger.warning(
+                        f"🔴 Обнаружен даунтайм сервера: "
+                        f"{int(gap // 60)} мин ({last_dt.strftime('%H:%M')} — {now.strftime('%H:%M')})"
+                    )
+                    # Записываем как даунтайм через тот же механизм
+                    current_key = "downtime_current:server"
+                    await self.redis_client.set(current_key, last_dt.isoformat())
+
+                    # Добавляем в день-лист начало (чтобы record_downtime_end нашёл)
+                    start_date = last_dt.strftime("%Y-%m-%d")
+                    day_key = f"downtime:server:{start_date}"
+                    raw = await self.redis_client.get(day_key)
+                    intervals = json.loads(raw) if raw else []
+                    intervals.append({"start": last_dt.isoformat(), "end": None})
+                    await self.redis_client.setex(day_key, timedelta(days=8), json.dumps(intervals))
+
+                    await self.record_downtime_end("server")
+                    logger.info("✅ Даунтайм сервера зафиксирован")
+                else:
+                    logger.info(f"✅ Последний heartbeat {int(gap // 60)} мин назад — разрыва нет")
+            else:
+                logger.info("📡 Первый старт сервера — heartbeat ещё не было")
+
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка восстановления даунтайма сервера: {e}")
+            return False
+
+    async def get_cached_video_key(self, camera_id: str, video_id: str) -> Optional[str]:
+        """Получить S3-ключ видео из кэша."""
+        if not await self._ensure_connection():
+            return None
+        try:
+            return await self.redis_client.get(f"video_key:{camera_id}:{video_id}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка чтения ключа видео из кэша: {e}")
+            return None
+
+    async def set_video_key(self, camera_id: str, video_id: str, s3_key: str) -> bool:
+        """Сохранить S3-ключ видео в кэш."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            await self.redis_client.setex(
+                f"video_key:{camera_id}:{video_id}",
+                timedelta(days=DEFAULT_RECORDING_DAYS + 1),
+                s3_key
+            )
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения ключа видео в кэш: {e}")
+            return False
