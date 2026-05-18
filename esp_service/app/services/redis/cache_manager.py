@@ -428,6 +428,47 @@ class CacheManager:
             logger.exception(f"❌ Ошибка получения недельного отчёта из кэша: {e}")
             return None
         
+    async def get_video_list_for_day(self, camera_id: Optional[str], date) -> Optional[list]:
+        """Вернуть закэшированный список видео за день. None — cache miss."""
+        if not await self._ensure_connection():
+            return None
+        try:
+            cam_key = camera_id or "all"
+            key = f"video_list:{cam_key}:{date.strftime('%Y-%m-%d')}"
+            data = await self.redis_client.get(key)
+            return json.loads(data) if data else None
+        except Exception as e:
+            logger.error(f"❌ Ошибка чтения кэша видео за {date}: {e}")
+            return None
+
+    async def set_video_list_for_day(self, camera_id: Optional[str], date, videos: list, ttl: timedelta) -> bool:
+        """Сохранить список видео за день в кэш."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            cam_key = camera_id or "all"
+            key = f"video_list:{cam_key}:{date.strftime('%Y-%m-%d')}"
+            await self.redis_client.setex(key, ttl, json.dumps(videos, default=str))
+            logger.debug(f"💾 Кэш видео за {date} сохранён (TTL {ttl})")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения кэша видео за {date}: {e}")
+            return False
+
+    async def invalidate_video_list_for_day(self, camera_id: Optional[str], date) -> bool:
+        """Инвалидировать кэш списка видео за конкретный день."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            cam_key = camera_id or "all"
+            key = f"video_list:{cam_key}:{date.strftime('%Y-%m-%d')}"
+            await self.redis_client.delete(key)
+            logger.debug(f"🗑️ Кэш видео за {date.strftime('%Y-%m-%d')} инвалидирован")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка инвалидации кэша видео за {date}: {e}")
+            return False
+
     async def get_or_create_session_token(self, user_id: int) -> str:
         """Получает существующий токен или создаёт новый"""
         if not await self._ensure_connection():

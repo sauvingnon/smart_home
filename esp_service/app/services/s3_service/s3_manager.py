@@ -306,6 +306,100 @@ class S3Manager:
             logger.exception(f"❌ Failed to list videos: {e}")
             return []
 
+    async def list_videos_for_day(self, camera_id: Optional[str], date) -> list:
+        """Получить список видео за конкретный день (без URL, с флагом has_thumbnail).
+        Используется для кэширования по дням."""
+        if not await self._ensure_connection():
+            return []
+
+        try:
+            date_str = date.strftime('%Y/%m/%d')
+            if camera_id:
+                prefix = f"videos/{camera_id}/{date_str}/"
+            else:
+                prefix = "videos/"
+
+            objects = []
+            paginator = self._client.get_paginator('list_objects_v2')
+
+            async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                if 'Contents' not in page:
+                    continue
+
+                for obj in page['Contents']:
+                    key = obj['Key']
+                    if not key.endswith('.mp4'):
+                        continue
+
+                    parts = key.split('/')
+                    # Когда camera_id=None — фильтруем по дате в Python
+                    if not camera_id:
+                        if len(parts) < 6 or f"{parts[2]}/{parts[3]}/{parts[4]}" != date_str:
+                            continue
+
+                    camera_id_from_key = parts[1] if len(parts) > 1 else 'unknown'
+                    last_modified = obj['LastModified']
+
+                    metadata = {}
+                    duration_seconds = None
+                    start_time = None
+                    video_id = None
+
+                    try:
+                        head = await self._client.head_object(Bucket=self.bucket_name, Key=key)
+                        metadata = head.get('Metadata', {}) or {}
+
+                        if 'video-id' in metadata:
+                            video_id = metadata['video-id']
+                        else:
+                            filename = os.path.basename(key)
+                            if filename.endswith('.mp4'):
+                                potential_uuid = filename[:-4]
+                                if len(potential_uuid) == 36 and potential_uuid.count('-') == 4:
+                                    video_id = potential_uuid
+
+                        if 'duration' in metadata:
+                            try:
+                                duration_seconds = int(metadata['duration'])
+                            except (ValueError, TypeError):
+                                pass
+
+                        if 'start-time' in metadata:
+                            try:
+                                start_time = datetime.fromisoformat(metadata['start-time'])
+                            except (ValueError, TypeError):
+                                pass
+
+                    except Exception as e:
+                        logger.debug(f"Failed head_object for {key}: {e}")
+
+                    has_thumbnail = False
+                    if video_id:
+                        try:
+                            thumb_key = f"thumbnails/{camera_id_from_key}/{video_id}.jpg"
+                            await self._client.head_object(Bucket=self.bucket_name, Key=thumb_key)
+                            has_thumbnail = True
+                        except Exception:
+                            pass
+
+                    objects.append({
+                        'key': key,
+                        'video_id': video_id,
+                        'size_bytes': obj['Size'],
+                        'last_modified': last_modified.isoformat() if hasattr(last_modified, 'isoformat') else str(last_modified),
+                        'camera_id': camera_id_from_key,
+                        'duration_seconds': duration_seconds,
+                        'start_time': start_time.isoformat() if start_time else None,
+                        'has_thumbnail': has_thumbnail,
+                    })
+
+            logger.debug(f"📋 День {date}: найдено {len(objects)} видео")
+            return objects
+
+        except Exception as e:
+            logger.exception(f"❌ Ошибка получения видео за {date}: {e}")
+            return []
+
     async def save_video_from_stream(
         self, 
         camera_id: str, 

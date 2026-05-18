@@ -14,7 +14,7 @@ from app.services.redis.cache_manager import CacheManager
 import tempfile
 import os
 from starlette.websockets import WebSocketDisconnect, WebSocketState
-from config import CAMERA_ID, CAMERA_ACCESS_KEY
+from config import CAMERA_ID, CAMERA_ACCESS_KEY, DEFAULT_RECORDING_DAYS
 
 class VideoService:
     """Сервис управления камерами — базовая версия (только подключение и метрики)"""
@@ -760,6 +760,11 @@ class VideoService:
 
             await self.cache_manager.save_video_dedup(camera_id, start_timestamp, video_id)
 
+            # Инвалидируем кэш сегодняшнего дня — появилось новое видео
+            izhevsk_tz = timezone(timedelta(hours=4))
+            today = datetime.now(tz=izhevsk_tz).date()
+            await self.cache_manager.invalidate_video_list_for_day(camera_id, today)
+
             return video_id
             
         except Exception as e:
@@ -778,21 +783,53 @@ class VideoService:
         self,
         camera_id: Optional[str] = None
     ) -> list:
-        """
-        Получить список видео.
-        
-        Args:
-            camera_id: опционально фильтр по камере
-        
-        Returns:
-            list: список видео с метаданными и presigned URLs
-        """
+        """Получить список видео за последние DEFAULT_RECORDING_DAYS+1 дней с кэшированием по дням."""
         if not self.s3_manager:
             raise ValueError("S3 manager не доступен")
-        
+
         token = await self.cache_manager.get_or_create_session_token(123)
-        
-        return await self.s3_manager.list_videos(camera_id=camera_id, token=token, url=API_BASE_URL)
+
+        IZHEVSK_TZ = timezone(timedelta(hours=4))
+        today = datetime.now(tz=IZHEVSK_TZ).date()
+
+        all_videos = []
+
+        for i in range(DEFAULT_RECORDING_DAYS + 1):
+            day = today - timedelta(days=i)
+            is_today = (i == 0)
+
+            day_videos = await self.cache_manager.get_video_list_for_day(camera_id, day)
+
+            if day_videos is None:
+                day_videos = await self.s3_manager.list_videos_for_day(camera_id, day)
+                if is_today:
+                    # Кэшируем до конца текущих суток — в полночь день станет иммутабельным
+                    now = datetime.now(tz=IZHEVSK_TZ)
+                    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                    ttl = midnight - now
+                else:
+                    ttl = timedelta(days=8)
+                await self.cache_manager.set_video_list_for_day(camera_id, day, day_videos, ttl)
+                logger.debug(f"📋 День {day}: {len(day_videos)} видео загружено из S3, TTL={ttl}")
+            else:
+                logger.debug(f"📋 День {day}: {len(day_videos)} видео из кэша")
+
+            for video in day_videos:
+                vid = dict(video)
+                vid['video_url'] = (
+                    f"{API_BASE_URL}/esp_service/videos/stream"
+                    f"?video_id={vid['video_id']}&camera_id={vid['camera_id']}&token={token}"
+                )
+                if vid.pop('has_thumbnail', False):
+                    vid['thumbnail_url'] = (
+                        f"{API_BASE_URL}/esp_service/videos/thumbnail"
+                        f"?camera_id={vid['camera_id']}&video_id={vid['video_id']}&token={token}"
+                    )
+                else:
+                    vid['thumbnail_url'] = None
+                all_videos.append(vid)
+
+        return all_videos
 
     async def stream_video(
         self,
@@ -914,8 +951,18 @@ class VideoService:
                 
                 if success:
                     logger.info(f"🗑️ [{camera_id}] Видео {video_id} удалено")
+                    # Инвалидируем кэш дня, к которому принадлежит это видео
+                    try:
+                        parts = video['key'].split('/')
+                        # key: videos/{camera_id}/{year}/{month}/{day}/...
+                        if len(parts) >= 5:
+                            from datetime import date as date_type
+                            video_date = date_type(int(parts[2]), int(parts[3]), int(parts[4]))
+                            await self.cache_manager.invalidate_video_list_for_day(camera_id, video_date)
+                    except Exception:
+                        pass
                     return True
-        
+
         return False
     
     async def save_thumbnail(
