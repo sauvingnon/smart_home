@@ -32,9 +32,9 @@ Adafruit_AHT10 myAHT10;
 
 // Подключение энкодера
 // Ряд пинов для подключение энкодера
-#define S1 D5                                  
-#define S2 D6
-#define KEY D7
+#define S1 D7                                  
+#define S2 D5
+#define KEY D6
 // Подключение библиотеки для энкодера 
 #include <GyverEncoder.h>
 // Объявление энкодера как объекта
@@ -102,7 +102,7 @@ const char* ssid = "TP-Link_8343";
 const char* password = "64826424";
 
 // MQTT брокер
-const char* mqtt_server = "dotnetdon.ru";
+const char* mqtt_server = "tgapp.dotnetdon.ru";
 // const char* mqtt_server = "192.168.1.102";
 
 // Глобальные объекты
@@ -152,7 +152,7 @@ WeatherData current_weather; // Текущая погода
 // Библиотека для модуля реального времени
 #include "RTClib.h"
 // Объект модуля реального времени
-RTC_DS1307 rtc;
+RTC_DS3231 rtc;
 
 // Структура для описания настраиваемого параметра времени
 struct TimeParam {
