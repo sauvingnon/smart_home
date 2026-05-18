@@ -44,6 +44,20 @@ async def get_history_endpoint(
         records=records  # ← просто records, без распаковки!
     )
 
+@router.get("/login_stats")
+async def get_login_stats_endpoint(
+    user_id: int = Depends(get_current_user_id_dep)
+):
+    """Статистика входов пользователей. Только для администратора."""
+    ADMIN_USER_ID = 1245
+    if user_id != ADMIN_USER_ID:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    worker = BackgroundWorker.get_instance()
+    stats = await worker.cache.get_login_stats(exclude_user_id=ADMIN_USER_ID)
+    return stats
+
+
 @router.get("/stats", response_model=StatsResponse)
 async def get_stats_endpoint(
     hours: int = Query(24, ge=1, le=168, description="Количество часов для статистики"),

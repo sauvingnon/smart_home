@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw
+  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw, User, Users
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
@@ -19,6 +19,8 @@ type WeatherData = {
   night_temp?: number; morning_temp?: number; day_temp?: number;
   timestamp: string; expires_at: string; api_calls_today: number;
 }
+
+type LoginStats = Record<string, Record<string, number>>
 
 type DiskUsage = {
   total_gb: number;
@@ -100,6 +102,7 @@ export default function HomePage() {
   const [data, setData] = useState<GeneralResponse | null>(null)
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loginStats, setLoginStats] = useState<LoginStats | null>(null)
 
   const fetchData = async () => {
     try {
@@ -110,9 +113,18 @@ export default function HomePage() {
   }
   
   const fetchWeather = async () => {
-    try { 
-      const res = await apiClient.fetch('/esp_service/weather'); 
-      setWeather(res); 
+    try {
+      const res = await apiClient.fetch('/esp_service/weather');
+      setWeather(res);
+    } catch {}
+  }
+
+  const fetchLoginStats = async () => {
+    try {
+      const res = await apiClient.fetchRaw('/esp_service/login_stats')
+      if (res.status === 200) {
+        setLoginStats(await res.json())
+      }
     } catch {}
   }
 
@@ -162,6 +174,7 @@ export default function HomePage() {
   useEffect(() => {
     fetchData();
     fetchWeather();
+    fetchLoginStats();
   }, [])
 
   return (
@@ -429,8 +442,49 @@ export default function HomePage() {
           
           <TemperatureChart theme={theme} />
 
-          {/* Новый блок с ИИ отчётами */}
           <AIReport theme={theme} />
+
+          {loginStats !== null && (
+            <motion.div variants={itemVar} className="glass-card">
+              <div className="card-content">
+                <div className="stat-item" style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div className="stat-icon" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
+                    <Users size={18} />
+                  </div>
+                  <div className="stat-info">
+                    <span className="stat-label">Активность пользователей</span>
+                    <span className="stat-value">{Object.keys(loginStats).length} чел.</span>
+                  </div>
+                </div>
+
+                {Object.keys(loginStats).length === 0 ? (
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', textAlign: 'center', padding: '8px 0' }}>Нет активности</p>
+                ) : (
+                  <div className="stats-grid">
+                    {Object.entries(loginStats)
+                      .map(([uid, days]) => {
+                        const total = Object.values(days).reduce((a, b) => a + b, 0)
+                        const lastDate = Object.keys(days).sort().reverse()[0]
+                        return { uid, total, lastDate }
+                      })
+                      .sort((a, b) => b.total - a.total)
+                      .map(({ uid, total, lastDate }) => (
+                        <div key={uid} className="stat-item">
+                          <div className="stat-icon" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
+                            <User size={18} />
+                          </div>
+                          <div className="stat-info">
+                            <span className="stat-label">ID {uid}</span>
+                            <span className="stat-value">{total} вх. · {lastDate}</span>
+                          </div>
+                        </div>
+                      ))
+                    }
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
 
         </motion.div>
       </div>

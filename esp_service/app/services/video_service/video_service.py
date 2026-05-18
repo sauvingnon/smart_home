@@ -64,7 +64,7 @@ class VideoService:
         logger.info("🧹 Запуск очистки старых видео...")
 
         IZHEVSK_TZ = timezone(timedelta(hours=4))
-        cutoff = datetime.now(tz=IZHEVSK_TZ) - timedelta(days=7)
+        cutoff = datetime.now(tz=IZHEVSK_TZ) - timedelta(days=DEFAULT_RECORDING_DAYS)
         deleted_count = 0
         deleted_bytes = 0
 

@@ -428,6 +428,44 @@ class CacheManager:
             logger.exception(f"❌ Ошибка получения недельного отчёта из кэша: {e}")
             return None
         
+    async def record_login(self, user_id: int) -> bool:
+        """Записать факт входа пользователя (инкремент счётчика за день)."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            key = f"login_stats:{user_id}:{today}"
+            await self.redis_client.incr(key)
+            await self.redis_client.expire(key, timedelta(days=90))
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка записи login stats: {e}")
+            return False
+
+    async def get_login_stats(self, exclude_user_id: int) -> dict:
+        """Вернуть статистику входов по всем пользователям кроме exclude_user_id."""
+        if not await self._ensure_connection():
+            return {}
+        try:
+            keys = await self.redis_client.keys("login_stats:*")
+            result = {}
+            for key in keys:
+                parts = key.split(":")
+                if len(parts) != 3:
+                    continue
+                uid = int(parts[1])
+                date = parts[2]
+                if uid == exclude_user_id:
+                    continue
+                count = int(await self.redis_client.get(key) or 0)
+                if uid not in result:
+                    result[uid] = {}
+                result[uid][date] = count
+            return result
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения login stats: {e}")
+            return {}
+
     async def get_video_list_for_day(self, camera_id: Optional[str], date) -> Optional[list]:
         """Вернуть закэшированный список видео за день. None — cache miss."""
         if not await self._ensure_connection():
