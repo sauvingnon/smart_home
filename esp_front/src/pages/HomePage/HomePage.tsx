@@ -20,7 +20,10 @@ type WeatherData = {
   timestamp: string; expires_at: string; api_calls_today: number;
 }
 
-type LoginStats = Record<string, Record<string, number>>
+type VisitStats = {
+  name: string
+  days: Record<string, string[]>
+}[]
 
 type DiskUsage = {
   total_gb: number;
@@ -102,7 +105,7 @@ export default function HomePage() {
   const [data, setData] = useState<GeneralResponse | null>(null)
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loginStats, setLoginStats] = useState<LoginStats | null>(null)
+  const [visitStats, setVisitStats] = useState<VisitStats | null>(null)
 
   const fetchData = async () => {
     try {
@@ -123,7 +126,7 @@ export default function HomePage() {
     try {
       const res = await apiClient.fetchRaw('/esp_service/login_stats')
       if (res.status === 200) {
-        setLoginStats(await res.json())
+        setVisitStats(await res.json())
       }
     } catch {}
   }
@@ -444,7 +447,7 @@ export default function HomePage() {
 
           <AIReport theme={theme} />
 
-          {loginStats !== null && (
+          {visitStats !== null && (
             <motion.div variants={itemVar} className="glass-card">
               <div className="card-content">
                 <div className="stat-item" style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
@@ -452,34 +455,40 @@ export default function HomePage() {
                     <Users size={18} />
                   </div>
                   <div className="stat-info">
-                    <span className="stat-label">Активность пользователей</span>
-                    <span className="stat-value">{Object.keys(loginStats).length} чел.</span>
+                    <span className="stat-label">Активность · 7 дней</span>
+                    <span className="stat-value">{visitStats.length} пользователей</span>
                   </div>
                 </div>
 
-                {Object.keys(loginStats).length === 0 ? (
+                {visitStats.length === 0 ? (
                   <p style={{ fontSize: '13px', color: 'var(--text-secondary)', textAlign: 'center', padding: '8px 0' }}>Нет активности</p>
                 ) : (
-                  <div className="stats-grid">
-                    {Object.entries(loginStats)
-                      .map(([uid, days]) => {
-                        const total = Object.values(days).reduce((a, b) => a + b, 0)
-                        const lastDate = Object.keys(days).sort().reverse()[0]
-                        return { uid, total, lastDate }
-                      })
-                      .sort((a, b) => b.total - a.total)
-                      .map(({ uid, total, lastDate }) => (
-                        <div key={uid} className="stat-item">
-                          <div className="stat-icon" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
-                            <User size={18} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {visitStats.map((user) => {
+                      const sortedDays = Object.entries(user.days).sort(([a], [b]) => b.localeCompare(a))
+                      const totalVisits = Object.values(user.days).reduce((s, t) => s + t.length, 0)
+                      return (
+                        <div key={user.name} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '10px' }}>
+                          <div className="stat-item" style={{ marginBottom: '6px' }}>
+                            <div className="stat-icon" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
+                              <User size={18} />
+                            </div>
+                            <div className="stat-info">
+                              <span className="stat-label">{user.name}</span>
+                              <span className="stat-value">{totalVisits} визит{totalVisits === 1 ? '' : totalVisits < 5 ? 'а' : 'ов'} за 7 дней</span>
+                            </div>
                           </div>
-                          <div className="stat-info">
-                            <span className="stat-label">ID {uid}</span>
-                            <span className="stat-value">{total} вх. · {lastDate}</span>
+                          <div style={{ paddingLeft: '48px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            {sortedDays.map(([date, times]) => (
+                              <div key={date} style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '8px' }}>
+                                <span style={{ opacity: 0.6, minWidth: '80px' }}>{date}</span>
+                                <span>{times.join(', ')}</span>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      ))
-                    }
+                      )
+                    })}
                   </div>
                 )}
               </div>

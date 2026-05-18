@@ -30,6 +30,8 @@ class AuthManager:
             )
 
         logger.debug(f"✅ Session validated for user {user_id}")
+        if user_id != 1245:
+            await self.cache.record_visit(user_id)
         return user_id
 
     async def get_current_user_id(self, request: Request) -> int:

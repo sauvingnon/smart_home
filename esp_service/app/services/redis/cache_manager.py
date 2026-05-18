@@ -1,7 +1,7 @@
 import redis.asyncio as redis
 from typing import Optional
 from app.schemas.weather_data import WeatherData
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 import json
 from logger import logger
 import asyncio
@@ -428,43 +428,76 @@ class CacheManager:
             logger.exception(f"❌ Ошибка получения недельного отчёта из кэша: {e}")
             return None
         
-    async def record_login(self, user_id: int) -> bool:
-        """Записать факт входа пользователя (инкремент счётчика за день)."""
+    USER_NAMES: dict = {
+        61327489: "Камелия",
+        4382099: "Лилия",
+        987654: "Андрей",
+    }
+    IZHEVSK_TZ = timezone(timedelta(hours=4))
+
+    async def record_visit(self, user_id: int) -> bool:
+        """Записать визит пользователя (не чаще раза в час на пользователя)."""
         if not await self._ensure_connection():
             return False
         try:
-            today = datetime.now().strftime("%Y-%m-%d")
-            key = f"login_stats:{user_id}:{today}"
-            await self.redis_client.incr(key)
-            await self.redis_client.expire(key, timedelta(days=90))
+            cooldown_key = f"visit_cooldown:{user_id}"
+            if await self.redis_client.exists(cooldown_key):
+                return False
+
+            await self.redis_client.setex(cooldown_key, 3600, "1")
+
+            now = datetime.now(tz=self.IZHEVSK_TZ)
+            today = now.strftime("%Y-%m-%d")
+            time_str = now.strftime("%H:%M")
+
+            visits_key = f"login_visits:{user_id}:{today}"
+            visits_raw = await self.redis_client.get(visits_key)
+            visits = json.loads(visits_raw) if visits_raw else []
+            visits.append(time_str)
+            await self.redis_client.setex(visits_key, timedelta(days=8), json.dumps(visits))
+            logger.debug(f"👁️ Визит записан: user={user_id} в {time_str}")
             return True
         except Exception as e:
-            logger.error(f"❌ Ошибка записи login stats: {e}")
+            logger.error(f"❌ Ошибка записи визита: {e}")
             return False
 
-    async def get_login_stats(self, exclude_user_id: int) -> dict:
-        """Вернуть статистику входов по всем пользователям кроме exclude_user_id."""
+    async def get_visit_stats(self, exclude_user_id: int, days: int = 7) -> list:
+        """Вернуть статистику визитов за последние N дней, кроме exclude_user_id."""
         if not await self._ensure_connection():
-            return {}
+            return []
         try:
-            keys = await self.redis_client.keys("login_stats:*")
-            result = {}
+            today = datetime.now(tz=self.IZHEVSK_TZ).date()
+            date_range = {
+                (today - timedelta(days=i)).strftime("%Y-%m-%d")
+                for i in range(days)
+            }
+
+            keys = await self.redis_client.keys("login_visits:*")
+            user_data: dict = {}
+
             for key in keys:
                 parts = key.split(":")
                 if len(parts) != 3:
                     continue
                 uid = int(parts[1])
                 date = parts[2]
-                if uid == exclude_user_id:
+                if uid == exclude_user_id or date not in date_range:
                     continue
-                count = int(await self.redis_client.get(key) or 0)
-                if uid not in result:
-                    result[uid] = {}
-                result[uid][date] = count
-            return result
+
+                visits_raw = await self.redis_client.get(key)
+                visits = json.loads(visits_raw) if visits_raw else []
+
+                if uid not in user_data:
+                    user_data[uid] = {
+                        "name": self.USER_NAMES.get(uid, f"ID {uid}"),
+                        "days": {}
+                    }
+                user_data[uid]["days"][date] = visits
+
+            return sorted(user_data.values(), key=lambda u: u["name"])
         except Exception as e:
-            logger.error(f"❌ Ошибка получения login stats: {e}")
-            return {}
+            logger.error(f"❌ Ошибка получения статистики визитов: {e}")
+            return []
 
     async def get_video_list_for_day(self, camera_id: Optional[str], date) -> Optional[list]:
         """Вернуть закэшированный список видео за день. None — cache miss."""

@@ -21,15 +21,10 @@ async def login(request: Request, response: Response):
     if not key:
         raise HTTPException(status_code=400, detail="Key required")
 
-    ADMIN_USER_ID = 1245
-
     worker = BackgroundWorker.get_instance()
     user_id = await worker.cache.validate_key(key)
     if not user_id:
         raise HTTPException(status_code=403, detail="Invalid or expired key")
-
-    if user_id != ADMIN_USER_ID:
-        await worker.cache.record_login(user_id)
 
     response.set_cookie(
         key=COOKIE_NAME,

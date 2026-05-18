@@ -54,8 +54,7 @@ async def get_login_stats_endpoint(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     worker = BackgroundWorker.get_instance()
-    stats = await worker.cache.get_login_stats(exclude_user_id=ADMIN_USER_ID)
-    return stats
+    return await worker.cache.get_visit_stats(exclude_user_id=ADMIN_USER_ID, days=7)
 
 
 @router.get("/stats", response_model=StatsResponse)
