@@ -703,6 +703,29 @@ class CacheManager:
             logger.error(f"❌ Ошибка записи конца даунтайма [{device_id}]: {e}")
             return False
 
+    async def discard_downtime(self, device_id: str) -> bool:
+        """Отменить текущий даунтайм без записи — удаляет открытый интервал из Redis и дневного ключа."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            current_key = f"downtime_current:{device_id}"
+            start_iso = await self.redis_client.get(current_key)
+            if not start_iso:
+                return False
+            await self.redis_client.delete(current_key)
+            start_dt = datetime.fromisoformat(start_iso)
+            day_key = f"downtime:{device_id}:{start_dt.strftime('%Y-%m-%d')}"
+            raw = await self.redis_client.get(day_key)
+            if raw:
+                intervals = json.loads(raw)
+                intervals = [iv for iv in intervals if iv.get("end") is not None]
+                await self.redis_client.setex(day_key, timedelta(days=8), json.dumps(intervals))
+            logger.info(f"🗑️ Даунтайм отменён (рестарт): {device_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка отмены даунтайма [{device_id}]: {e}")
+            return False
+
     async def get_downtime_stats(self, device_ids: list, days: int = 7) -> dict:
         """Статистика даунтайма за N дней для списка устройств."""
         if not await self._ensure_connection():

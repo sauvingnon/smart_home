@@ -115,9 +115,9 @@ class BackgroundWorker:
         # 5 минут grace period — не пишем даунтайм пока всё поднимается
         self.cache.set_startup_grace(300)
 
-        # Закрываем открытые интервалы всех устройств (если сервер перезапустился с открытым даунтаймом)
+        # Отменяем открытые интервалы всех устройств при рестарте — не считаем деплой даунтаймом
         for device_id in [self.device_id, self.sensor_id, self.toilet_id, "cam1"]:
-            await self.cache.record_downtime_end(device_id)
+            await self.cache.discard_downtime(device_id)
 
         # Восстанавливаем даунтайм сервера по последнему heartbeat
         await self.cache.recover_server_downtime()
