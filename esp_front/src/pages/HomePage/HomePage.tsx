@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw, User, Users
+  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw, User, Users, ChevronDown, Search
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
@@ -112,6 +112,7 @@ export default function HomePage() {
   const [visitStats, setVisitStats] = useState<VisitStats | null>(null)
   const [downtimeStats, setDowntimeStats] = useState<DowntimeStats | null>(null)
   const [selectedDowntimeDevice, setSelectedDowntimeDevice] = useState<string | null>(null)
+  const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (selectedDowntimeDevice) {
@@ -411,19 +412,37 @@ export default function HomePage() {
                     const avgUptime = sortedDays.length
                       ? Math.round(sortedDays.reduce((s, [, d]) => s + d.uptime_pct, 0) / sortedDays.length * 10) / 10
                       : 100
+                    const isExpanded = expandedDevices.has(deviceId)
 
                     return (
-                      <div key={deviceId} onClick={() => setSelectedDowntimeDevice(deviceId)} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '12px', cursor: 'pointer' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{device.name}</span>
-                          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                      <div key={deviceId} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '12px' }}>
+
+                        {/* Заголовок — разворачивает полосы */}
+                        <div
+                          onClick={() => setExpandedDevices(prev => {
+                            const next = new Set(prev)
+                            next.has(deviceId) ? next.delete(deviceId) : next.add(deviceId)
+                            return next
+                          })}
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isExpanded ? '10px' : 0, cursor: 'pointer', userSelect: 'none' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <ChevronDown size={15} style={{
+                              color: 'var(--text-secondary)',
+                              transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                              transition: 'transform 0.2s ease',
+                              flexShrink: 0,
+                            }} />
+                            <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{device.name}</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                             {totalMin > 0 && (
-                              <span style={{ fontSize: '11px', color: '#f87171' }}>
+                              <span style={{ fontSize: '12px', color: '#f87171' }}>
                                 ↓ {totalMin >= 60 ? `${Math.floor(totalMin / 60)}ч ${totalMin % 60}м` : `${totalMin}м`}
                               </span>
                             )}
                             <span style={{
-                              fontSize: '12px', fontWeight: 700,
+                              fontSize: '14px', fontWeight: 700,
                               color: avgUptime >= 99 ? '#34d399' : avgUptime >= 95 ? '#fbbf24' : '#f87171'
                             }}>
                               {avgUptime}%
@@ -431,38 +450,45 @@ export default function HomePage() {
                           </div>
                         </div>
 
-                        {/* Тайм-лайн: по одной полоске на день */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          {sortedDays.map(([dateStr, dayData]) => {
-                            const label = dateStr.slice(5) // "MM-DD"
-                            const dayStart = new Date(dateStr + 'T00:00:00+04:00').getTime()
-                            const dayEnd = dayStart + 86400000
+                        {/* Тайм-лайн: разворачивается по клику на заголовок */}
+                        {isExpanded && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {sortedDays.map(([dateStr, dayData]) => {
+                              const label = dateStr.slice(5)
+                              const dayStart = new Date(dateStr + 'T00:00:00+04:00').getTime()
+                              const dayEnd = dayStart + 86400000
 
-                            return (
-                              <div key={dateStr} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '36px', flexShrink: 0 }}>{label}</span>
-                                <div style={{ flex: 1, height: '8px', borderRadius: '4px', background: 'rgba(52,211,153,0.25)', position: 'relative', overflow: 'hidden' }}>
-                                  {dayData.intervals.map((iv, i) => {
-                                    const s = Math.max(new Date(iv.start).getTime(), dayStart)
-                                    const e = Math.min(iv.end ? new Date(iv.end).getTime() : Date.now(), dayEnd)
-                                    const left = ((s - dayStart) / 86400000) * 100
-                                    const width = Math.max(((e - s) / 86400000) * 100, 0.5)
-                                    return (
-                                      <div key={i} style={{
-                                        position: 'absolute', top: 0, bottom: 0,
-                                        left: `${left}%`, width: `${width}%`,
-                                        background: 'rgba(248,113,113,0.85)', borderRadius: '2px'
-                                      }} />
-                                    )
-                                  })}
+                              return (
+                                <div
+                                  key={dateStr}
+                                  onClick={() => setSelectedDowntimeDevice(deviceId)}
+                                  style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', borderRadius: '6px', padding: '3px 4px' }}
+                                >
+                                  <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '36px', flexShrink: 0 }}>{label}</span>
+                                  <div style={{ flex: 1, height: '8px', borderRadius: '4px', background: 'rgba(52,211,153,0.25)', position: 'relative', overflow: 'hidden' }}>
+                                    {dayData.intervals.map((iv, i) => {
+                                      const s = Math.max(new Date(iv.start).getTime(), dayStart)
+                                      const e = Math.min(iv.end ? new Date(iv.end).getTime() : Date.now(), dayEnd)
+                                      const left = ((s - dayStart) / 86400000) * 100
+                                      const width = Math.max(((e - s) / 86400000) * 100, 0.5)
+                                      return (
+                                        <div key={i} style={{
+                                          position: 'absolute', top: 0, bottom: 0,
+                                          left: `${left}%`, width: `${width}%`,
+                                          background: 'rgba(248,113,113,0.85)', borderRadius: '2px'
+                                        }} />
+                                      )
+                                    })}
+                                  </div>
+                                  <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '28px', textAlign: 'right', flexShrink: 0 }}>
+                                    {dayData.uptime_pct}%
+                                  </span>
+                                  <Search size={11} style={{ color: 'var(--text-secondary)', opacity: 0.5, flexShrink: 0 }} />
                                 </div>
-                                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '36px', textAlign: 'right', flexShrink: 0 }}>
-                                  {dayData.uptime_pct}%
-                                </span>
-                              </div>
-                            )
-                          })}
-                        </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
