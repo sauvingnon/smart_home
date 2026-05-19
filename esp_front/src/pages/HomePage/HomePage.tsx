@@ -111,6 +111,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [visitStats, setVisitStats] = useState<VisitStats | null>(null)
   const [downtimeStats, setDowntimeStats] = useState<DowntimeStats | null>(null)
+  const [selectedDowntimeDevice, setSelectedDowntimeDevice] = useState<string | null>(null)
 
   const fetchData = async () => {
     try {
@@ -244,12 +245,12 @@ export default function HomePage() {
 
               <div className="stats-grid">
                 {([
-                  { key: data?.central_board_status, label: 'Центральная плата', Icon: Cpu },
-                  { key: data?.camera_status,         label: 'Камера',            Icon: Camera },
-                  { key: data?.sensor_status,         label: 'Датчик двери',      Icon: Eye },
-                  { key: data?.toilet_status,         label: 'Уборная',           Icon: Bath },
-                ] as const).map(({ key, label, Icon }) => {
-                  const s = getStatusStyle(key || 'never_connected')
+                  { key: data?.central_board_status, label: 'Центральная плата', Icon: Cpu,    defaultStatus: 'online' },
+                  { key: data?.camera_status,         label: 'Камера',            Icon: Camera, defaultStatus: 'never_connected' },
+                  { key: data?.sensor_status,         label: 'Датчик двери',      Icon: Eye,    defaultStatus: 'online' },
+                  { key: data?.toilet_status,         label: 'Уборная',           Icon: Bath,   defaultStatus: 'online' },
+                ] as const).map(({ key, label, Icon, defaultStatus }) => {
+                  const s = getStatusStyle(key || defaultStatus)
                   return (
                     <div className="stat-item" key={label}>
                       <div className="stat-icon" style={{ background: s.bg, color: s.color }}>
@@ -403,7 +404,7 @@ export default function HomePage() {
                       : 100
 
                     return (
-                      <div key={deviceId} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '12px' }}>
+                      <div key={deviceId} onClick={() => setSelectedDowntimeDevice(deviceId)} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '12px', cursor: 'pointer' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{device.name}</span>
                           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -546,6 +547,119 @@ export default function HomePage() {
         )}
       </AnimatePresence>
       
+      <AnimatePresence>
+        {selectedDowntimeDevice && downtimeStats && downtimeStats[selectedDowntimeDevice] && (() => {
+          const device = downtimeStats[selectedDowntimeDevice]
+          const sortedDays = Object.entries(device.days).sort(([a], [b]) => a.localeCompare(b))
+          const totalMin = Math.round(device.total_downtime_seconds / 60)
+
+          const fmtTime = (iso: string) =>
+            new Date(iso).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
+
+          const fmtDate = (dateStr: string) => {
+            const [, month, day] = dateStr.split('-')
+            const months = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек']
+            return `${parseInt(day)} ${months[parseInt(month) - 1]}`
+          }
+
+          return (
+            <motion.div
+              key="downtime-modal-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedDowntimeDevice(null)}
+              style={{
+                position: 'fixed', inset: 0, zIndex: 1000,
+                background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+                display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+              }}
+            >
+              <motion.div
+                key="downtime-modal-panel"
+                initial={{ y: 60, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 60, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: '100%', maxWidth: '480px',
+                  maxHeight: '82vh', overflowY: 'auto',
+                  background: theme === 'dark' ? '#1a1f2e' : '#fff',
+                  borderRadius: '20px 20px 0 0',
+                  padding: '24px 20px 40px',
+                  boxShadow: '0 -8px 40px rgba(0,0,0,0.4)',
+                }}
+              >
+                {/* Шапка */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{device.name}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {totalMin === 0
+                        ? 'Отключений не зафиксировано'
+                        : `Всего: ${totalMin >= 60 ? `${Math.floor(totalMin / 60)}ч ${totalMin % 60}м` : `${totalMin} мин`}`
+                      }
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedDowntimeDevice(null)}
+                    style={{
+                      background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '50%',
+                      width: '32px', height: '32px', cursor: 'pointer',
+                      color: 'var(--text-secondary)', fontSize: '18px', lineHeight: '32px', textAlign: 'center',
+                    }}
+                  >×</button>
+                </div>
+
+                {/* Разбивка по дням */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {sortedDays.map(([dateStr, dayData]) => (
+                    <div key={dateStr}>
+                      <div style={{
+                        fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)',
+                        marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em'
+                      }}>
+                        {fmtDate(dateStr)}
+                        <span style={{ marginLeft: '8px', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                          · {dayData.uptime_pct}% онлайн
+                        </span>
+                      </div>
+
+                      {dayData.intervals.length === 0 ? (
+                        <div style={{ fontSize: '13px', color: '#34d399', paddingLeft: '4px' }}>Без отключений</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {dayData.intervals.map((iv, i) => {
+                            const startMs = new Date(iv.start).getTime()
+                            const endMs = iv.end ? new Date(iv.end).getTime() : Date.now()
+                            const durMin = Math.round((endMs - startMs) / 60000)
+                            return (
+                              <div key={i} style={{
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                padding: '6px 10px', borderRadius: '8px',
+                                background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)',
+                              }}>
+                                <span style={{ fontSize: '13px', color: '#f87171', fontVariantNumeric: 'tabular-nums' }}>
+                                  {fmtTime(iv.start)} — {iv.end ? fmtTime(iv.end) : 'сейчас'}
+                                </span>
+                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                  {durMin >= 60 ? `${Math.floor(durMin / 60)}ч ${durMin % 60}м` : `${durMin} мин`}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            </motion.div>
+          )
+        })()}
+      </AnimatePresence>
+
       <BottomNavBar />
     </div>
   )

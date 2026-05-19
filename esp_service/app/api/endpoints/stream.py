@@ -98,50 +98,44 @@ async def stream_video(
     if not user_id:
         raise HTTPException(status_code=403, detail="Недействительный токен")
 
-    _cors = {
+    # Парсим Range заголовок
+    range_header = request.headers.get('range')
+    start = 0
+    end = None
+    if range_header:
+        try:
+            parts = range_header.replace('bytes=', '').split('-')
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if len(parts) > 1 and parts[1] else None
+        except Exception:
+            pass
+
+    stream, file_size, actual_end = await worker.video_service.get_video_stream_ranged(
+        camera_id, video_id, start, end
+    )
+
+    if not stream:
+        raise HTTPException(status_code=404, detail="Видео не найдено")
+
+    headers = {
         'Accept-Ranges': 'bytes',
+        'Content-Length': str(actual_end - start + 1),
         'Cache-Control': 'no-cache',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
     }
 
-    range_header = request.headers.get('range')
-
-    if not range_header:
-        # Нет Range — стримим напрямую из S3, не буферизируя в памяти
-        stream, file_size = await worker.video_service.stream_video_download(camera_id, video_id)
-        if not stream:
-            raise HTTPException(status_code=404, detail="Видео не найдено")
-        return StreamingResponse(
-            stream,
-            status_code=200,
-            media_type='video/mp4',
-            headers={**_cors, 'Content-Length': str(file_size)},
-        )
-
-    # Range request — возвращаем нужный чанк
-    data, file_size, content_range, error = await worker.video_service.stream_video(
-        camera_id=camera_id,
-        video_id=video_id,
-        range_header=range_header,
-    )
-
-    if error:
-        raise HTTPException(
-            status_code=404 if error == "Видео не найдено" else 500,
-            detail=error,
-        )
-
-    headers = {**_cors}
     status_code = 200
-    if content_range:
+    if range_header:
         status_code = 206
-        headers['Content-Range'] = content_range
-        headers['Content-Length'] = str(len(data))
-    else:
-        headers['Content-Length'] = str(file_size)
+        headers['Content-Range'] = f'bytes {start}-{actual_end}/{file_size}'
 
-    return Response(content=data, status_code=status_code, media_type='video/mp4', headers=headers)
+    return StreamingResponse(
+        stream,
+        status_code=status_code,
+        media_type='video/mp4',
+        headers=headers,
+    )
 
 @router.options("/videos/stream")
 async def options_stream_video():

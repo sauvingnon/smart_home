@@ -375,15 +375,21 @@ class BackgroundWorker:
 
     def _record_device_activity(self, activity_name: str = ""):
         """Записать активность центральной платы (любое сообщение)"""
+        old = self.device_status
         self.last_activity_timestamp = _get_izhevsk_time()
         self.device_status = self._update_device_status()
+        if old in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and self.device_status == DeviceStatus.ONLINE:
+            asyncio.create_task(self.cache.record_downtime_end(self.device_id))
         if activity_name:
             logger.debug(f"📍 Активность: {activity_name}. Статус устройства {self.device_status.value}")
 
     def _record_toilet_activity(self, activity_name: str = ""):
         """Записать активность туалетной платы (любое сообщение)"""
+        old = self.toilet_status
         self.last_activity_timestamp_toilet = _get_izhevsk_time()
         self.toilet_status = self._update_toilet_status()
+        if old in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and self.toilet_status == DeviceStatus.ONLINE:
+            asyncio.create_task(self.cache.record_downtime_end(self.toilet_id))
         if activity_name:
             logger.debug(f"🚽 Активность туалета: {activity_name}. Статус {self.toilet_status.value}")
 
@@ -412,7 +418,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Центральная плата ОНЛАЙН")
 
-                if old_status == DeviceStatus.ONLINE and new_status != DeviceStatus.ONLINE:
+                if old_status == DeviceStatus.ONLINE and new_status == DeviceStatus.DEAD:
                     await self.cache.record_downtime_start(self.device_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.device_id)
@@ -427,7 +433,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Датчик двери ОНЛАЙН")
 
-                if old_status == DeviceStatus.ONLINE and new_status != DeviceStatus.ONLINE:
+                if old_status == DeviceStatus.ONLINE and new_status == DeviceStatus.DEAD:
                     await self.cache.record_downtime_start(self.sensor_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.sensor_id)
@@ -442,7 +448,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Туалет ОНЛАЙН")
 
-                if old_status == DeviceStatus.ONLINE and new_status != DeviceStatus.ONLINE:
+                if old_status == DeviceStatus.ONLINE and new_status == DeviceStatus.DEAD:
                     await self.cache.record_downtime_start(self.toilet_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.toilet_id)
@@ -970,7 +976,11 @@ class BackgroundWorker:
 
     async def handle_sensor_healthcheck(self, sensor_id: str, data: dict):
         """Проверка датчика двери, что он в порядке."""
+        old = self.sensor_status
         self.last_activity_timestamp_sensor = _get_izhevsk_time()
+        self.sensor_status = self._update_sensor_status()
+        if old in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and self.sensor_status == DeviceStatus.ONLINE:
+            asyncio.create_task(self.cache.record_downtime_end(self.sensor_id))
 
     async def handle_toilet_telemetry(self, device_id: str, data: dict):
         """Обработчик телеметрии туалетной платы (heartbeat раз в минуту)."""

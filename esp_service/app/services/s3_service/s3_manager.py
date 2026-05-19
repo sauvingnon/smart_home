@@ -719,16 +719,50 @@ class S3Manager:
             file_size = head['ContentLength']
 
             response = await self._client.get_object(Bucket=self.bucket_name, Key=key)
+            body = response['Body']
 
             async def _stream():
-                body = response['Body']
-                async for chunk in body.iter_chunks(chunk_size=64 * 1024):
-                    yield chunk[0] if isinstance(chunk, tuple) else chunk
+                while True:
+                    chunk = await body.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
 
             return _stream(), file_size
         except Exception as e:
             logger.exception(f"❌ Ошибка стриминга видео {key}: {e}")
             return None, 0
+
+    async def stream_range(self, key: str, start: int = 0, end: Optional[int] = None):
+        """
+        Стриминг байтового диапазона из S3.
+        Возвращает (async_generator, file_size, actual_end) или (None, 0, 0).
+        """
+        if not await self._ensure_connection():
+            return None, 0, 0
+        try:
+            head = await self._client.head_object(Bucket=self.bucket_name, Key=key)
+            file_size = head['ContentLength']
+            actual_end = end if end is not None else file_size - 1
+
+            kwargs: dict = {'Bucket': self.bucket_name, 'Key': key}
+            if start > 0 or actual_end < file_size - 1:
+                kwargs['Range'] = f'bytes={start}-{actual_end}'
+
+            response = await self._client.get_object(**kwargs)
+            body = response['Body']
+
+            async def _stream():
+                while True:
+                    chunk = await body.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+
+            return _stream(), file_size, actual_end
+        except Exception as e:
+            logger.exception(f"❌ Ошибка stream_range {key}: {e}")
+            return None, 0, 0
 
     async def get_video_by_id(self, camera_id: str, video_id: str) -> Optional[bytes]:
         """Скачать полное видео по video_id"""

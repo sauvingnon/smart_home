@@ -933,6 +933,24 @@ class VideoService:
             return None, 0
         return await self.s3_manager.get_video_stream(key)
 
+    async def get_video_stream_ranged(
+        self,
+        camera_id: str,
+        video_id: str,
+        start: int = 0,
+        end: Optional[int] = None,
+    ):
+        """
+        Стриминг байтового диапазона напрямую из S3.
+        Возвращает (async_generator, file_size, actual_end) или (None, 0, 0).
+        """
+        if not self.s3_manager:
+            return None, 0, 0
+        key = await self._get_video_key(camera_id, video_id)
+        if not key:
+            return None, 0, 0
+        return await self.s3_manager.stream_range(key, start, end)
+
     async def get_video_by_id(self, camera_id: str, video_id: str) -> Optional[bytes]:
         """Скачать полное видео по video_id"""
         if not self.s3_manager:
