@@ -502,10 +502,10 @@ class BackgroundWorker:
                             current_condition=adapter.current_condition,
                             humidity=adapter.current_humidity,
                             wind_speed=adapter.current_wind,
+                            morning_temp=adapter.morning_temp,
+                            day_temp=adapter.day_temp,
                             evening_temp=adapter.evening_temp,
                             night_temp=adapter.night_temp,
-                            morning_temp=adapter.tomorrow_temp,
-                            day_temp=adapter.current_temp,
                             timestamp=_get_izhevsk_time(),
                             expires_at=datetime.now() + timedelta(minutes=60),
                             api_calls_today=api_calls + 1
@@ -563,11 +563,11 @@ class BackgroundWorker:
                     condition=weather.current_condition,
                     humidity=weather.humidity,
                     wind_speed=weather.wind_speed,
-                    morning_temp=weather.morning_temp,
-                    day_temp=weather.day_temp,
-                    evening_temp=weather.evening_temp,
-                    night_temp=weather.night_temp,
-                    update_at=self._format_time_short(weather.timestamp)     
+                    morning_temp=weather.morning_temp or weather.current_temp,
+                    day_temp=weather.day_temp or weather.current_temp,
+                    evening_temp=weather.evening_temp or weather.current_temp,
+                    night_temp=weather.night_temp or weather.current_temp,
+                    update_at=self._format_time_short(weather.timestamp)
                 )
                 
                 # Отправляем на плату 

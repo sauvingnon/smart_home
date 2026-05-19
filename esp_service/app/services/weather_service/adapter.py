@@ -7,20 +7,23 @@ from app.services.weather_service.schemas import YandexResponse, ForecastDay, Fo
 
 class WeatherAdapter(BaseModel):
     """Адаптер для работы с погодными данными"""
-    
+
     # Наш универсальный интерфейс (не зависит от провайдера)
     current_temp: int
     current_feels_like: int
     current_condition: str
     current_wind: float
     current_humidity: int
-    
+
+    morning_temp: Optional[int] = None
+    day_temp: Optional[int] = None
+
     evening_temp: Optional[int]
     evening_condition: str
-    
+
     night_temp: Optional[int]
     night_condition: str
-    
+
     tomorrow_temp: Optional[int]
     tomorrow_condition: str
     tomorrow_temp_range: str
@@ -38,6 +41,8 @@ class WeatherAdapter(BaseModel):
         
         # Прогноз на сегодня
         today = data.forecasts[0]
+        morning = ForecastPart(**today.parts['morning']) if 'morning' in today.parts else None
+        day = ForecastPart(**today.parts['day']) if 'day' in today.parts else None
         evening = ForecastPart(**today.parts['evening']) if 'evening' in today.parts else None
         night = ForecastPart(**today.parts['night']) if 'night' in today.parts else None
         
@@ -53,9 +58,12 @@ class WeatherAdapter(BaseModel):
             current_feels_like=fact.feels_like,
             current_condition=fact.condition,
             current_wind=fact.wind_speed,
-
             current_humidity=fact.humidity,
-            
+
+            # Сегодня
+            morning_temp=morning.temp_avg if morning else None,
+            day_temp=day.temp_avg if day else None,
+
             # Вечер
             evening_temp=evening.temp_avg if evening else None,
             evening_condition=evening.condition if evening else "нет данных",

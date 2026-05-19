@@ -165,7 +165,6 @@ class CacheManager:
             return
             
         try:
-            # Сохраняем на 10 минут
             await self.redis_client.setex(
                 f"weather:Izhevsk",
                 timedelta(minutes=60),
