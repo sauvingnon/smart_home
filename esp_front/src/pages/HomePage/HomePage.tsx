@@ -113,6 +113,15 @@ export default function HomePage() {
   const [downtimeStats, setDowntimeStats] = useState<DowntimeStats | null>(null)
   const [selectedDowntimeDevice, setSelectedDowntimeDevice] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (selectedDowntimeDevice) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => { document.body.style.overflow = '' }
+  }, [selectedDowntimeDevice])
+
   const fetchData = async () => {
     try {
       setLoading(true)
@@ -584,7 +593,7 @@ export default function HomePage() {
                 onClick={(e) => e.stopPropagation()}
                 style={{
                   width: '100%', maxWidth: '480px',
-                  maxHeight: '82vh', overflowY: 'auto',
+                  maxHeight: '82vh', overflowY: 'auto', overscrollBehavior: 'contain',
                   background: theme === 'dark' ? '#1a1f2e' : '#fff',
                   borderRadius: '20px 20px 0 0',
                   padding: '24px 20px 40px',

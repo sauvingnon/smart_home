@@ -115,8 +115,8 @@ class BackgroundWorker:
         # 5 минут grace period — не пишем даунтайм пока всё поднимается
         self.cache.set_startup_grace(300)
 
-        # Закрываем открытые интервалы MQTT-плат (если сервер перезапустился с открытым даунтаймом)
-        for device_id in [self.device_id, self.sensor_id, self.toilet_id]:
+        # Закрываем открытые интервалы всех устройств (если сервер перезапустился с открытым даунтаймом)
+        for device_id in [self.device_id, self.sensor_id, self.toilet_id, "cam1"]:
             await self.cache.record_downtime_end(device_id)
 
         # Восстанавливаем даунтайм сервера по последнему heartbeat
