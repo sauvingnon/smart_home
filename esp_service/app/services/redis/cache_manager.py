@@ -591,6 +591,13 @@ class CacheManager:
 
     # ───────────────────── DOWNTIME TRACKING ─────────────────────
 
+    _startup_grace_until: Optional[datetime] = None
+
+    @classmethod
+    def set_startup_grace(cls, seconds: int = 300):
+        """Запрещает record_downtime_start на время grace period после старта сервера."""
+        cls._startup_grace_until = datetime.now(tz=timezone.utc) + timedelta(seconds=seconds)
+
     DEVICE_NAMES: dict = {
         "greenhouse_01": "Центральная плата",
         "sensor_door_pir": "Датчик двери",
@@ -600,6 +607,8 @@ class CacheManager:
 
     async def record_downtime_start(self, device_id: str) -> bool:
         """Зафиксировать начало даунтайма устройства."""
+        if self._startup_grace_until and datetime.now(tz=timezone.utc) < self._startup_grace_until:
+            return False  # Стартовый grace period — игнорируем
         if not await self._ensure_connection():
             return False
         try:

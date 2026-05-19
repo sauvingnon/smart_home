@@ -58,12 +58,13 @@ class BackgroundWorker:
         self.sensor_id = DEFAULT_SENSOR_ID
         self.toilet_id = DEFAULT_TOILET_ID
         self.current_telemetry: Optional[TelemetryData] = None
-        self.last_activity_timestamp: Optional[datetime] = None  # Любое сообщение от платы
-        self.device_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
-        self.last_activity_timestamp_sensor: Optional[datetime] = None  # Любое сообщение от дверного датчика
-        self.sensor_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
-        self.last_activity_timestamp_toilet: Optional[datetime] = None  # Любое сообщение от датчика туалета
-        self.toilet_status: DeviceStatus = DeviceStatus.NEVER_CONNECTED
+        startup_time = _get_izhevsk_time()
+        self.last_activity_timestamp: Optional[datetime] = startup_time
+        self.device_status: DeviceStatus = DeviceStatus.ONLINE
+        self.last_activity_timestamp_sensor: Optional[datetime] = startup_time
+        self.sensor_status: DeviceStatus = DeviceStatus.ONLINE
+        self.last_activity_timestamp_toilet: Optional[datetime] = startup_time
+        self.toilet_status: DeviceStatus = DeviceStatus.ONLINE
         self.counter_for_telemetry = 0
         init_auth_manager(cache_manager)
         self._initialization_complete = False  # Флаг: сервис полностью инициализирован
@@ -110,6 +111,9 @@ class BackgroundWorker:
         # Запускаем VideoService observer loop в фоне
         asyncio.create_task(self.video_service.start())
         logger.info("✅ VideoService инициализирован (observer loop запущен)")
+
+        # 5 минут grace period — не пишем даунтайм пока всё поднимается
+        self.cache.set_startup_grace(300)
 
         # Восстанавливаем даунтайм сервера по последнему heartbeat
         await self.cache.recover_server_downtime()
@@ -418,7 +422,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Центральная плата ОНЛАЙН")
 
-                if old_status == DeviceStatus.ONLINE and new_status == DeviceStatus.DEAD:
+                if old_status in (DeviceStatus.ONLINE, DeviceStatus.OFFLINE) and new_status == DeviceStatus.DEAD:
                     await self.cache.record_downtime_start(self.device_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.device_id)
@@ -433,7 +437,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Датчик двери ОНЛАЙН")
 
-                if old_status == DeviceStatus.ONLINE and new_status == DeviceStatus.DEAD:
+                if old_status in (DeviceStatus.ONLINE, DeviceStatus.OFFLINE) and new_status == DeviceStatus.DEAD:
                     await self.cache.record_downtime_start(self.sensor_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.sensor_id)
@@ -448,7 +452,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Туалет ОНЛАЙН")
 
-                if old_status == DeviceStatus.ONLINE and new_status == DeviceStatus.DEAD:
+                if old_status in (DeviceStatus.ONLINE, DeviceStatus.OFFLINE) and new_status == DeviceStatus.DEAD:
                     await self.cache.record_downtime_start(self.toilet_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.toilet_id)
