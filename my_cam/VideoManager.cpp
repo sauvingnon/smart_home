@@ -10,7 +10,7 @@ VideoManager::VideoManager(const char* cameraId, const char* accessKey, const ch
 
 bool VideoManager::begin() {
     _sdReady = false;
-    
+
     // Сначала монтируем SD
     if (!SD_MMC.begin("/sdcard", true)) {
         Serial.println("SD Card mount failed in VideoManager");
@@ -90,9 +90,10 @@ bool VideoManager::startRecord(unsigned long startTime) {
     }
     
     _recording = true;
-    _recordStartTime = millis();  // ← для таймаута используем millis()
-    _recordStartTimestamp = startTime;  // ← переименуем, чтобы не путать
+    _recordStartTime = millis();
+    _recordStartTimestamp = startTime;
     _recordDuration = 0;
+    _recordedBytes  = 0;
     Serial.printf("Recording started: %s (startTime=%lu)\n", _currentFileName.c_str(), startTime);
     return true;
 }
@@ -102,9 +103,9 @@ bool VideoManager::writeFrame(uint8_t* data, size_t len) {
     size_t written = _currentFile.write(data, len);
     if (written != len) {
         Serial.println("Write error during recording");
-        // Не останавливаем запись, но сообщаем об ошибке
         return false;
     }
+    _recordedBytes += len;
     return true;
 }
 
@@ -121,18 +122,14 @@ bool VideoManager::stopRecord() {
     if (!wasRecording) return false;
 
     _currentFile.close();
-    
+
     unsigned long duration = (millis() - _recordStartTime) / 1000;
-    
-    // Проверяем существование файла
+    size_t fileSize = _recordedBytes;  // already tracked — no need to re-open
+
     if (!SD_MMC.exists(_currentFileName)) {
         Serial.printf("❌ File NOT found: %s\n", _currentFileName.c_str());
         return false;
     }
-
-    File sizeFile = SD_MMC.open(_currentFileName, FILE_READ);
-    size_t fileSize = sizeFile.size();
-    sizeFile.close();
 
     if (fileSize < MIN_RECORD_SIZE) {
         Serial.printf("⚠️ Recording too small (%zu B), discarding: %s\n", fileSize, _currentFileName.c_str());
@@ -228,12 +225,12 @@ void VideoManager::removeFirstLine() {
     // Пропускаем первую строку
     queueFile.readStringUntil('\n');
     
-    // Создаём новый файл без первой строки
     File tempFile = SD_MMC.open("/queue.tmp", FILE_WRITE);
     if (tempFile) {
-        while (queueFile.available()) {
-            tempFile.write(queueFile.read());
-        }
+        uint8_t copyBuf[512];
+        size_t n;
+        while ((n = queueFile.read(copyBuf, sizeof(copyBuf))) > 0)
+            tempFile.write(copyBuf, n);
         tempFile.close();
     }
     queueFile.close();

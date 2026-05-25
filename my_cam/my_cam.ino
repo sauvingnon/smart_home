@@ -191,7 +191,19 @@ void applyFanMode() {
     switch (fanMode) {
         case 0: digitalWrite(FAN_PIN, LOW); break;
         case 1: digitalWrite(FAN_PIN, systemState != STATE_IDLE ? HIGH : LOW); break;
-        case 2: digitalWrite(FAN_PIN, getTemperature() > 60.0f ? HIGH : LOW); break;
+        case 2: {
+            static bool          autoFanOn = false;
+            static unsigned long fanOnAt   = 0;
+            float temp = getTemperature();
+            if (!autoFanOn && temp > 60.0f) {
+                autoFanOn = true;
+                fanOnAt   = millis();
+            } else if (autoFanOn && temp < 57.0f && (millis() - fanOnAt) >= 120000UL) {
+                autoFanOn = false;
+            }
+            digitalWrite(FAN_PIN, autoFanOn ? HIGH : LOW);
+            break;
+        }
         default: break;
     }
 }

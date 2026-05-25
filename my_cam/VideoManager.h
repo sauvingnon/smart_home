@@ -53,6 +53,8 @@ private:
     volatile bool _abortRequested  = false; // set by requestAbort(); checked between chunks
     portMUX_TYPE  _stopMux = portMUX_INITIALIZER_UNLOCKED; // guards _recording in stopRecord()
     WiFiClientSecure _sslClient;  // persistent member — requestAbort() calls stop() to interrupt POST mid-chunk
+
+    size_t _recordedBytes = 0;  // tracks file size without re-opening after stop
     
     void addRecord(const String& filename, unsigned long startTime, unsigned long duration, size_t fileSize);
     void removeFirstLine();
