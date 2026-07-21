@@ -2,6 +2,7 @@ services:
   redis:
     image: redis:alpine
     container_name: esp_redis
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -168,7 +169,7 @@ services:
         max-file: "3"
 
   esp_grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.1.0
     container_name: esp_grafana
     ports:
     # Даем ей выход, порт 3000 занят remnawave, поэтому даем 3001 для просмотра логов,
@@ -177,6 +178,7 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_LOG_LEVEL=warn
+      - GF_INSTALL_PLUGINS=grafana-lokiexplore-app
     volumes:
       - grafana_data:/var/lib/grafana
     restart: unless-stopped

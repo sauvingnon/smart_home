@@ -843,6 +843,7 @@ class CacheManager:
             else:
                 logger.info("📡 Первый старт сервера — heartbeat ещё не было")
 
+            await self.update_server_heartbeat()
             return True
         except Exception as e:
             logger.error(f"❌ Ошибка восстановления даунтайма сервера: {e}")
