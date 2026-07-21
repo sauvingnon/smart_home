@@ -6,7 +6,10 @@ import json
 from logger import logger
 import asyncio
 import secrets
+import os
 from config import DEFAULT_RECORDING_DAYS
+
+KEYS_BACKUP_PATH = "/app/data/access_keys.json"
 
 # =================== КЭШ МЕНЕДЖЕР ===================
 class CacheManager:
@@ -262,27 +265,67 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Ошибка сохранения времени синхронизации для {device_id}: {e}")
 
+    def _load_keys_backup(self) -> dict:
+        try:
+            if os.path.exists(KEYS_BACKUP_PATH):
+                with open(KEYS_BACKUP_PATH, "r") as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"❌ Ошибка чтения бэкапа ключей: {e}")
+        return {}
+
+    def _save_keys_backup(self, data: dict):
+        try:
+            os.makedirs(os.path.dirname(KEYS_BACKUP_PATH), exist_ok=True)
+            with open(KEYS_BACKUP_PATH, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"❌ Ошибка записи бэкапа ключей: {e}")
+
+    async def restore_keys_from_backup(self):
+        """При старте: восстановить ключи из файла в Redis если их нет."""
+        backup = self._load_keys_backup()
+        if not backup:
+            return
+        if not await self._ensure_connection():
+            return
+        restored = 0
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
+        for key, entry in backup.items():
+            expires_at = entry.get("expires_at", 0)
+            if expires_at and expires_at < now_ts:
+                continue  # ключ истёк — не восстанавливаем
+            user_id = entry.get("user_id")
+            if not user_id:
+                continue
+            remaining = int(expires_at - now_ts) if expires_at else int(self.key_ttl.total_seconds())
+            redis_key = f"{self.key_prefix}{key}"
+            try:
+                await self.redis_client.setex(redis_key, remaining, str(user_id))
+                restored += 1
+            except Exception as e:
+                logger.error(f"❌ Ошибка восстановления ключа {key[:8]}…: {e}")
+        logger.info(f"🔑 Восстановлено {restored}/{len(backup)} ключей из бэкапа")
+
     async def generate_key(self, user_id: int) -> str:
         """Генерирует новый ключ для пользователя."""
         if not self.redis_client:
             return
-        
+
         if not await self._ensure_connection():
             return
-        
-        # Генерируем случайный ключ
+
         key = secrets.token_urlsafe(32)
         redis_key = f"{self.key_prefix}{key}"
-            
+        expires_at = (datetime.now(tz=timezone.utc) + self.key_ttl).timestamp()
+
         try:
-            # Сохраняем на 10 минут
-            await self.redis_client.setex(
-                redis_key,
-                self.key_ttl,
-                str(user_id)
-            )
-            
-            # Обновляем счетчик вызовов за день
+            await self.redis_client.setex(redis_key, self.key_ttl, str(user_id))
+
+            backup = self._load_keys_backup()
+            backup[key] = {"user_id": user_id, "expires_at": expires_at}
+            self._save_keys_backup(backup)
+
             return key
         except Exception as e:
             logger.exception(f"Ошибка сохранения в кэш ключа: {e}")
@@ -308,7 +351,12 @@ class CacheManager:
     async def revoke_key(self, key: str) -> bool:
         """Отзывает ключ"""
         redis_key = f"{self.key_prefix}{key}"
-        return bool(await self.redis_client.delete(redis_key))
+        result = bool(await self.redis_client.delete(redis_key))
+        backup = self._load_keys_backup()
+        if key in backup:
+            del backup[key]
+            self._save_keys_backup(backup)
+        return result
     
     async def cache_daily_report(self, report_text: str, report_date: str, now: datetime) -> bool:
         """

@@ -2218,12 +2218,15 @@ void setupNetwork(){
   }
 
   // Подключение к MQTT
+  // Хендлеры регистрируем ВСЕГДА — даже если MQTT сейчас недоступен.
+  // Иначе при авто-переподключении через loop() resubscribeAll() подписывается
+  // на пустой массив и плата не может принимать сообщения с сервера.
+  setupMQTTHandlers();
   if (!connectToMQTT()) {
     // Если MQTT не доступен - всё равно продолжаем
     displayOnlineWithoutMQTT();
   } else {
     displayConnected();
-    setupMQTTHandlers();
   }
 
 }

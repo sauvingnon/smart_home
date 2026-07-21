@@ -112,6 +112,9 @@ class BackgroundWorker:
         asyncio.create_task(self.video_service.start())
         logger.info("✅ VideoService инициализирован (observer loop запущен)")
 
+        # Восстанавливаем ключи авторизации из файлового бэкапа (на случай очистки Redis)
+        await self.cache.restore_keys_from_backup()
+
         # 5 минут grace period — не пишем даунтайм пока всё поднимается
         self.cache.set_startup_grace(300)
 
