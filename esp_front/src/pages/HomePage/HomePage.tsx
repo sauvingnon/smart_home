@@ -466,7 +466,11 @@ export default function HomePage() {
                                 >
                                   <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '36px', flexShrink: 0 }}>{label}</span>
                                   <div style={{ flex: 1, height: '8px', borderRadius: '4px', background: 'rgba(52,211,153,0.25)', position: 'relative', overflow: 'hidden' }}>
-                                    {dayData.intervals.map((iv, i) => {
+                                    {dayData.intervals.filter(iv => {
+                                      const startMs = new Date(iv.start).getTime()
+                                      const endMs = iv.end ? new Date(iv.end).getTime() : Date.now()
+                                      return Math.round((endMs - startMs) / 60000) > 0
+                                    }).map((iv, i) => {
                                       const s = Math.max(new Date(iv.start).getTime(), dayStart)
                                       const e = Math.min(iv.end ? new Date(iv.end).getTime() : Date.now(), dayEnd)
                                       const left = ((s - dayStart) / 86400000) * 100
@@ -661,31 +665,38 @@ export default function HomePage() {
                         </span>
                       </div>
 
-                      {dayData.intervals.length === 0 ? (
-                        <div style={{ fontSize: '13px', color: '#34d399', paddingLeft: '4px' }}>Без отключений</div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          {dayData.intervals.map((iv, i) => {
-                            const startMs = new Date(iv.start).getTime()
-                            const endMs = iv.end ? new Date(iv.end).getTime() : Date.now()
-                            const durMin = Math.round((endMs - startMs) / 60000)
-                            return (
-                              <div key={i} style={{
-                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                padding: '6px 10px', borderRadius: '8px',
-                                background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)',
-                              }}>
-                                <span style={{ fontSize: '13px', color: '#f87171', fontVariantNumeric: 'tabular-nums' }}>
-                                  {fmtTime(iv.start)} — {iv.end ? fmtTime(iv.end) : 'сейчас'}
-                                </span>
-                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                                  {durMin >= 60 ? `${Math.floor(durMin / 60)}ч ${durMin % 60}м` : `${durMin} мин`}
-                                </span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
+                      {(() => {
+                        const visibleIntervals = dayData.intervals.filter(iv => {
+                          const startMs = new Date(iv.start).getTime()
+                          const endMs = iv.end ? new Date(iv.end).getTime() : Date.now()
+                          return Math.round((endMs - startMs) / 60000) > 0
+                        })
+                        return visibleIntervals.length === 0 ? (
+                          <div style={{ fontSize: '13px', color: '#34d399', paddingLeft: '4px' }}>Без отключений</div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {visibleIntervals.map((iv, i) => {
+                              const startMs = new Date(iv.start).getTime()
+                              const endMs = iv.end ? new Date(iv.end).getTime() : Date.now()
+                              const durMin = Math.round((endMs - startMs) / 60000)
+                              return (
+                                <div key={i} style={{
+                                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                  padding: '6px 10px', borderRadius: '8px',
+                                  background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)',
+                                }}>
+                                  <span style={{ fontSize: '13px', color: '#f87171', fontVariantNumeric: 'tabular-nums' }}>
+                                    {fmtTime(iv.start)} — {iv.end ? fmtTime(iv.end) : 'сейчас'}
+                                  </span>
+                                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                    {durMin >= 60 ? `${Math.floor(durMin / 60)}ч ${durMin % 60}м` : `${durMin} мин`}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                     </div>
                   ))}
                 </div>
