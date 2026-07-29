@@ -8,7 +8,7 @@ import {
 import { apiClient } from '../../api/client'
 import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
-import AIReport from '../../components/AIReport/AIReport'
+// import AIReport from '../../components/AIReport/AIReport'
 import { useTheme } from '../../context/ThemeContext'
 import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
@@ -390,7 +390,7 @@ export default function HomePage() {
           
           <TemperatureChart theme={theme} />
 
-          <AIReport theme={theme} />
+          {/* <AIReport theme={theme} /> */}
 
           {downtimeStats && (
             <motion.div variants={itemVar} className="glass-card">
