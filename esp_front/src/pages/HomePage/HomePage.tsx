@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw, User, Users, ChevronDown, Search
+  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw, User, Users, ChevronDown, Search, Fan, Check, X
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
@@ -113,6 +113,8 @@ export default function HomePage() {
   const [downtimeStats, setDowntimeStats] = useState<DowntimeStats | null>(null)
   const [selectedDowntimeDevice, setSelectedDowntimeDevice] = useState<string | null>(null)
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set())
+  const [silentLoading, setSilentLoading] = useState(false)
+  const [silentFeedback, setSilentFeedback] = useState<'ok' | 'error' | null>(null)
 
   useEffect(() => {
     if (selectedDowntimeDevice) {
@@ -152,6 +154,25 @@ export default function HomePage() {
       const res = await apiClient.fetch('/esp_service/downtime')
       setDowntimeStats(res)
     } catch {}
+  }
+
+  const activateSilentMode = async () => {
+    if (silentLoading) return
+    setSilentLoading(true)
+    setSilentFeedback(null)
+    try {
+      const currentSettings = await apiClient.fetch('/esp_service/settings')
+      await apiClient.fetch('/esp_service/settings', {
+        method: 'POST',
+        body: JSON.stringify({ ...currentSettings, silentMode: true })
+      })
+      setSilentFeedback('ok')
+    } catch {
+      setSilentFeedback('error')
+    } finally {
+      setSilentLoading(false)
+      setTimeout(() => setSilentFeedback(null), 2500)
+    }
   }
 
   const isAllOnline = (): boolean => {
@@ -205,6 +226,62 @@ export default function HomePage() {
           </div>
           
           <div className="header-actions">
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={activateSilentMode}
+              className={`theme-button silent-mode-button ${silentFeedback === 'ok' ? 'silent-ok' : ''} ${silentFeedback === 'error' ? 'silent-error' : ''}`}
+              title="Включить режим тишины вентилятора"
+              disabled={silentLoading}
+            >
+              <AnimatePresence mode="wait" initial={false}>
+                {silentLoading ? (
+                  <motion.span
+                    key="loading"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ duration: 0.15 }}
+                    className="silent-icon-wrap"
+                  >
+                    <RefreshCw size={20} className="spin" />
+                  </motion.span>
+                ) : silentFeedback === 'ok' ? (
+                  <motion.span
+                    key="ok"
+                    initial={{ opacity: 0, scale: 0.3, rotate: -45 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+                    className="silent-icon-wrap"
+                  >
+                    <Check size={20} />
+                  </motion.span>
+                ) : silentFeedback === 'error' ? (
+                  <motion.span
+                    key="error"
+                    initial={{ opacity: 0, scale: 0.3 }}
+                    animate={{ opacity: 1, scale: 1, x: [0, -4, 4, -3, 3, 0] }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ duration: 0.4 }}
+                    className="silent-icon-wrap"
+                  >
+                    <X size={20} />
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    key="idle"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ duration: 0.15 }}
+                    className="silent-icon-wrap fan-off-icon"
+                  >
+                    <Fan size={20} />
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </motion.button>
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
