@@ -118,9 +118,28 @@ class BackgroundWorker:
         # 5 минут grace period — не пишем даунтайм пока всё поднимается
         self.cache.set_startup_grace(300)
 
-        # Отменяем открытые интервалы всех устройств при рестарте — не считаем деплой даунтаймом
-        for device_id in [self.device_id, self.sensor_id, self.toilet_id, "cam1"]:
-            await self.cache.discard_downtime(device_id)
+        # При рестарте in-memory статус устройств всегда стартует оптимистично ONLINE
+        # (last_activity_timestamp = "сейчас", см. __init__), поэтому если устройство
+        # реально было в даунтайме ДО рестарта (интервал в Redis всё ещё открыт) и
+        # переподключилось быстро — переход OFFLINE/DEAD → ONLINE, который закрывает
+        # интервал, просто не произойдёт: in-memory статус никогда не побывает в OFFLINE/DEAD.
+        # Интервал так и останется открытым в Redis навсегда. Раньше это лечили тем, что
+        # при каждом рестарте удаляли (discard_downtime) любой открытый интервал — но это
+        # стирало реальный даунтайм, если устройство и правда легло перед деплоем.
+        # Вместо этого: если даунтайм был открыт по-настоящему — состариваем timestamp
+        # активности и явно выставляем DEAD, чтобы следующий реальный коннект честно
+        # закрыл интервал сам, с правильным временем окончания.
+        # Камера тут не участвует: её downtime_end вызывается безусловно при любом
+        # реконнекте (video_service.py), у неё нет проблемы «застревания».
+        stale_timestamp = _get_izhevsk_time() - timedelta(days=1)
+        for device_id, ts_attr, status_attr in [
+            (self.device_id, "last_activity_timestamp", "device_status"),
+            (self.sensor_id, "last_activity_timestamp_sensor", "sensor_status"),
+            (self.toilet_id, "last_activity_timestamp_toilet", "toilet_status"),
+        ]:
+            if await self.cache.has_open_downtime(device_id):
+                setattr(self, ts_attr, stale_timestamp)
+                setattr(self, status_attr, DeviceStatus.DEAD)
 
         # Восстанавливаем даунтайм сервера по последнему heartbeat
         await self.cache.recover_server_downtime()
@@ -429,7 +448,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Центральная плата ОНЛАЙН")
 
-                if old_status in (DeviceStatus.ONLINE, DeviceStatus.OFFLINE) and new_status == DeviceStatus.DEAD:
+                if old_status == DeviceStatus.ONLINE and new_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD):
                     await self.cache.record_downtime_start(self.device_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.device_id)
@@ -444,7 +463,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Датчик двери ОНЛАЙН")
 
-                if old_status in (DeviceStatus.ONLINE, DeviceStatus.OFFLINE) and new_status == DeviceStatus.DEAD:
+                if old_status == DeviceStatus.ONLINE and new_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD):
                     await self.cache.record_downtime_start(self.sensor_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.sensor_id)
@@ -459,7 +478,7 @@ class BackgroundWorker:
                 elif new_status == DeviceStatus.ONLINE and old_status != DeviceStatus.ONLINE:
                     logger.info("✅ Туалет ОНЛАЙН")
 
-                if old_status in (DeviceStatus.ONLINE, DeviceStatus.OFFLINE) and new_status == DeviceStatus.DEAD:
+                if old_status == DeviceStatus.ONLINE and new_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD):
                     await self.cache.record_downtime_start(self.toilet_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.toilet_id)

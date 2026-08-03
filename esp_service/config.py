@@ -23,3 +23,4 @@ CAMERA_ACCESS_KEY = os.getenv("CAMERA_ACCESS_KEY")
 DEFAULT_RECORDING_DAYS = int(os.getenv("DEFAULT_RECORDING_DAYS", "7"))
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")  # "development" | "production"
 COOKIE_SECURE = ENVIRONMENT != "development"
+ADMIN_USER_ID = 1245

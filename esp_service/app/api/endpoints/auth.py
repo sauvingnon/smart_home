@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, Header
 from app.core.worker import BackgroundWorker
 from app.core.auth import get_auth_manager, COOKIE_NAME
 from app.schemas.auth import KeyResponse
-from config import BOT_SECRET, COOKIE_SECURE
+from config import BOT_SECRET, COOKIE_SECURE, ADMIN_USER_ID
 
 router = APIRouter(
     prefix="/auth",
@@ -49,7 +49,7 @@ async def me(request: Request):
     """Проверить текущую сессию."""
     auth = get_auth_manager()
     user_id = await auth.verify_access_key(request)
-    return {"user_id": user_id}
+    return {"user_id": user_id, "is_admin": user_id == ADMIN_USER_ID}
 
 
 @router.post("/generate_key", response_model=KeyResponse)

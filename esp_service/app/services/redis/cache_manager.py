@@ -482,6 +482,38 @@ class CacheManager:
     }
     IZHEVSK_TZ = timezone(timedelta(hours=4))
 
+    # Префикс пути → название раздела приложения, для статистики "кто что открывал".
+    # Порядок важен: смотрим на первое совпадение по startswith.
+    ROUTE_LABELS: list = [
+        ("/esp_service/camera", "Камера"),
+        ("/esp_service/video", "Видео"),
+        ("/esp_service/settings", "Настройки"),
+        ("/esp_service/sync_time", "Настройки"),
+        ("/esp_service/telemetry", "Главная"),
+        ("/esp_service/weather", "Главная"),
+        ("/esp_service/history", "Главная"),
+        ("/esp_service/stats", "Главная"),
+        ("/esp_service/downtime", "Главная"),
+        ("/esp_service/ai_report", "Главная"),
+    ]
+
+    async def record_route_visit(self, user_id: int, path: str) -> bool:
+        """Запомнить, какой раздел приложения открывал пользователь (для админ-статистики)."""
+        label = next((lbl for prefix, lbl in self.ROUTE_LABELS if path.startswith(prefix)), None)
+        if not label:
+            return False
+        if not await self._ensure_connection():
+            return False
+        try:
+            today = datetime.now(tz=self.IZHEVSK_TZ).strftime("%Y-%m-%d")
+            key = f"route_visits:{user_id}:{today}"
+            await self.redis_client.sadd(key, label)
+            await self.redis_client.expire(key, timedelta(days=8))
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка записи маршрута [{user_id}, {path}]: {e}")
+            return False
+
     async def record_visit(self, user_id: int) -> bool:
         """Записать визит пользователя (не чаще раза в час на пользователя)."""
         if not await self._ensure_connection():
@@ -539,7 +571,12 @@ class CacheManager:
                         "name": self.USER_NAMES.get(uid, f"ID {uid}"),
                         "days": {}
                     }
-                user_data[uid]["days"][date] = visits
+
+                routes_raw = await self.redis_client.smembers(f"route_visits:{uid}:{date}")
+                user_data[uid]["days"][date] = {
+                    "times": visits,
+                    "routes": sorted(routes_raw) if routes_raw else [],
+                }
 
             return sorted(user_data.values(), key=lambda u: u["name"])
         except Exception as e:
@@ -750,27 +787,14 @@ class CacheManager:
             logger.error(f"❌ Ошибка записи конца даунтайма [{device_id}]: {e}")
             return False
 
-    async def discard_downtime(self, device_id: str) -> bool:
-        """Отменить текущий даунтайм без записи — удаляет открытый интервал из Redis и дневного ключа."""
+    async def has_open_downtime(self, device_id: str) -> bool:
+        """Есть ли у устройства незакрытый интервал даунтайма прямо сейчас."""
         if not await self._ensure_connection():
             return False
         try:
-            current_key = f"downtime_current:{device_id}"
-            start_iso = await self.redis_client.get(current_key)
-            if not start_iso:
-                return False
-            await self.redis_client.delete(current_key)
-            start_dt = datetime.fromisoformat(start_iso)
-            day_key = f"downtime:{device_id}:{start_dt.strftime('%Y-%m-%d')}"
-            raw = await self.redis_client.get(day_key)
-            if raw:
-                intervals = json.loads(raw)
-                intervals = [iv for iv in intervals if iv.get("end") is not None]
-                await self.redis_client.setex(day_key, timedelta(days=8), json.dumps(intervals))
-            logger.info(f"🗑️ Даунтайм отменён (рестарт): {device_id}")
-            return True
+            return bool(await self.redis_client.exists(f"downtime_current:{device_id}"))
         except Exception as e:
-            logger.error(f"❌ Ошибка отмены даунтайма [{device_id}]: {e}")
+            logger.error(f"❌ Ошибка проверки открытого даунтайма [{device_id}]: {e}")
             return False
 
     async def get_downtime_stats(self, device_ids: list, days: int = 7) -> dict:

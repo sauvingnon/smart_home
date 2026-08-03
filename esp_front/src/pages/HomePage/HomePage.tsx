@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ComponentType } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw, User, Users, ChevronDown, Search, Fan, Check, X
+  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw, User, Users, ChevronDown, Search, Fan, Check, X,
+  Home, Settings2, Video
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 // import AIReport from '../../components/AIReport/AIReport'
 import { useTheme } from '../../context/ThemeContext'
+import { useAuth } from '../../context/AuthContext'
 import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 // --- Типы и Хелперы ---
@@ -20,9 +22,14 @@ type WeatherData = {
   timestamp: string; expires_at: string; api_calls_today: number;
 }
 
+type VisitDay = {
+  times: string[]
+  routes: string[]
+}
+
 type VisitStats = {
   name: string
-  days: Record<string, string[]>
+  days: Record<string, VisitDay>
 }[]
 
 type DayDowntime = {
@@ -59,6 +66,13 @@ type GeneralResponse = {
   sensor_status: string;
   toilet_status: string;
   disk_usage?: DiskUsage;
+}
+
+const routeIcons: Record<string, ComponentType<{ size?: number }>> = {
+  'Главная': Home,
+  'Настройки': Settings2,
+  'Камера': Camera,
+  'Видео': Video,
 }
 
 const weatherTranslations: Record<string, string> = {
@@ -106,6 +120,7 @@ const itemVar = {
 
 export default function HomePage() {
   const { theme } = useTheme()
+  const { isAdmin } = useAuth()
   const [data, setData] = useState<GeneralResponse | null>(null)
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -195,9 +210,9 @@ export default function HomePage() {
   useEffect(() => {
     fetchData();
     fetchWeather();
-    fetchLoginStats();
+    if (isAdmin) fetchLoginStats();
     fetchDowntime();
-  }, [])
+  }, [isAdmin])
 
   return (
     <div className={`home-container ${theme}`}>
@@ -578,7 +593,7 @@ export default function HomePage() {
             </motion.div>
           )}
 
-          {visitStats !== null && (
+          {isAdmin && visitStats !== null && (
             <motion.div variants={itemVar} className="glass-card">
               <div className="card-content">
                 <div className="stat-item" style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
@@ -597,7 +612,7 @@ export default function HomePage() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {visitStats.map((user) => {
                       const sortedDays = Object.entries(user.days).sort(([a], [b]) => b.localeCompare(a))
-                      const totalVisits = Object.values(user.days).reduce((s, t) => s + t.length, 0)
+                      const totalVisits = Object.values(user.days).reduce((s, d) => s + d.times.length, 0)
                       return (
                         <div key={user.name} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '10px' }}>
                           <div className="stat-item" style={{ marginBottom: '6px' }}>
@@ -609,11 +624,28 @@ export default function HomePage() {
                               <span className="stat-value">{totalVisits} визит{totalVisits === 1 ? '' : totalVisits < 5 ? 'а' : 'ов'} за 7 дней</span>
                             </div>
                           </div>
-                          <div style={{ paddingLeft: '48px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            {sortedDays.map(([date, times]) => (
-                              <div key={date} style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '8px' }}>
-                                <span style={{ opacity: 0.6, minWidth: '80px' }}>{date}</span>
-                                <span>{times.join(', ')}</span>
+                          <div style={{ paddingLeft: '48px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {sortedDays.map(([date, day]) => (
+                              <div key={date} style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <span style={{ opacity: 0.6, fontWeight: 600 }}>{date}</span>
+                                <span style={{ wordBreak: 'break-word' }}>{day.times.join(', ')}</span>
+                                {day.routes.length > 0 && (
+                                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '2px' }}>
+                                    {day.routes.map(route => {
+                                      const Icon = routeIcons[route]
+                                      return (
+                                        <span key={route} style={{
+                                          display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                          fontSize: '10px', padding: '3px 8px', borderRadius: '999px',
+                                          background: 'rgba(129,140,248,0.15)', color: '#818cf8',
+                                        }}>
+                                          {Icon && <Icon size={11} />}
+                                          {route}
+                                        </span>
+                                      )
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

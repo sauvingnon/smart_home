@@ -4,6 +4,7 @@ import { API_BASE_URL } from '../api/client';
 interface AuthContextType {
   accessKey: string | null;
   isLoading: boolean;
+  isAdmin: boolean;
   setAccessKey: (key: string) => Promise<void>;
   clearAccessKey: () => void;
 }
@@ -12,7 +13,22 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [accessKey, setAccessKeyState] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  const fetchMe = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+        credentials: 'include',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIsAdmin(Boolean(data.is_admin));
+        return true;
+      }
+    } catch {}
+    return false;
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -28,17 +44,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             body: JSON.stringify({ key: urlKey }),
             credentials: 'include',
           });
-          if (res.ok) setAccessKeyState('session');
+          if (res.ok) {
+            setAccessKeyState('session');
+            await fetchMe();
+          }
         } catch {}
         window.history.replaceState({}, '', '/');
       } else {
         // Проверяем существующую сессию
-        try {
-          const res = await fetch(`${API_BASE_URL}/auth/me`, {
-            credentials: 'include',
-          });
-          if (res.ok) setAccessKeyState('session');
-        } catch {}
+        if (await fetchMe()) setAccessKeyState('session');
       }
 
       setIsLoading(false);
@@ -58,6 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Invalid key');
     }
     setAccessKeyState('session');
+    await fetchMe();
   };
 
   const clearAccessKey = () => {
@@ -66,12 +81,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       credentials: 'include',
     }).catch(() => {});
     setAccessKeyState(null);
+    setIsAdmin(false);
   };
 
   return (
     <AuthContext.Provider value={{
       accessKey,
       isLoading,
+      isAdmin,
       setAccessKey: handleSetKey,
       clearAccessKey,
     }}>

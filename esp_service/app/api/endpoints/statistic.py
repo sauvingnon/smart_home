@@ -9,7 +9,7 @@ from app.schemas.telemetry_history import (
 )
 from app.core.auth import get_current_user_id_dep
 from app.utils.time import _get_izhevsk_time
-from config import CAMERA_ID
+from config import CAMERA_ID, ADMIN_USER_ID
 
 router = APIRouter(
     prefix="/esp_service",
@@ -50,7 +50,6 @@ async def get_login_stats_endpoint(
     user_id: int = Depends(get_current_user_id_dep)
 ):
     """Статистика входов пользователей. Только для администратора."""
-    ADMIN_USER_ID = 1245
     if user_id != ADMIN_USER_ID:
         raise HTTPException(status_code=403, detail="Forbidden")
 
