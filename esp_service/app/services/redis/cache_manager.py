@@ -7,7 +7,7 @@ from logger import logger
 import asyncio
 import secrets
 import os
-from config import DEFAULT_RECORDING_DAYS
+from config import DEFAULT_RECORDING_DAYS, CAMERA_ID
 
 KEYS_BACKUP_PATH = "/app/data/access_keys.json"
 
@@ -790,8 +790,59 @@ class CacheManager:
             logger.error(f"❌ Ошибка проверки открытого даунтайма [{device_id}]: {e}")
             return False
 
+    async def _day_intervals_raw(self, device_id: str, day, is_today: bool) -> list:
+        """Сырые интервалы даунтайма устройства за день, с дозаполнением текущего
+        незакрытого интервала («до сейчас»), если день — сегодня."""
+        day_str = day.strftime("%Y-%m-%d")
+        raw = await self.redis_client.get(f"downtime:{device_id}:{day_str}")
+        intervals = json.loads(raw) if raw else []
+        if is_today:
+            start_iso = await self.redis_client.get(f"downtime_current:{device_id}")
+            if start_iso and not any(iv.get("end") is None for iv in intervals):
+                intervals.append({"start": start_iso, "end": None})
+        return intervals
+
+    @staticmethod
+    def _subtract_intervals(base: list, cut: list, now: datetime) -> list:
+        """Вычитает интервалы cut из base (оба — списки {"start": iso, "end": iso|None},
+        открытый end=None считается длящимся до now). При частичном пересечении режет
+        base на остатки; при полном перекрытии кусок пропадает целиком."""
+        def parse(iv):
+            s = datetime.fromisoformat(iv["start"])
+            open_ended = iv.get("end") is None
+            e = now if open_ended else datetime.fromisoformat(iv["end"])
+            return s, e, open_ended
+
+        segments = [parse(iv) for iv in base]
+
+        for iv in cut:
+            cs, ce, _ = parse(iv)
+            new_segments = []
+            for s, e, open_ended in segments:
+                if ce <= s or cs >= e:
+                    new_segments.append((s, e, open_ended))
+                    continue
+                if cs > s:
+                    new_segments.append((s, cs, False))
+                if ce < e:
+                    new_segments.append((ce, e, open_ended))
+            segments = new_segments
+
+        return [
+            {"start": s.isoformat(), "end": None if open_ended else e.isoformat()}
+            for s, e, open_ended in segments
+        ]
+
     async def get_downtime_stats(self, device_ids: list, days: int = 7) -> dict:
-        """Статистика даунтайма за N дней для списка устройств."""
+        """Статистика даунтайма за N дней для списка устройств.
+
+        Даунтайм камеры пишется при обрыве её WebSocket-соединения — а обрыв
+        происходит в том числе когда сам сервер уходит на рестарт/деплой. В этот
+        момент сервер не может знать, была ли камера реально жива: он сам не
+        работал и наблюдать не мог. Поэтому из интервалов камеры вычитаем те,
+        что пересекаются с даунтаймом сервера — остаётся только время, когда
+        камера была недоступна при заведомо живом сервере.
+        """
         if not await self._ensure_connection():
             return {}
         try:
@@ -806,17 +857,13 @@ class CacheManager:
                 for i in range(days):
                     day = today - timedelta(days=i)
                     day_str = day.strftime("%Y-%m-%d")
+                    is_today = (i == 0)
 
-                    raw = await self.redis_client.get(f"downtime:{device_id}:{day_str}")
-                    intervals = json.loads(raw) if raw else []
+                    intervals = await self._day_intervals_raw(device_id, day, is_today)
 
-                    # Если сегодня и есть незакрытый даунтайм — дополняем «до сейчас»
-                    if i == 0:
-                        start_iso = await self.redis_client.get(f"downtime_current:{device_id}")
-                        if start_iso:
-                            has_open = any(iv.get("end") is None for iv in intervals)
-                            if not has_open:
-                                intervals.append({"start": start_iso, "end": None})
+                    if device_id == CAMERA_ID:
+                        server_intervals = await self._day_intervals_raw("server", day, is_today)
+                        intervals = self._subtract_intervals(intervals, server_intervals, now)
 
                     # Считаем суммарный даунтайм дня
                     day_seconds = 0.0

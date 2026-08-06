@@ -8,7 +8,8 @@ import {
   Play,
   RefreshCw,
   HardDrive,
-  Users
+  Users,
+  AlertTriangle
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
@@ -27,6 +28,7 @@ interface VideoItem {
     start_time?: string
     thumbnail_url: string  // 🔧 Может быть null
     recognized?: string[] | null  // Кто распознан на видео (null = ещё не обработано)
+    recognition_error?: boolean | null  // true = не смогли проверить статус (не путать с "ещё не обработано")
 }
 
 const containerVar = {
@@ -373,6 +375,12 @@ export const VideosPage = () => {
                                       <div className="video-card-recognized">
                                         <Users size={14} />
                                         <span>{video.recognized.join(', ')}</span>
+                                      </div>
+                                    )}
+                                    {video.recognition_error && (
+                                      <div className="video-card-recognition-error" title="Не удалось проверить, распознан ли кто-то на видео">
+                                        <AlertTriangle size={14} />
+                                        <span>Ошибка проверки распознавания</span>
                                       </div>
                                     )}
                                     <div className="video-card-footer">

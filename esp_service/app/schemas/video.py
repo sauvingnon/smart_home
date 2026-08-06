@@ -15,3 +15,4 @@ class VideoItem(BaseModel):
     duration_seconds: Optional[int] = None
     start_time: Optional[str] = None
     recognized: Optional[List[str]] = None  # кто распознан на видео; None = ещё не обработано
+    recognition_error: Optional[bool] = None  # True = не смогли проверить статус (Redis/S3 упали) — не путать с "ещё не обработано"

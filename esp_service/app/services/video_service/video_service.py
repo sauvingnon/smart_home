@@ -266,25 +266,28 @@ class VideoService:
             access_key = parts[1]
             camera_id = parts[2]
 
-            self._tasks[camera_id] = asyncio.current_task()
-            
             if self.valid_keys.get(camera_id) != access_key:
                 await websocket.close(code=1008, reason="Invalid key")
                 return
-            
+
             # ---- Старое соединение? закрываем ----
+            # ВАЖНО: self._tasks[camera_id] на этот момент ещё указывает на задачу
+            # СТАРОГО соединения (новую регистрируем только ниже) — иначе cancel()
+            # отменяет сам себя и старая задача виснет в своём receive() до
+            # собственного 60-секундного таймаута, генерируя фантомный даунтайм.
             if camera_id in self.connections:
                 old_ws = self.connections[camera_id]
                 try:
-                    # ВАЖНО: Сначала отменяем задачу, которая крутит receive
-                    if camera_id in self._tasks:
-                        self._tasks[camera_id].cancel()
+                    old_task = self._tasks.get(camera_id)
+                    if old_task:
+                        old_task.cancel()
                     await old_ws.close(code=1000, reason="New connection")
                 except:
                     pass
-            
+
             # ---- Сохраняем новое соединение ----
             self.connections[camera_id] = websocket
+            self._tasks[camera_id] = asyncio.current_task()
 
             # ---- Инициализируем или обновляем состояние ----
             if camera_id not in self.cameras:
@@ -337,9 +340,14 @@ class VideoService:
         except Exception as e:
             logger.error(f"❌ Ошибка при обработке {camera_id}: {e}", exc_info=True)
         finally:
-            self.cameras[camera_id].mode = CameraMode.OFFLINE
-            await self._disconnect_camera(camera_id)
-    
+            # Если эта задача уже не актуальна для camera_id (отменена новым
+            # реконнектом, либо camera_id вообще не дошёл до регистрации —
+            # None или неверный auth) — не трогаем состояние, иначе можно
+            # затереть уже подключившуюся новую камеру или упасть на None-ключе.
+            if camera_id and self._tasks.get(camera_id) is asyncio.current_task():
+                self.cameras[camera_id].mode = CameraMode.OFFLINE
+                await self._disconnect_camera(camera_id)
+
     async def _handle_text(self, camera_id: str, text: str):
         """Обработка текстовых сообщений от камеры (метрики, pong, команды)"""
         state = self.cameras.get(camera_id)
@@ -804,7 +812,7 @@ class VideoService:
         IZHEVSK_TZ = timezone(timedelta(hours=4))
         today = datetime.now(tz=IZHEVSK_TZ).date()
 
-        all_videos = []
+        video_dicts = []
 
         for i in range(DEFAULT_RECORDING_DAYS + 1):
             day = today - timedelta(days=i)
@@ -847,10 +855,25 @@ class VideoService:
                     )
                 else:
                     vid['thumbnail_url'] = None
-                vid['recognized'] = await self._get_recognition_names(vid['camera_id'], vid['video_id'])
-                all_videos.append(VideoItem(**vid))
+                video_dicts.append(vid)
 
-        return all_videos
+        # Кто распознан — запрашиваем для всех видео параллельно одним залпом:
+        # раньше это было N последовательных await в цикле (N Redis- и, в худшем
+        # случае, N S3-запросов подряд), теперь один общий gather. return_exceptions=True —
+        # чтобы упавший Redis/S3 на одном видео не ронял весь список остальных.
+        recognized_results = await asyncio.gather(
+            *(self._get_recognition_names(vid['camera_id'], vid['video_id']) for vid in video_dicts),
+            return_exceptions=True,
+        )
+        for vid, result in zip(video_dicts, recognized_results):
+            if isinstance(result, Exception):
+                logger.error(f"❌ Не удалось проверить распознавание для {vid.get('video_id')}: {result}")
+                vid['recognized'] = None
+                vid['recognition_error'] = True
+            else:
+                vid['recognized'] = result
+
+        return [VideoItem(**vid) for vid in video_dicts]
 
     async def _get_recognition_names(self, camera_id: str, video_id: str) -> Optional[list]:
         """

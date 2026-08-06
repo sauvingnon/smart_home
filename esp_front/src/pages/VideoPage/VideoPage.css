@@ -376,6 +376,14 @@
   color: var(--accent-cyan);
 }
 
+.video-card-recognition-error {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--accent-red);
+}
+
 .video-card-footer {
   display: flex;
   align-items: center;

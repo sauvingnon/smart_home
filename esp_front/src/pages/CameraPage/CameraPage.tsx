@@ -337,11 +337,16 @@ export const CameraPage: React.FC = () => {
           {/* Видеопоток */}
           <motion.div variants={itemVar} className="camera-stream-wrapper glass-card" ref={videoContainerRef}>
             <div className="video-tap-area" onClick={handleVideoTap}>
-              <CameraStream
-                cameraId={cameraId}
-                cameraStatus={cameraStatus?.mode}
-                onFrameStall={fetchStatus}
-              />
+              {/* Пока открыт simulatedFullscreen (iOS PWA) — поток идёт через второй
+                  CameraStream ниже, в оверлее. Этот размонтируем, иначе оба держат
+                  свой WebSocket одновременно и сервер считает одного человека за двух зрителей. */}
+              {!simulatedFullscreen && (
+                <CameraStream
+                  cameraId={cameraId}
+                  cameraStatus={cameraStatus?.mode}
+                  onFrameStall={fetchStatus}
+                />
+              )}
             </div>
 
             {isMobile && fullscreen && (
