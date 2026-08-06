@@ -169,16 +169,14 @@ services:
         max-size: "5m"
         max-file: "3"
 
-  # Не поднимается сама по себе (profile "recognition"), не в default `up`.
-  # Запускается извне по таймеру: `docker compose --profile recognition run --rm recognition_worker`
-  # Скрипт внутри сам проверяет очередь Redis и выходит сразу, если пусто — контейнер
-  # с --rm удаляется по завершении, ничего не остаётся висеть.
+  # Обычный постоянный сервис: сам себя опрашивает по таймеру внутри (worker.py,
+  # POLL_INTERVAL_SECONDS), models грузит только когда в очереди Redis есть работа
+  # и сразу выгружает их из памяти после — простаивая занимает считанные MB.
   recognition_worker:
     build:
       context: ./recognition_worker
     container_name: recognition_worker
-    profiles: ["recognition"]
-    restart: "no"
+    restart: unless-stopped
     depends_on:
       redis:
         condition: service_healthy

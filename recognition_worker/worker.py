@@ -1,15 +1,16 @@
 """
-Точка входа докер-воркера. Не сервер — одноразовый прогон:
-проверяет очередь в Redis, если пусто выходит сразу, иначе
-тянет видео из S3(Garage) по одному, гонит pipeline, кладёт
-результат обратно в S3 и выходит когда очередь опустела.
+Долгоживущий воркер: раз в POLL_INTERVAL_SECONDS проверяет очередь в Redis.
+Если пусто — ничего не грузит и засыпает дальше. Если есть работа — тянет
+видео из S3(Garage) по одному, гонит pipeline, кладёт результат обратно
+в S3, разбирает очередь до конца и выгружает модели из памяти до следующей
+находки работы (тесно по RAM на VPS, держать их в памяти простаивая смысла нет).
 
 Формат job'а в очереди (кладёт esp_service при сохранении видео):
     "{camera_id}:{video_id}:{start_unix_timestamp}"
 
 Env:
     REDIS_URL, S3_ENDPOINT_URL, S3_BUCKET_NAME,
-    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, POLL_INTERVAL_SECONDS (по умолчанию 60)
 """
 import os
 
@@ -20,8 +21,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
+import gc
 import json
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -36,6 +39,7 @@ from yolo_onnx import PersonDetectorONNX
 QUEUE_KEY = "recognition:queue"
 LOCK_KEY = "recognition:lock"
 LOCK_TTL_SECONDS = 900  # страховка на случай, если воркер зависнет/упадёт не освободив лок
+POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
 IZHEVSK_TZ = timezone(timedelta(hours=4))
 
 
@@ -56,18 +60,19 @@ def video_key_for(camera_id: str, video_id: str, start_ts: int) -> str:
     return f"videos/{camera_id}/{dt.strftime('%Y')}/{dt.strftime('%m')}/{dt.strftime('%d')}/{video_id}.mp4"
 
 
-def main():
-    r = redis.Redis.from_url(os.environ["REDIS_URL"])
+def process_queue(r: "redis.Redis") -> None:
+    """Разбирает очередь целиком, если в ней есть работа. Модели живут только
+    в теле этой функции — как только она возвращается, они выходят из области
+    видимости и освобождаются (см. gc.collect() в вызывающем цикле)."""
 
     if r.llen(QUEUE_KEY) == 0:
-        print("очередь пуста, выходим без загрузки моделей")
         return
 
-    # Лок против пересечения соседних запусков (например если один прогон
-    # не уложился в интервал таймера) — второй воркер не должен параллельно
+    # Лок против пересечения соседних прогонов (на случай если предыдущий
+    # не уложился в интервал опроса) — второй воркер не должен параллельно
     # держать в памяти те же модели на тесной по RAM машине.
     if not r.set(LOCK_KEY, "1", nx=True, ex=LOCK_TTL_SECONDS):
-        print("другой воркер уже обрабатывает очередь, выходим")
+        print("другой воркер уже обрабатывает очередь, пропускаем")
         return
 
     try:
@@ -124,6 +129,19 @@ def main():
 
     finally:
         r.delete(LOCK_KEY)
+
+
+def main():
+    r = redis.Redis.from_url(os.environ["REDIS_URL"])
+    print(f"recognition_worker запущен, опрос очереди каждые {POLL_INTERVAL_SECONDS}с")
+
+    while True:
+        try:
+            process_queue(r)
+        except Exception as e:
+            print(f"⚠️ прогон обработки очереди упал: {e}")
+        gc.collect()  # выгружаем модели из памяти на время простоя
+        time.sleep(POLL_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":
