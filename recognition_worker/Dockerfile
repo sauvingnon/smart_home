@@ -6,18 +6,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# CPU-only torch явно — иначе pip на linux тянет CUDA-сборку (лишние сотни MB, GPU тут не нужен)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY run_pipeline.py worker.py classifier.joblib ./
+COPY run_pipeline.py worker.py yolo_onnx.py classifier.joblib yolov8n.onnx ./
 
-# Прогреваем веса на этапе сборки, а не при каждом коротком запуске воркера
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+# Прогреваем insightface на этапе сборки, а не при каждом коротком запуске воркера.
+# YOLO ONNX никакой прогрузки весов не требует — файл уже с нами, никуда не ходит.
+# insightface качает все 5 моделей пака buffalo_l разом — используем только 2
+# (detection, recognition), остальные 150MB чистый мёртвый груз, сносим тут же
+# в этом же слое (удаление отдельным RUN слоем размер образа не уменьшило бы).
 RUN python -c "\
 from insightface.app import FaceAnalysis; \
-FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition'], providers=['CPUExecutionProvider']).prepare(ctx_id=-1, det_size=(640, 640))"
+FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition'], providers=['CPUExecutionProvider']).prepare(ctx_id=-1, det_size=(640, 640))" \
+    && rm -f /root/.insightface/models/buffalo_l/1k3d68.onnx \
+             /root/.insightface/models/buffalo_l/2d106det.onnx \
+             /root/.insightface/models/buffalo_l/genderage.onnx
 
 CMD ["python", "worker.py"]

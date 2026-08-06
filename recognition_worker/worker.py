@@ -11,8 +11,16 @@ Env:
     REDIS_URL, S3_ENDPOINT_URL, S3_BUCKET_NAME,
     AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 """
-import json
 import os
+
+# ДО импорта onnxruntime — иначе он по умолчанию хватает все ядра хоста под
+# свои thread pool'ы, а тут всего 2 ядра и один из них должен оставаться
+# свободным для esp_service (аплоад видео с камеры, ffmpeg).
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
+import json
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,9 +29,9 @@ import boto3
 import joblib
 import redis
 from insightface.app import FaceAnalysis
-from ultralytics import YOLO
 
 from run_pipeline import process_video
+from yolo_onnx import PersonDetectorONNX
 
 QUEUE_KEY = "recognition:queue"
 LOCK_KEY = "recognition:lock"
@@ -72,7 +80,7 @@ def main():
         bucket = os.environ["S3_BUCKET_NAME"]
 
         print("есть работа, гружу модели...")
-        yolo = YOLO("yolov8n.pt")
+        yolo = PersonDetectorONNX("yolov8n.onnx", conf=PipelineArgs.person_conf)
         face_app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection", "recognition"], providers=["CPUExecutionProvider"])
         face_app.prepare(ctx_id=-1, det_size=(640, 640))
         rec_model = face_app.models["recognition"]

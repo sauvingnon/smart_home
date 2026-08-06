@@ -18,10 +18,10 @@ import joblib
 import numpy as np
 from insightface.app import FaceAnalysis
 from insightface.utils import face_align
-from ultralytics import YOLO
+
+from yolo_onnx import PersonDetectorONNX
 
 ROOT = Path(__file__).resolve().parent.parent
-PERSON_CLASS_ID = 0
 
 
 def blur_score(gray: np.ndarray) -> float:
@@ -46,9 +46,7 @@ def process_video(video_path, yolo, face_app, rec_model, clf, classes, args):
             if not ok:
                 break
             h, w = frame.shape[:2]
-            results = yolo.predict(frame, classes=[PERSON_CLASS_ID], conf=args.person_conf, verbose=False)[0]
-            for box in results.boxes:
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
+            for x1, y1, x2, y2, _score in yolo.predict(frame):
                 pad_x = (x2 - x1) * 0.1
                 pad_y = (y2 - y1) * 0.1
                 x1 = max(0, int(x1 - pad_x)); y1 = max(0, int(y1 - pad_y))
@@ -112,7 +110,7 @@ def main():
     ap.add_argument("--min-blur", type=float, default=8.0)
     ap.add_argument("--unknown-threshold", type=float, default=0.55, help="ниже этой уверенности лицо считается неизвестным")
     ap.add_argument("--min-votes", type=int, default=2, help="сколько уверенных детекций нужно, чтобы засчитать присутствие")
-    ap.add_argument("--yolo-model", default="yolov8n.pt")
+    ap.add_argument("--yolo-model", default="yolov8n.onnx")
     ap.add_argument("--face-model", default="buffalo_l")
     ap.add_argument("--out", default="dataset/pipeline_results.jsonl")
     args = ap.parse_args()
@@ -120,7 +118,7 @@ def main():
     bundle = joblib.load(ROOT / "dataset" / "classifier.joblib")
     clf, classes = bundle["clf"], bundle["classes"]
 
-    yolo = YOLO(args.yolo_model)
+    yolo = PersonDetectorONNX(args.yolo_model, conf=args.person_conf)
     face_app = FaceAnalysis(name=args.face_model, allowed_modules=["detection", "recognition"], providers=["CPUExecutionProvider"])
     face_app.prepare(ctx_id=-1, det_size=(640, 640))
     rec_model = face_app.models["recognition"]

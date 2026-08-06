@@ -189,7 +189,10 @@ services:
     networks:
       - internal
     mem_limit: 1g
-    cpus: "1.5"
+    # Половина от 2 ядер хоста, не больше — esp_service (0.5) должен успевать
+    # обслуживать аплоад видео с камеры (там свой ffmpeg на конвертацию), даже
+    # если в этот момент recognition_worker что-то распознаёт в фоне.
+    cpus: "1.0"
     logging:
       driver: "json-file"
       options:
