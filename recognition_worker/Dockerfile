@@ -7,7 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# pypi.org недоступен из РФ с 01.06.2026 — ставим через зеркало
+RUN pip install --no-cache-dir \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple/ \
+    --extra-index-url https://mirror.yandex.ru/pypi/web/simple/ \
+    -r requirements.txt
 
 COPY run_pipeline.py worker.py yolo_onnx.py classifier.joblib yolov8n.onnx ./
 

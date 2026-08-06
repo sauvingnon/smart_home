@@ -7,8 +7,13 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-# Устанавливаем зависимости
-RUN pip install --no-cache-dir -r requirements.txt
+# pypi.org недоступен из РФ с 01.06.2026 — ставим через зеркала.
+# Два индекса на выбор (не проверено с самого VPS, только что оба технически
+# рабочие и полные откуда я собирал) — pip сам возьмёт пакет с того, что ответит.
+RUN pip install --no-cache-dir \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple/ \
+    --extra-index-url https://mirror.yandex.ru/pypi/web/simple/ \
+    -r requirements.txt
 
 # Копируем все файлы из локальной директории в контейнер
 COPY . .
