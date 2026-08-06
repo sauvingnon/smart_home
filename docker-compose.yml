@@ -87,6 +87,7 @@ services:
   esp_loki:
     image: grafana/loki:3.0.0
     container_name: esp_loki
+    profiles: ["observability"]
     mem_limit: 200m
     mem_reservation: 100m
     cpus: "0.5"
@@ -168,9 +169,37 @@ services:
         max-size: "5m"
         max-file: "3"
 
+  # Не поднимается сама по себе (profile "recognition"), не в default `up`.
+  # Запускается извне по таймеру: `docker compose --profile recognition run --rm recognition_worker`
+  # Скрипт внутри сам проверяет очередь Redis и выходит сразу, если пусто — контейнер
+  # с --rm удаляется по завершении, ничего не остаётся висеть.
+  recognition_worker:
+    build:
+      context: ./recognition_worker
+    container_name: recognition_worker
+    profiles: ["recognition"]
+    restart: "no"
+    depends_on:
+      redis:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+    env_file:
+      - ./recognition_worker/.env
+    networks:
+      - internal
+    mem_limit: 1g
+    cpus: "1.5"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   esp_grafana:
     image: grafana/grafana:11.1.0
     container_name: esp_grafana
+    profiles: ["observability"]
     ports:
     # Даем ей выход, порт 3000 занят remnawave, поэтому даем 3001 для просмотра логов,
     # У графаны есть авторизация, включил. Но она по http, нужен переход на https
@@ -204,6 +233,7 @@ services:
   esp_promtail:
     image: grafana/promtail:3.0.0
     container_name: esp_promtail
+    profiles: ["observability"]
     restart: unless-stopped
     mem_limit: 100m
     mem_reservation: 50m

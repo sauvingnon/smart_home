@@ -1,12 +1,14 @@
 # app/services/video_service.py
 import asyncio
+import json
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 from fastapi import WebSocket
 from app.services.video_service.video_chunk_service import VideoChunkService
 from logger import logger
 from config import API_BASE_URL
 from app.schemas.camera import CameraState, CameraMode, CameraMetrics
+from app.schemas.video import VideoItem
 from app.core.auth import get_auth_manager
 from app.utils.time import _get_izhevsk_time
 from app.services.s3_service.s3_manager import S3Manager
@@ -136,6 +138,14 @@ class VideoService:
                                         ts = int(datetime.fromisoformat(video['start_time']).timestamp())
                                         dedup_key = f"video_dedup:{camera_id}:{ts}"
                                         await self.cache_manager.redis_client.delete(dedup_key)
+                                except Exception:
+                                    pass
+
+                                try:
+                                    await self.s3_manager.delete_recognition_result(camera_id, video_id)
+                                    await self.cache_manager.redis_client.delete(
+                                        f"recognition_cache:{camera_id}:{video_id}"
+                                    )
                                 except Exception:
                                     pass
 
@@ -784,7 +794,7 @@ class VideoService:
     async def get_video_list(
         self,
         camera_id: Optional[str] = None
-    ) -> list:
+    ) -> List[VideoItem]:
         """Получить список видео за последние DEFAULT_RECORDING_DAYS+1 дней с кэшированием по дням."""
         if not self.s3_manager:
             raise ValueError("S3 manager не доступен")
@@ -837,9 +847,37 @@ class VideoService:
                     )
                 else:
                     vid['thumbnail_url'] = None
-                all_videos.append(vid)
+                vid['recognized'] = await self._get_recognition_names(vid['camera_id'], vid['video_id'])
+                all_videos.append(VideoItem(**vid))
 
         return all_videos
+
+    async def _get_recognition_names(self, camera_id: str, video_id: str) -> Optional[list]:
+        """
+        Кто распознан на видео (recognition_worker кладёт результат в S3 отдельно).
+        Кэшируется своим отдельным ключом — намеренно НЕ частью дневного кэша списка видео,
+        у которого TTL/инвалидация привязаны к моменту аплоада, а не к моменту готовности
+        распознавания (оно может доехать на 5-15 минут позже). Так поле само "дозревает"
+        на следующий запрос списка, а не залипает пустым до следующего аплоада/полуночи.
+        """
+        if not self.s3_manager or not video_id:
+            return None
+
+        cache_key = f"recognition_cache:{camera_id}:{video_id}"
+        cached = await self.cache_manager.redis_client.get(cache_key)
+        if cached is not None:
+            return None if cached == "__pending__" else json.loads(cached)
+
+        result = await self.s3_manager.get_recognition_result(camera_id, video_id)
+        if result is None:
+            # ещё не обработано — короткий TTL, чтобы не долбить S3 на каждый запрос списка
+            await self.cache_manager.redis_client.setex(cache_key, 60, "__pending__")
+            return None
+
+        names = [name for name, info in result.get("presence", {}).items() if info.get("present")]
+        # результат неизменен раз готов — кэшируем без TTL
+        await self.cache_manager.redis_client.set(cache_key, json.dumps(names))
+        return names
 
     async def _get_video_key(self, camera_id: str, video_id: str) -> Optional[str]:
         """Получить S3-ключ видео: сначала из кэша Redis, потом полный скан S3."""

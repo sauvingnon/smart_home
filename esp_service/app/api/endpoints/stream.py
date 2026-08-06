@@ -1,10 +1,11 @@
 # app/api/esp_service.py
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, Depends, Header, UploadFile, File
 from fastapi.responses import StreamingResponse
 from app.core.worker import BackgroundWorker
 from app.core.auth import get_current_user_id_dep
+from app.schemas.video import VideoItem
 from pydantic import BaseModel
 from logger import logger
 
@@ -72,7 +73,7 @@ async def get_camera_status(
     
     return state
 
-@router.get("/videos")
+@router.get("/videos", response_model=List[VideoItem])
 async def list_videos(
     request: Request,
     camera_id: Optional[str] = Query(None, description="ID камеры"),
@@ -80,7 +81,7 @@ async def list_videos(
 ):
     """Получить список видео с presigned URLs и токеном доступа"""
     worker = BackgroundWorker.get_instance()
-    
+
     # Получаем список видео
     return await worker.video_service.get_video_list(camera_id=camera_id)
 
@@ -295,7 +296,16 @@ async def upload_chunk(
             file_size = video_stream.getbuffer().nbytes
             
             logger.info(f"🎉 [{camera_id}] Видео {video_id} сохранено ({file_size} байт)")
-            
+
+            # Ставим в очередь на распознавание лиц. Best-effort: если Redis прилёг,
+            # видео всё равно уже сохранено — не роняем аплоад из-за этого.
+            try:
+                await worker.cache.redis_client.lpush(
+                    "recognition:queue", f"{camera_id}:{video_id}:{start_time}"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ [{camera_id}] Не удалось поставить {video_id} в очередь распознавания: {e}")
+
             return {
                 "status": "complete",
                 "video_id": video_id,

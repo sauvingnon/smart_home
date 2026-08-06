@@ -62,7 +62,13 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }} \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
               echo '${{ secrets.ESP_SERVICE_ENV_FILE }}' > /srv/esp_system/esp_service/.env &&
-              echo '${{ secrets.MQTT_BROKER_ENV_FILE }}' > /srv/esp_system/mosquitto/config/.env
+              echo '${{ secrets.MQTT_BROKER_ENV_FILE }}' > /srv/esp_system/mosquitto/config/.env &&
+              mkdir -p /srv/esp_system/recognition_worker &&
+              echo '${{ secrets.ESP_SERVICE_ENV_FILE }}' > /srv/esp_system/recognition_worker/.env &&
+              echo 'S3_ENDPOINT_URL=http://garage:3900' >> /srv/esp_system/recognition_worker/.env &&
+              echo 'S3_BUCKET_NAME=video-bucket' >> /srv/esp_system/recognition_worker/.env &&
+              echo 'AWS_ACCESS_KEY_ID=GK39eb72624df14cf0b66afa79' >> /srv/esp_system/recognition_worker/.env &&
+              echo 'AWS_SECRET_ACCESS_KEY=b607bde5e96a7f99175f9945441bd059d366e404655394e44f4bbc835b5accd7' >> /srv/esp_system/recognition_worker/.env
             "
       - name: Deploy over SSH
         run: |
@@ -82,7 +88,11 @@ jobs:
             echo ""
             echo "🚨 Проверка: все сервисы running?"
             FAIL=0
-            for c in esp_grafana esp_promtail esp_redis esp_loki mosquitto esp_service esp_front esp_system-garage-1; do
+            # esp_grafana/esp_promtail/esp_loki намеренно не в default `up` (profile "observability",
+            # поднимаются вручную по требованию) — не проверяем их тут.
+            # recognition_worker намеренно не постоянный сервис (profile "recognition", запускается
+            # по таймеру через `run --rm` и сам завершается) — не проверяем и его.
+            for c in esp_redis mosquitto esp_service esp_front esp_system-garage-1; do
               STATUS=$(sudo docker inspect -f "{{.State.Status}}" ${c} || echo "missing")
               echo "$c -> $STATUS"
               if [ "$STATUS" != "running" ]; then

@@ -1,0 +1,9 @@
+ultralytics
+opencv-python-headless
+insightface
+onnxruntime
+scikit-learn
+joblib
+numpy
+boto3
+redis

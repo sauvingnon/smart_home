@@ -7,7 +7,8 @@ import {
   Download,
   Play,
   RefreshCw,
-  HardDrive
+  HardDrive,
+  Users
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
@@ -25,6 +26,7 @@ interface VideoItem {
     duration_seconds?: number
     start_time?: string
     thumbnail_url: string  // 🔧 Может быть null
+    recognized?: string[] | null  // Кто распознан на видео (null = ещё не обработано)
 }
 
 const containerVar = {
@@ -367,6 +369,12 @@ export const VideosPage = () => {
                                     <div className="video-card-title">
                                       {formatTime(video.start_time || video.last_modified)}
                                     </div>
+                                    {video.recognized && video.recognized.length > 0 && (
+                                      <div className="video-card-recognized">
+                                        <Users size={14} />
+                                        <span>{video.recognized.join(', ')}</span>
+                                      </div>
+                                    )}
                                     <div className="video-card-footer">
                                       <div className="video-card-subtitle">
                                         {formatDate(video.start_time || video.last_modified)}

@@ -559,6 +559,51 @@ class S3Manager:
             logger.exception(f"❌ Ошибка загрузки thumbnail: {e}")
             return None
 
+    async def get_recognition_result(self, camera_id: str, video_id: str) -> Optional[dict]:
+        """
+        Получить результат распознавания лиц из S3 (кладёт recognition_worker).
+
+        Returns:
+            Распарсенный JSON или None, если ещё не готово / не найдено
+        """
+        if not await self._ensure_connection():
+            return None
+
+        try:
+            key = f"recognition/{camera_id}/{video_id}.json"
+
+            response = await self._client.get_object(
+                Bucket=self.bucket_name,
+                Key=key
+            )
+
+            data = await response['Body'].read()
+            return json.loads(data)
+
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                return None
+            else:
+                logger.exception(f"❌ Ошибка загрузки результата распознавания: {e}")
+                return None
+        except Exception as e:
+            logger.exception(f"❌ Ошибка загрузки результата распознавания: {e}")
+            return None
+
+    async def delete_recognition_result(self, camera_id: str, video_id: str) -> bool:
+        """Удалить результат распознавания (вызывается вместе с удалением видео)."""
+        if not await self._ensure_connection():
+            return False
+
+        try:
+            key = f"recognition/{camera_id}/{video_id}.json"
+            await self._client.delete_object(Bucket=self.bucket_name, Key=key)
+            logger.debug(f"🗑️ Результат распознавания удалён: {key}")
+            return True
+        except Exception as e:
+            logger.exception(f"❌ Ошибка удаления результата распознавания: {e}")
+            return False
+
     async def get_video_chunk(
         self, 
         key: str, 

@@ -368,6 +368,14 @@
   line-height: 1.4;
 }
 
+.video-card-recognized {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--accent-cyan);
+}
+
 .video-card-footer {
   display: flex;
   align-items: center;
