@@ -18,6 +18,16 @@ uint8_t bukva_TS[8] = {B10010, B10010, B10010, B10010, B10010, B10010, B11111, B
 uint8_t bukva_EE[8] = {B11111, B00001, B00001, B01111, B00001, B00001, B11111, B00000};
 uint8_t bukva_F[8] = {B00100, B11111, B10101, B10101, B10101, B11111, B00100, B00000};
 uint8_t bukva_SH[8] = { B10101, B10101, B10101, B10101, B10101, B10101, B11111, B00000};
+uint8_t bukva_uiu[8] = {
+  B10111, 
+  B10101, 
+  B10101, 
+  B11101, 
+  B10101, 
+  B10101, 
+  B10111, 
+  B00000
+};
 // Кодирование символов градуса
 uint8_t degree[8] = {B00111,B00101,B00111,B00000,B00000,B00000,B00000,};
 // Кодируем символ разделителя минут и часов для крупных цифр 
@@ -548,13 +558,14 @@ void printDate() {
     case 6:  // июнь bukva_I
       lcd.createChar(4, bukva_I);
       lcd.createChar(5, bukva_Ya);
-      result += "\4b|H\5";     // "июн"
+      lcd.createChar(6, bukva_uiu);
+      result += "\4\6H\5";     // "июн"
       break;
     case 7:  // июль
       lcd.createChar(4, bukva_I);
-      lcd.createChar(5, bukva_Ya);
+      lcd.createChar(5, bukva_uiu);
       lcd.createChar(6, bukva_L);
-      result += "\4b|\6\5";     // "июл"
+      result += "\4\5\6b";     // "июл"
       break;
     case 8:  // август
       lcd.createChar(4, bukva_G);
