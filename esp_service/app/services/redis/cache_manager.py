@@ -497,47 +497,44 @@ class CacheManager:
         ("/esp_service/ai_report", "Главная"),
     ]
 
-    async def record_route_visit(self, user_id: int, path: str) -> bool:
-        """Запомнить, какой раздел приложения открывал пользователь (для админ-статистики)."""
+    VISIT_COOLDOWN_SECONDS = 3600  # один "визит" в час, как и раньше — просто теперь у визита есть свои разделы
+
+    async def record_activity(self, user_id: int, path: str) -> bool:
+        """
+        Один визит в час на пользователя (как и раньше). Но пока визит активен
+        (тот же час), каждый новый раздел, который открыл пользователь,
+        дописывается в его же запись — вместо отдельной записи на каждый переход.
+        Итог в activity_log: [{"time": "15:34", "routes": ["Настройки", "Камера"]}, ...]
+        """
         label = next((lbl for prefix, lbl in self.ROUTE_LABELS if path.startswith(prefix)), None)
         if not label:
             return False
         if not await self._ensure_connection():
             return False
         try:
-            today = datetime.now(tz=self.IZHEVSK_TZ).strftime("%Y-%m-%d")
-            key = f"route_visits:{user_id}:{today}"
-            await self.redis_client.sadd(key, label)
-            await self.redis_client.expire(key, timedelta(days=8))
-            return True
-        except Exception as e:
-            logger.error(f"❌ Ошибка записи маршрута [{user_id}, {path}]: {e}")
-            return False
-
-    async def record_visit(self, user_id: int) -> bool:
-        """Записать визит пользователя (не чаще раза в час на пользователя)."""
-        if not await self._ensure_connection():
-            return False
-        try:
-            cooldown_key = f"visit_cooldown:{user_id}"
-            if await self.redis_client.exists(cooldown_key):
-                return False
-
-            await self.redis_client.setex(cooldown_key, 3600, "1")
-
             now = datetime.now(tz=self.IZHEVSK_TZ)
             today = now.strftime("%Y-%m-%d")
-            time_str = now.strftime("%H:%M")
+            log_key = f"activity_log:{user_id}:{today}"
+            cooldown_key = f"visit_cooldown:{user_id}"
 
-            visits_key = f"login_visits:{user_id}:{today}"
-            visits_raw = await self.redis_client.get(visits_key)
-            visits = json.loads(visits_raw) if visits_raw else []
-            visits.append(time_str)
-            await self.redis_client.setex(visits_key, timedelta(days=8), json.dumps(visits))
-            logger.debug(f"👁️ Визит записан: user={user_id} в {time_str}")
+            if await self.redis_client.exists(cooldown_key):
+                # тот же визит — дописываем раздел в последнюю запись, если его там ещё нет
+                last_raw = await self.redis_client.lindex(log_key, -1)
+                if last_raw:
+                    entry = json.loads(last_raw)
+                    if label not in entry["routes"]:
+                        entry["routes"].append(label)
+                        await self.redis_client.lset(log_key, -1, json.dumps(entry))
+                return True
+
+            # новый визит
+            await self.redis_client.setex(cooldown_key, self.VISIT_COOLDOWN_SECONDS, "1")
+            entry = json.dumps({"time": now.strftime("%H:%M"), "routes": [label]})
+            await self.redis_client.rpush(log_key, entry)
+            await self.redis_client.expire(log_key, timedelta(days=8))
             return True
         except Exception as e:
-            logger.error(f"❌ Ошибка записи визита: {e}")
+            logger.error(f"❌ Ошибка записи активности [{user_id}, {path}]: {e}")
             return False
 
     async def get_visit_stats(self, exclude_user_id: int, days: int = 7) -> list:
@@ -551,7 +548,7 @@ class CacheManager:
                 for i in range(days)
             }
 
-            keys = await self.redis_client.keys("login_visits:*")
+            keys = await self.redis_client.keys("activity_log:*")
             user_data: dict = {}
 
             for key in keys:
@@ -563,8 +560,8 @@ class CacheManager:
                 if uid == exclude_user_id or date not in date_range:
                     continue
 
-                visits_raw = await self.redis_client.get(key)
-                visits = json.loads(visits_raw) if visits_raw else []
+                raw_entries = await self.redis_client.lrange(key, 0, -1)
+                visits = [json.loads(e) for e in raw_entries]
 
                 if uid not in user_data:
                     user_data[uid] = {
@@ -572,11 +569,7 @@ class CacheManager:
                         "days": {}
                     }
 
-                routes_raw = await self.redis_client.smembers(f"route_visits:{uid}:{date}")
-                user_data[uid]["days"][date] = {
-                    "times": visits,
-                    "routes": sorted(routes_raw) if routes_raw else [],
-                }
+                user_data[uid]["days"][date] = visits
 
             return sorted(user_data.values(), key=lambda u: u["name"])
         except Exception as e:
