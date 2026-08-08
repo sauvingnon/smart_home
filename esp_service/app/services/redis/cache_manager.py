@@ -508,7 +508,7 @@ class CacheManager:
         """
         label = next((lbl for prefix, lbl in self.ROUTE_LABELS if path.startswith(prefix)), None)
         if not label:
-            logger.info(f"👁️ record_activity: путь {path} не подошёл ни под один префикс ROUTE_LABELS, пропускаю")
+            logger.debug(f"record_activity: путь {path} не подошёл ни под один префикс ROUTE_LABELS, пропускаю")
             return False
         if not await self._ensure_connection():
             logger.info(f"👁️ record_activity: нет соединения с Redis, пропускаю [{user_id}, {path}]")
@@ -531,6 +531,7 @@ class CacheManager:
                     if label not in entry["routes"]:
                         entry["routes"].append(label)
                         await self.redis_client.lset(log_key, -1, json.dumps(entry))
+                        logger.info(f"👁️ record_activity: новый раздел в текущем визите [{user_id}, {label}, {log_key}]")
                 return True
 
             # новый визит

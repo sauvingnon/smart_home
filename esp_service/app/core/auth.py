@@ -32,10 +32,12 @@ class AuthManager:
 
         logger.debug(f"✅ Session validated for user {user_id}")
         if user_id != ADMIN_USER_ID and isinstance(request, Request):
-            logger.info(f"👁️ verify_access_key: вызываю record_activity [{user_id}, {request.url.path}]")
-            await self.cache.record_activity(user_id, request.url.path)
-        elif isinstance(request, Request):
-            logger.info(f"👁️ verify_access_key: пропускаю record_activity — user_id={user_id} это ADMIN_USER_ID")
+            # request.url.path — сырой путь С учётом root_path ("/api/esp_service/...");
+            # ROUTE_LABELS сравнивается с путём БЕЗ root_path, иначе ни один
+            # префикс никогда не совпадёт (root_path у FastAPI = "/api").
+            root_path = request.scope.get("root_path", "")
+            relative_path = request.url.path.removeprefix(root_path)
+            await self.cache.record_activity(user_id, relative_path)
         return user_id
 
     async def get_current_user_id(self, request: Request) -> int:
