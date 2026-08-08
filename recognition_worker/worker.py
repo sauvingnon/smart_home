@@ -40,18 +40,22 @@ QUEUE_KEY = "recognition:queue"
 LOCK_KEY = "recognition:lock"
 LOCK_TTL_SECONDS = 900  # страховка на случай, если воркер зависнет/упадёт не освободив лок
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
+REFERENCES_PATH = "references.joblib"  # эталонные эмбеддинги людей, см. enroll.py
 IZHEVSK_TZ = timezone(timedelta(hours=4))
 
 
 class PipelineArgs:
     """Дефолты — совпадают с run_pipeline.py, чтобы process_video работал без изменений."""
-    sample_interval = 1.0
+    sample_interval = 0.05  # секунды между сэмплами; при обычном fps камеры это фактически каждый кадр
     person_conf = 0.4
-    face_det_thresh = 0.5
-    min_face_px = 30
-    min_blur = 8.0
-    unknown_threshold = 0.55
-    min_votes = 2
+    face_det_thresh = 0.6
+    min_face_px = 50
+    min_blur = 30.0
+    sim_threshold = 0.38  # минимальная косинусная близость к эталону
+    topk = 5              # сколько ближайших эталонов человека усредняем
+    margin = 0.05         # отрыв от второго кандидата, иначе решаем что неоднозначно
+    track_iou_thresh = 0.3         # порог IoU, чтобы считать bbox продолжением того же трека
+    track_max_gap_seconds = 1.0    # сколько трек может быть без детекции, прежде чем считать что закончился
 
 
 def video_key_for(camera_id: str, video_id: str, start_ts: int) -> str:
@@ -66,6 +70,10 @@ def process_queue(r: "redis.Redis") -> None:
     видимости и освобождаются (см. gc.collect() в вызывающем цикле)."""
 
     if r.llen(QUEUE_KEY) == 0:
+        return
+
+    if not os.path.exists(REFERENCES_PATH):
+        print(f"⚠️ нет {REFERENCES_PATH} — эталоны людей не заведены (см. enroll.py), очередь не трогаем")
         return
 
     # Лок против пересечения соседних прогонов (на случай если предыдущий
@@ -89,8 +97,7 @@ def process_queue(r: "redis.Redis") -> None:
         face_app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection", "recognition"], providers=["CPUExecutionProvider"])
         face_app.prepare(ctx_id=-1, det_size=(640, 640))
         rec_model = face_app.models["recognition"]
-        bundle = joblib.load("classifier.joblib")
-        clf, classes = bundle["clf"], bundle["classes"]
+        references = joblib.load(REFERENCES_PATH)
         args = PipelineArgs()
 
         processed = 0
@@ -107,7 +114,7 @@ def process_queue(r: "redis.Redis") -> None:
                 with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp:
                     s3.download_fileobj(bucket, key, tmp)
                     tmp.flush()
-                    result = process_video(Path(tmp.name), yolo, face_app, rec_model, clf, classes, args)
+                    result = process_video(Path(tmp.name), yolo, face_app, rec_model, references, args)
                     result["video"] = f"{video_id}.mp4"  # у process_video тут был бы temp-путь, не настоящее имя
 
                 result_key = f"recognition/{camera_id}/{video_id}.json"

@@ -7,3 +7,6 @@ __pycache__
 my_cam/.theia/launch.json
 my_cam/config.h
 toilet_module/config.h
+recognition_worker/dataset/
+recognition_worker/videos_raw/
+recognition_worker/extracted_faces/

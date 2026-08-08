@@ -17,6 +17,8 @@
   --accent-red: #ef4444;
   --accent-green: #22c55e;
   --accent-sky: #0ea5e9;
+  --accent-cyan-bg: rgba(6, 182, 212, 0.14);
+  --accent-red-bg: rgba(239, 68, 68, 0.14);
   --bg-gradient-from: #e0f2fe;
   --bg-gradient-to: #f0f9ff;
 }
@@ -37,6 +39,8 @@
   --accent-red: #f87171;
   --accent-green: #4ade80;
   --accent-sky: #0ea5e9;
+  --accent-cyan-bg: rgba(34, 211, 238, 0.16);
+  --accent-red-bg: rgba(248, 113, 113, 0.16);
   --bg-gradient-from: #0f172a;
   --bg-gradient-to: #1e1b4b;
 }
@@ -371,16 +375,27 @@
 .video-card-recognized {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.8rem;
+  gap: 0.4rem;
+  align-self: flex-start;
+  padding: 0.3rem 0.65rem;
+  border-radius: 0.6rem;
+  background: var(--accent-cyan-bg);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   color: var(--accent-cyan);
 }
 
 .video-card-recognition-error {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.8rem;
+  gap: 0.4rem;
+  align-self: flex-start;
+  padding: 0.3rem 0.65rem;
+  border-radius: 0.6rem;
+  background: var(--accent-red-bg);
+  font-size: 0.9rem;
+  font-weight: 700;
   color: var(--accent-red);
 }
 

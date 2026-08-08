@@ -31,6 +31,15 @@ interface VideoItem {
     recognition_error?: boolean | null  // true = не смогли проверить статус (не путать с "ещё не обработано")
 }
 
+// Метки people-эталонов (dataset/<label>/) -> отображаемое имя на фронте
+const RECOGNIZED_NAMES: Record<string, string> = {
+  andrey: 'Андрей',
+  liliya: 'Лилия',
+  kamelia: 'Камелия',
+  grisha: 'Гриша',
+}
+const recognizedDisplayName = (label: string) => RECOGNIZED_NAMES[label] ?? label
+
 const containerVar = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
@@ -373,13 +382,13 @@ export const VideosPage = () => {
                                     </div>
                                     {video.recognized && video.recognized.length > 0 && (
                                       <div className="video-card-recognized">
-                                        <Users size={14} />
-                                        <span>{video.recognized.join(', ')}</span>
+                                        <Users size={18} />
+                                        <span>{video.recognized.map(recognizedDisplayName).join(', ')}</span>
                                       </div>
                                     )}
                                     {video.recognition_error && (
                                       <div className="video-card-recognition-error" title="Не удалось проверить, распознан ли кто-то на видео">
-                                        <AlertTriangle size={14} />
+                                        <AlertTriangle size={16} />
                                         <span>Ошибка проверки распознавания</span>
                                       </div>
                                     )}

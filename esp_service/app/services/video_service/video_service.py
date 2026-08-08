@@ -857,12 +857,21 @@ class VideoService:
                     vid['thumbnail_url'] = None
                 video_dicts.append(vid)
 
-        # Кто распознан — запрашиваем для всех видео параллельно одним залпом:
-        # раньше это было N последовательных await в цикле (N Redis- и, в худшем
-        # случае, N S3-запросов подряд), теперь один общий gather. return_exceptions=True —
-        # чтобы упавший Redis/S3 на одном видео не ронял весь список остальных.
+        # Кто распознан — запрашиваем для всех видео параллельно, но не одним
+        # неограниченным залпом: необработанные видео каждую минуту заново
+        # бьют в S3 (их "pending"-кэш живёт всего 60с, в отличие от готовых
+        # результатов, закэшированных навсегда) — при большом списке видео
+        # это легко десятки одновременных запросов к Garage разом, и часть
+        # из них падает транзиентной ошибкой просто от перегрузки. Семафор
+        # держит разумный потолок параллелизма вместо неограниченного gather.
+        sem = asyncio.Semaphore(8)
+
+        async def _get_recognition_names_limited(camera_id: str, video_id: str):
+            async with sem:
+                return await self._get_recognition_names(camera_id, video_id)
+
         recognized_results = await asyncio.gather(
-            *(self._get_recognition_names(vid['camera_id'], vid['video_id']) for vid in video_dicts),
+            *(_get_recognition_names_limited(vid['camera_id'], vid['video_id']) for vid in video_dicts),
             return_exceptions=True,
         )
         for vid, result in zip(video_dicts, recognized_results):

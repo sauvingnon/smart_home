@@ -9,11 +9,12 @@ import onnxruntime as ort
 
 
 class PersonDetectorONNX:
-    def __init__(self, onnx_path="yolov8n.onnx", imgsz=640, conf=0.4, iou=0.7):
+    def __init__(self, onnx_path="yolov8n.onnx", imgsz=640, conf=0.4, iou=0.7, providers=None):
         opts = ort.SessionOptions()
+        # Лимит потоков актуален только для CPU (тесный VPS) — на GPU-провайдере не мешает.
         opts.intra_op_num_threads = 1
         opts.inter_op_num_threads = 1
-        self.session = ort.InferenceSession(onnx_path, sess_options=opts, providers=["CPUExecutionProvider"])
+        self.session = ort.InferenceSession(onnx_path, sess_options=opts, providers=providers or ["CPUExecutionProvider"])
         self.input_name = self.session.get_inputs()[0].name
         self.imgsz = imgsz
         self.conf = conf
