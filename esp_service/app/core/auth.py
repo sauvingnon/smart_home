@@ -32,7 +32,10 @@ class AuthManager:
 
         logger.debug(f"✅ Session validated for user {user_id}")
         if user_id != ADMIN_USER_ID and isinstance(request, Request):
+            logger.info(f"👁️ verify_access_key: вызываю record_activity [{user_id}, {request.url.path}]")
             await self.cache.record_activity(user_id, request.url.path)
+        elif isinstance(request, Request):
+            logger.info(f"👁️ verify_access_key: пропускаю record_activity — user_id={user_id} это ADMIN_USER_ID")
         return user_id
 
     async def get_current_user_id(self, request: Request) -> int:

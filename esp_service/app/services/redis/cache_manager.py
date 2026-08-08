@@ -508,14 +508,20 @@ class CacheManager:
         """
         label = next((lbl for prefix, lbl in self.ROUTE_LABELS if path.startswith(prefix)), None)
         if not label:
+            logger.info(f"👁️ record_activity: путь {path} не подошёл ни под один префикс ROUTE_LABELS, пропускаю")
             return False
         if not await self._ensure_connection():
+            logger.info(f"👁️ record_activity: нет соединения с Redis, пропускаю [{user_id}, {path}]")
             return False
         try:
             now = datetime.now(tz=self.IZHEVSK_TZ)
             today = now.strftime("%Y-%m-%d")
             log_key = f"activity_log:{user_id}:{today}"
-            cooldown_key = f"visit_cooldown:{user_id}"
+            # Кулдаун привязан к дате: иначе если последний визит был в прошлый
+            # час до полуночи, первый визит нового дня попадёт в "кулдаун ещё
+            # активен" и попытается дописаться в запись today, которой ещё нет —
+            # ничего не запишется, хотя функция вернёт True.
+            cooldown_key = f"visit_cooldown:{user_id}:{today}"
 
             if await self.redis_client.exists(cooldown_key):
                 # тот же визит — дописываем раздел в последнюю запись, если его там ещё нет
@@ -532,6 +538,7 @@ class CacheManager:
             entry = json.dumps({"time": now.strftime("%H:%M"), "routes": [label]})
             await self.redis_client.rpush(log_key, entry)
             await self.redis_client.expire(log_key, timedelta(days=8))
+            logger.info(f"👁️ record_activity: новый визит записан [{user_id}, {label}, {log_key}]")
             return True
         except Exception as e:
             logger.error(f"❌ Ошибка записи активности [{user_id}, {path}]: {e}")
