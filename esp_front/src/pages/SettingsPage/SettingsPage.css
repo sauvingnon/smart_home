@@ -295,6 +295,7 @@
 .section-icon.bath { color: var(--accent-emerald); }
 .section-icon.blue { color: var(--accent-blue); }
 .section-icon.purple { color: var(--accent-purple); }
+.section-icon.red { color: var(--accent-red); }
 
 /* Расписание */
 .schedule-grid {
@@ -667,6 +668,11 @@
   background: var(--accent-purple);
   color: white;
   border-color: var(--accent-purple);
+}
+
+.silent-button.danger:hover {
+  border-color: var(--accent-red);
+  color: var(--accent-red);
 }
 
 /* Загрузка */

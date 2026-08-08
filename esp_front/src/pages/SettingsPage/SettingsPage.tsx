@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
-  Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw
+  Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw, LogOut
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './SettingsPage.css'
 import { useTheme } from '../../context/ThemeContext'
+import { useAuth } from '../../context/AuthContext'
 import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 type Settings = {
@@ -222,6 +223,7 @@ const itemVar = {
 
 export default function SettingsPage() {
   const { theme } = useTheme()
+  const { clearAccessKey } = useAuth()
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -271,6 +273,12 @@ export default function SettingsPage() {
       console.error('Sync time failed:', e)
     } finally {
       setSyncing(false)
+    }
+  }
+
+  const handleLogout = () => {
+    if (window.confirm('Выйти из аккаунта?')) {
+      clearAccessKey()
     }
   }
 
@@ -553,6 +561,22 @@ export default function SettingsPage() {
                       Центральная плата: {syncResult.greenhouse === 'ok' ? '✓' : syncResult.greenhouse} &nbsp;·&nbsp; Уборная: {syncResult.toilet === 'ok' ? '✓' : syncResult.toilet}
                     </motion.p>
                   )}
+                </div>
+
+                <div className="section">
+                  <div className="section-header">
+                    <LogOut className="section-icon red" />
+                    <h2>Аккаунт</h2>
+                  </div>
+                  <motion.button
+                    className="silent-button danger"
+                    onClick={handleLogout}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <LogOut size={18} />
+                    Выйти из аккаунта
+                  </motion.button>
                 </div>
 
               </div>

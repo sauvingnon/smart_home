@@ -228,9 +228,60 @@
   color: var(--text-primary);
 }
 
-/* Фильтры */
-.filters-section {
-  padding: 1.5rem;
+/* Фильтр по распознанным людям */
+.people-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.people-filter-chip {
+  min-height: 2.5rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 9999px;
+  background: var(--glass-bg);
+  border: 1.5px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.people-filter-chip:hover {
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+}
+
+.people-filter-chip:active {
+  transform: scale(0.96);
+}
+
+.people-filter-chip.active {
+  background: var(--accent-cyan-bg);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.people-filter-clear {
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  background: transparent;
+  border: 1.5px dashed var(--glass-border);
+  color: var(--text-tertiary);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.people-filter-clear:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-tertiary);
 }
 
 .filters-grid {

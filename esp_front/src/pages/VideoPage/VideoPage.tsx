@@ -39,6 +39,7 @@ const RECOGNIZED_NAMES: Record<string, string> = {
   grisha: 'Гриша',
 }
 const recognizedDisplayName = (label: string) => RECOGNIZED_NAMES[label] ?? label
+const PEOPLE_FILTERS = ['andrey', 'liliya', 'kamelia', 'grisha']
 
 const containerVar = {
   hidden: { opacity: 0 },
@@ -59,6 +60,16 @@ export const VideosPage = () => {
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [downloadProgress, setDownloadProgress] = useState(0) // -1 = подготовка, 0-100 = прогресс
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
+
+  const toggleFilter = (label: string) => {
+    setActiveFilters(prev => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }
 
   const toggleDay = (dayKey: string) => {
     setExpandedDays(prev => {
@@ -153,7 +164,7 @@ export const VideosPage = () => {
   }
 
   const getTotalDuration = () => {
-    const totalSeconds = videos.reduce((sum, video) => sum + (video.duration_seconds || 0), 0)
+    const totalSeconds = filteredVideos.reduce((sum, video) => sum + (video.duration_seconds || 0), 0)
     const hours = Math.floor(totalSeconds / 3600)
     const minutes = Math.floor((totalSeconds % 3600) / 60)
     if (hours > 0) {
@@ -163,7 +174,7 @@ export const VideosPage = () => {
   }
 
   const getTotalSize = () => {
-    const totalBytes = videos.reduce((sum, video) => sum + video.size_bytes, 0)
+    const totalBytes = filteredVideos.reduce((sum, video) => sum + video.size_bytes, 0)
     return formatSize(totalBytes)
   }
 
@@ -240,8 +251,13 @@ export const VideosPage = () => {
     return new Date(utcMs + 4 * 60 * 60 * 1000) // UTC+4 Самара
   }
 
+  // Фильтр по распознанным людям — пусто = без фильтра, показываем всё
+  const filteredVideos = activeFilters.size === 0
+    ? videos
+    : videos.filter(video => video.recognized?.some(name => activeFilters.has(name)))
+
   // Группировка видео по дням (UTC+4, Самара)
-  const groupedVideos = videos.reduce<Record<string, VideoItem[]>>((groups, video) => {
+  const groupedVideos = filteredVideos.reduce<Record<string, VideoItem[]>>((groups, video) => {
     const date = toSamaraDate(video.start_time || video.last_modified)
     const y = date.getUTCFullYear()
     const m = String(date.getUTCMonth() + 1).padStart(2, '0')
@@ -293,6 +309,25 @@ export const VideosPage = () => {
               <h2>Записи</h2>
             </div>
 
+            {videos.length > 0 && (
+              <div className="people-filter">
+                {PEOPLE_FILTERS.map(label => (
+                  <button
+                    key={label}
+                    className={`people-filter-chip ${activeFilters.has(label) ? 'active' : ''}`}
+                    onClick={() => toggleFilter(label)}
+                  >
+                    {recognizedDisplayName(label)}
+                  </button>
+                ))}
+                {activeFilters.size > 0 && (
+                  <button className="people-filter-clear" onClick={() => setActiveFilters(new Set())}>
+                    Сбросить
+                  </button>
+                )}
+              </div>
+            )}
+
             {loading ? (
               <div className="loading-container">
                 <div className="loading-card">
@@ -305,6 +340,12 @@ export const VideosPage = () => {
                 <FileVideo size={48} className="empty-icon" />
                 <h3>Нет видеозаписей</h3>
                 <p>Видеозаписи появятся здесь после записи</p>
+              </div>
+            ) : filteredVideos.length === 0 ? (
+              <div className="empty-state">
+                <Users size={48} className="empty-icon" />
+                <h3>Никого не найдено</h3>
+                <p>Нет видео с выбранными людьми — попробуй другой фильтр</p>
               </div>
             ) : (
               <div className="videos-list">
@@ -431,7 +472,7 @@ export const VideosPage = () => {
                 </div>
                 <div className="stat-info">
                   <span className="stat-label">Всего видео</span>
-                  <span className="stat-value">{videos.length}</span>
+                  <span className="stat-value">{filteredVideos.length}</span>
                 </div>
               </div>
               <div className="stat-card glass-card">
