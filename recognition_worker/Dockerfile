@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://mirror.yandex.ru/pypi/web/simple/ \
     -r requirements.txt
 
-COPY run_pipeline.py worker.py yolo_onnx.py backfill_queue.py references.joblib yolov8n.onnx ./
+COPY run_pipeline.py worker.py yolo_onnx.py backfill_queue.py classifier.joblib yolov8n.onnx ./
 
 # Прогреваем insightface на этапе сборки, а не при каждом коротком запуске воркера.
 # YOLO ONNX никакой прогрузки весов не требует — файл уже с нами, никуда не ходит.
