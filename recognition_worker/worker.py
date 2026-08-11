@@ -1,16 +1,15 @@
 """
-Долгоживущий воркер: раз в POLL_INTERVAL_SECONDS проверяет очередь в Redis.
-Если пусто — ничего не грузит и засыпает дальше. Если есть работа — тянет
-видео из S3(Garage) по одному, гонит pipeline, кладёт результат обратно
-в S3, разбирает очередь до конца и выгружает модели из памяти до следующей
-находки работы (тесно по RAM на VPS, держать их в памяти простаивая смысла нет).
+Точка входа докер-воркера. Не сервер — одноразовый прогон:
+проверяет очередь в Redis, если пусто выходит сразу, иначе
+тянет видео из S3(Garage) по одному, гонит pipeline, кладёт
+результат обратно в S3 и выходит когда очередь опустела.
 
 Формат job'а в очереди (кладёт esp_service при сохранении видео):
     "{camera_id}:{video_id}:{start_unix_timestamp}"
 
 Env:
     REDIS_URL, S3_ENDPOINT_URL, S3_BUCKET_NAME,
-    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, POLL_INTERVAL_SECONDS (по умолчанию 60)
+    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 """
 import os
 
@@ -21,10 +20,8 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
-import gc
 import json
 import tempfile
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -39,23 +36,20 @@ from yolo_onnx import PersonDetectorONNX
 QUEUE_KEY = "recognition:queue"
 LOCK_KEY = "recognition:lock"
 LOCK_TTL_SECONDS = 900  # страховка на случай, если воркер зависнет/упадёт не освободив лок
-POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
-REFERENCES_PATH = "references.joblib"  # эталонные эмбеддинги людей, см. enroll.py
 IZHEVSK_TZ = timezone(timedelta(hours=4))
 
 
 class PipelineArgs:
     """Дефолты — совпадают с run_pipeline.py, чтобы process_video работал без изменений."""
-    sample_interval = 0.05  # секунды между сэмплами; при обычном fps камеры это фактически каждый кадр
+    sample_interval = 1.0
     person_conf = 0.4
-    face_det_thresh = 0.6
-    min_face_px = 50
-    min_blur = 30.0
-    sim_threshold = 0.38  # минимальная косинусная близость к эталону
-    topk = 5              # сколько ближайших эталонов человека усредняем
-    margin = 0.05         # отрыв от второго кандидата, иначе решаем что неоднозначно
-    track_iou_thresh = 0.3         # порог IoU, чтобы считать bbox продолжением того же трека
-    track_max_gap_seconds = 1.0    # сколько трек может быть без детекции, прежде чем считать что закончился
+    face_det_thresh = 0.5
+    min_face_px = 30
+    min_blur = 8.0
+    unknown_threshold = 0.75
+    iou_threshold = 0.2
+    max_frame_gap = 3
+    min_track_faces = 1
 
 
 def video_key_for(camera_id: str, video_id: str, start_ts: int) -> str:
@@ -64,23 +58,18 @@ def video_key_for(camera_id: str, video_id: str, start_ts: int) -> str:
     return f"videos/{camera_id}/{dt.strftime('%Y')}/{dt.strftime('%m')}/{dt.strftime('%d')}/{video_id}.mp4"
 
 
-def process_queue(r: "redis.Redis") -> None:
-    """Разбирает очередь целиком, если в ней есть работа. Модели живут только
-    в теле этой функции — как только она возвращается, они выходят из области
-    видимости и освобождаются (см. gc.collect() в вызывающем цикле)."""
+def main():
+    r = redis.Redis.from_url(os.environ["REDIS_URL"])
 
     if r.llen(QUEUE_KEY) == 0:
+        print("очередь пуста, выходим без загрузки моделей")
         return
 
-    if not os.path.exists(REFERENCES_PATH):
-        print(f"⚠️ нет {REFERENCES_PATH} — эталоны людей не заведены (см. enroll.py), очередь не трогаем")
-        return
-
-    # Лок против пересечения соседних прогонов (на случай если предыдущий
-    # не уложился в интервал опроса) — второй воркер не должен параллельно
+    # Лок против пересечения соседних запусков (например если один прогон
+    # не уложился в интервал таймера) — второй воркер не должен параллельно
     # держать в памяти те же модели на тесной по RAM машине.
     if not r.set(LOCK_KEY, "1", nx=True, ex=LOCK_TTL_SECONDS):
-        print("другой воркер уже обрабатывает очередь, пропускаем")
+        print("другой воркер уже обрабатывает очередь, выходим")
         return
 
     try:
@@ -95,9 +84,10 @@ def process_queue(r: "redis.Redis") -> None:
         print("есть работа, гружу модели...")
         yolo = PersonDetectorONNX("yolov8n.onnx", conf=PipelineArgs.person_conf)
         face_app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection", "recognition"], providers=["CPUExecutionProvider"])
-        face_app.prepare(ctx_id=-1, det_size=(640, 640))
+        face_app.prepare(ctx_id=-1, det_size=(320, 320))
         rec_model = face_app.models["recognition"]
-        references = joblib.load(REFERENCES_PATH)
+        bundle = joblib.load("classifier.joblib")
+        clf, classes = bundle["clf"], bundle["classes"]
         args = PipelineArgs()
 
         processed = 0
@@ -114,7 +104,7 @@ def process_queue(r: "redis.Redis") -> None:
                 with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp:
                     s3.download_fileobj(bucket, key, tmp)
                     tmp.flush()
-                    result = process_video(Path(tmp.name), yolo, face_app, rec_model, references, args)
+                    result = process_video(Path(tmp.name), yolo, face_app, rec_model, clf, classes, args)
                     result["video"] = f"{video_id}.mp4"  # у process_video тут был бы temp-путь, не настоящее имя
 
                 result_key = f"recognition/{camera_id}/{video_id}.json"
@@ -136,19 +126,6 @@ def process_queue(r: "redis.Redis") -> None:
 
     finally:
         r.delete(LOCK_KEY)
-
-
-def main():
-    r = redis.Redis.from_url(os.environ["REDIS_URL"])
-    print(f"recognition_worker запущен, опрос очереди каждые {POLL_INTERVAL_SECONDS}с")
-
-    while True:
-        try:
-            process_queue(r)
-        except Exception as e:
-            print(f"⚠️ прогон обработки очереди упал: {e}")
-        gc.collect()  # выгружаем модели из памяти на время простоя
-        time.sleep(POLL_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":

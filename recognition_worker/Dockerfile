@@ -22,7 +22,7 @@ COPY run_pipeline.py worker.py yolo_onnx.py backfill_queue.py references.joblib 
 # в этом же слое (удаление отдельным RUN слоем размер образа не уменьшило бы).
 RUN python -c "\
 from insightface.app import FaceAnalysis; \
-FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition'], providers=['CPUExecutionProvider']).prepare(ctx_id=-1, det_size=(640, 640))" \
+FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition'], providers=['CPUExecutionProvider']).prepare(ctx_id=-1, det_size=(320, 320))" \
     && rm -f /root/.insightface/models/buffalo_l/1k3d68.onnx \
              /root/.insightface/models/buffalo_l/2d106det.onnx \
              /root/.insightface/models/buffalo_l/genderage.onnx
