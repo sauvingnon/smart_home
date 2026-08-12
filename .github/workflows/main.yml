@@ -100,3 +100,13 @@ jobs:
             done
             exit $FAIL
           '
+
+      - name: Логи recognition_worker
+        if: always()
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} '
+            echo "⏳ жду 90с, чтобы демон успел хотя бы раз опросить очередь"
+            sleep 90
+            echo "📋 recognition_worker (последние 300 строк):"
+            sudo docker logs recognition_worker --tail 300
+          ' || true
