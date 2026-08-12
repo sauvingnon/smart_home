@@ -80,6 +80,17 @@ class ApiClient {
     });
   }
 
+  async getSettings(): Promise<any> {
+    return this.fetch('/esp_service/settings');
+  }
+
+  async updateSettings(settings: any): Promise<any> {
+    return this.fetch('/esp_service/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
   createCameraWebSocket(cameraId: string, options: any = {}) {
     const wsUrl = `${getWebSocketBaseUrl()}/esp_service/ws/view/${cameraId}`;
     const ws = new WebSocket(wsUrl);

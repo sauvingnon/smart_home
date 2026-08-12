@@ -13,7 +13,8 @@ import {
   Check,
   Fan,
   Power,
-  Thermometer
+  Thermometer,
+  Lightbulb
 } from 'lucide-react'
 import { CameraStream } from '../../components/StreamCamera/StreamCamera'
 import { apiClient } from '../../api/client'
@@ -68,6 +69,9 @@ export const CameraPage: React.FC = () => {
 
   const [fanMode, setFanMode] = useState<0 | 1 | 2>(1)
   const [isChangingFan, setIsChangingFan] = useState(false)
+
+  const [isBlinkingLight, setIsBlinkingLight] = useState(false)
+  const [lightSkipped, setLightSkipped] = useState(false)
 
   // Состояние для имитации fullscreen на iOS
   const [simulatedFullscreen, setSimulatedFullscreen] = useState(false)
@@ -174,6 +178,40 @@ export const CameraPage: React.FC = () => {
       console.error('Failed to set fan mode:', e)
     } finally {
       setIsChangingFan(false)
+    }
+  }
+
+  const handleLightBlink = async () => {
+    if (isBlinkingLight) return
+    setIsBlinkingLight(true)
+    setLightSkipped(false)
+    try {
+      const original = await apiClient.getSettings()
+
+      // Ручной режим с обоими выключенными реле — датчики намеренно
+      // обесточены (человек хочет полной темноты). Их повторное включение
+      // само по себе на ~30с зажжёт свет как побочный эффект старта датчика —
+      // этого тут быть не должно, поэтому вообще не трогаем настройки.
+      if (original.relayMode && !original.manualDayState && !original.manualNightState) {
+        setLightSkipped(true)
+        setTimeout(() => setLightSkipped(false), 3000)
+        return
+      }
+
+      await apiClient.updateSettings({
+        ...original,
+        relayMode: true,
+        manualDayState: false,
+        manualNightState: false,
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 700))
+
+      await apiClient.updateSettings(original)
+    } catch (e) {
+      console.error('Failed to blink light:', e)
+    } finally {
+      setIsBlinkingLight(false)
     }
   }
 
@@ -359,6 +397,47 @@ export const CameraPage: React.FC = () => {
                 <span>
                   {fullscreen ? '👆 Нажмите для выхода' : '👆 Нажмите на видео для полноэкранного режима'}
                 </span>
+              </motion.div>
+            )}
+          </motion.div>
+
+          <motion.div variants={itemVar} className="resolution-section glass-card light-section">
+            <div className="section-header">
+              <Lightbulb size={24} className="section-icon light-icon" />
+              <h2>Подсветка</h2>
+            </div>
+
+            <motion.button
+              className="light-blink-button"
+              onClick={handleLightBlink}
+              disabled={isBlinkingLight}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Lightbulb size={20} />
+              {isBlinkingLight ? 'Включаю...' : 'Посветить'}
+            </motion.button>
+
+            {isBlinkingLight && (
+              <motion.div
+                className="changing-indicator"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <div className="spinner-small" />
+                <span>Свет включится примерно на 30 секунд...</span>
+              </motion.div>
+            )}
+
+            {lightSkipped && (
+              <motion.div
+                className="changing-indicator"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <span>Свет выключен вручную — не трогаю</span>
               </motion.div>
             )}
           </motion.div>

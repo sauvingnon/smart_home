@@ -423,6 +423,38 @@
   color: var(--text-tertiary);
 }
 
+.light-icon {
+  color: var(--accent-amber);
+}
+
+.light-blink-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.18), rgba(249, 115, 22, 0.08));
+  border: 2px solid rgba(249, 115, 22, 0.35);
+  border-radius: 1.5rem;
+  color: var(--text-primary);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.light-blink-button:hover:not(:disabled) {
+  border-color: var(--accent-amber);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(249, 115, 22, 0.2);
+}
+
+.light-blink-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .changing-indicator {
   display: flex;
   align-items: center;
