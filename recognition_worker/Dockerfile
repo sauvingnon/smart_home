@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+# Иначе Docker не видит print() из worker.py, пока питон не сбросит буфер сам —
+# stdout не подключён к терминалу, питон переходит на блочную буферизацию.
+ENV PYTHONUNBUFFERED=1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
