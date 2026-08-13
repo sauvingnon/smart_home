@@ -767,11 +767,17 @@ class S3Manager:
             body = response['Body']
 
             async def _stream():
-                while True:
-                    chunk = await body.read(65536)
-                    if not chunk:
-                        break
-                    yield chunk
+                try:
+                    while True:
+                        chunk = await body.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    # Клиент мог оборвать чтение (перемотка/закрытие плеера) не
+                    # дочитав до конца — без явного close() соединение к Garage
+                    # зависает и не освобождается штатно.
+                    body.close()
 
             return _stream(), file_size
         except Exception as e:
@@ -798,11 +804,17 @@ class S3Manager:
             body = response['Body']
 
             async def _stream():
-                while True:
-                    chunk = await body.read(65536)
-                    if not chunk:
-                        break
-                    yield chunk
+                try:
+                    while True:
+                        chunk = await body.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    # Клиент мог оборвать чтение (перемотка/закрытие плеера) не
+                    # дочитав до конца — без явного close() соединение к Garage
+                    # зависает и не освобождается штатно.
+                    body.close()
 
             return _stream(), file_size, actual_end
         except Exception as e:
