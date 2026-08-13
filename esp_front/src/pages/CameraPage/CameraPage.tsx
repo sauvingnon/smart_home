@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera as CameraIcon,
   Wifi,
@@ -387,18 +387,21 @@ export const CameraPage: React.FC = () => {
               )}
             </div>
 
-            {isMobile && fullscreen && (
-              <motion.div 
-                className="mobile-exit-hint"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-              >
-                <span>
-                  {fullscreen ? '👆 Нажмите для выхода' : '👆 Нажмите на видео для полноэкранного режима'}
-                </span>
-              </motion.div>
-            )}
+            <AnimatePresence>
+              {isMobile && fullscreen && (
+                <motion.div
+                  key="mobile-exit-hint"
+                  className="mobile-exit-hint"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <span>
+                    {fullscreen ? '👆 Нажмите для выхода' : '👆 Нажмите на видео для полноэкранного режима'}
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
 
           <motion.div variants={itemVar} className="resolution-section glass-card light-section">
@@ -418,28 +421,32 @@ export const CameraPage: React.FC = () => {
               {isBlinkingLight ? 'Включаю...' : 'Посветить'}
             </motion.button>
 
-            {isBlinkingLight && (
-              <motion.div
-                className="changing-indicator"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-              >
-                <div className="spinner-small" />
-                <span>Свет включится примерно на 30 секунд...</span>
-              </motion.div>
-            )}
+            <AnimatePresence>
+              {isBlinkingLight && (
+                <motion.div
+                  key="light-blinking"
+                  className="changing-indicator"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <div className="spinner-small" />
+                  <span>Свет включится примерно на 30 секунд...</span>
+                </motion.div>
+              )}
 
-            {lightSkipped && (
-              <motion.div
-                className="changing-indicator"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-              >
-                <span>Свет выключен вручную — не трогаю</span>
-              </motion.div>
-            )}
+              {lightSkipped && (
+                <motion.div
+                  key="light-skipped"
+                  className="changing-indicator"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <span>Свет выключен вручную — не трогаю</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
 
           <motion.div variants={itemVar} className="resolution-section glass-card">
@@ -512,30 +519,36 @@ export const CameraPage: React.FC = () => {
                 ))}
               </div>
 
-              {isChangingFan && (
-                <motion.div 
+              <AnimatePresence>
+                {isChangingFan && (
+                  <motion.div
+                    key="fan-changing"
+                    className="changing-indicator"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <div className="spinner-small" />
+                    <span>Переключение вентилятора...</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <AnimatePresence>
+              {isChangingResolution && (
+                <motion.div
+                  key="resolution-changing"
                   className="changing-indicator"
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                 >
                   <div className="spinner-small" />
-                  <span>Переключение вентилятора...</span>
+                  <span>Смена разрешения...</span>
                 </motion.div>
               )}
-            </div>
-
-            {isChangingResolution && (
-              <motion.div 
-                className="changing-indicator"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-              >
-                <div className="spinner-small" />
-                <span>Смена разрешения...</span>
-              </motion.div>
-            )}
+            </AnimatePresence>
           </motion.div>
 
            {/* Статистика камеры */}
