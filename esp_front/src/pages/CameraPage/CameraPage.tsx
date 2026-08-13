@@ -205,7 +205,7 @@ export const CameraPage: React.FC = () => {
         manualNightState: false,
       })
 
-      await new Promise((resolve) => setTimeout(resolve, 1400))
+      await new Promise((resolve) => setTimeout(resolve, 2000))
 
       await apiClient.updateSettings(original)
     } catch (e) {
