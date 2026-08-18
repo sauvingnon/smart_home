@@ -10,8 +10,10 @@ import {
   HardDrive,
   Users,
   AlertTriangle,
+  AlertCircle,
   LogIn,
-  LogOut
+  LogOut,
+  Loader2
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
@@ -33,6 +35,17 @@ interface VideoItem {
     recognition_error?: boolean | null  // true = не смогли проверить статус (не путать с "ещё не обработано")
     direction?: string | null  // "entering" | "exiting" | "nothing" | null (ещё не обработано)
     direction_low_confidence?: boolean | null  // true = вердикт вблизи порога, не доверять слепо
+}
+
+// Сколько ждём результат CV-пайплайна, прежде чем считать обработку зависшей
+// (воркер падает на конкретном видео без следа -- см. обсуждение с пользователем).
+// Не про типичное время обработки (~1.5-3 мин) -- запас на очередь из нескольких видео подряд.
+const PROCESSING_STUCK_MINUTES = 60
+
+const isStuckProcessing = (video: VideoItem) => {
+  const started = new Date(video.start_time || video.last_modified).getTime()
+  if (Number.isNaN(started)) return false
+  return (Date.now() - started) / 60000 > PROCESSING_STUCK_MINUTES
 }
 
 // Метки people-эталонов (dataset/<label>/) -> отображаемое имя на фронте
@@ -425,6 +438,25 @@ export const VideosPage = () => {
                                     <div className="video-card-title">
                                       {formatTime(video.start_time || video.last_modified)}
                                     </div>
+                                    {video.recognized == null && !video.recognition_error && !isStuckProcessing(video) && (
+                                      <div className="video-card-processing">
+                                        <div className="video-card-processing-label">
+                                          <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ display: 'flex' }}>
+                                            <Loader2 size={16} />
+                                          </motion.div>
+                                          <span>В обработке</span>
+                                        </div>
+                                        <div className="video-card-progress-track">
+                                          <div className="video-card-progress-bar" />
+                                        </div>
+                                      </div>
+                                    )}
+                                    {video.recognized == null && !video.recognition_error && isStuckProcessing(video) && (
+                                      <div className="video-card-processing-stuck" title={`Прошло больше ${PROCESSING_STUCK_MINUTES} мин, а результата всё нет — похоже, обработка упала`}>
+                                        <AlertCircle size={16} />
+                                        <span>Не удалось обработать</span>
+                                      </div>
+                                    )}
                                     {video.recognized && video.recognized.length > 0 && (
                                       <div className="video-card-recognized">
                                         <Users size={18} />

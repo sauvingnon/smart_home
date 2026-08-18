@@ -441,6 +441,48 @@
   color: var(--accent-cyan);
 }
 
+.video-card-processing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-self: flex-start;
+  width: 100%;
+}
+
+.video-card-processing-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.video-card-progress-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--glass-border);
+  overflow: hidden;
+}
+
+.video-card-progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 35%;
+  border-radius: 2px;
+  background: var(--accent-sky);
+  animation: videoProcessingSlide 1.4s ease-in-out infinite;
+}
+
+@keyframes videoProcessingSlide {
+  0%   { left: -35%; }
+  100% { left: 100%; }
+}
+
 .video-card-direction-entering {
   display: flex;
   align-items: center;
@@ -465,6 +507,19 @@
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--accent-amber);
+}
+
+.video-card-processing-stuck {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  padding: 0.3rem 0.65rem;
+  border-radius: 0.6rem;
+  background: var(--accent-red-bg);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--accent-red);
 }
 
 .video-card-recognition-error {
