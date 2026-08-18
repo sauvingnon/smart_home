@@ -19,6 +19,8 @@
   --accent-sky: #0ea5e9;
   --accent-cyan-bg: rgba(6, 182, 212, 0.14);
   --accent-red-bg: rgba(239, 68, 68, 0.14);
+  --accent-emerald-bg: rgba(16, 185, 129, 0.14);
+  --accent-amber-bg: rgba(249, 115, 22, 0.14);
   --bg-gradient-from: #e0f2fe;
   --bg-gradient-to: #f0f9ff;
 }
@@ -41,6 +43,8 @@
   --accent-sky: #0ea5e9;
   --accent-cyan-bg: rgba(34, 211, 238, 0.16);
   --accent-red-bg: rgba(248, 113, 113, 0.16);
+  --accent-emerald-bg: rgba(52, 211, 153, 0.16);
+  --accent-amber-bg: rgba(251, 191, 36, 0.16);
   --bg-gradient-from: #0f172a;
   --bg-gradient-to: #1e1b4b;
 }
@@ -435,6 +439,32 @@
   font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--accent-cyan);
+}
+
+.video-card-direction-entering {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  padding: 0.3rem 0.65rem;
+  border-radius: 0.6rem;
+  background: var(--accent-emerald-bg);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--accent-emerald);
+}
+
+.video-card-direction-exiting {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  padding: 0.3rem 0.65rem;
+  border-radius: 0.6rem;
+  background: var(--accent-amber-bg);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--accent-amber);
 }
 
 .video-card-recognition-error {

@@ -60,7 +60,10 @@ def process_video(video_path, yolo, face_app, rec_model, clf, classes, args):
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 12.0
     frame_step = max(1, round(fps * args.sample_interval))
-    max_gap_frames = args.max_frame_gap * frame_step
+    # В секундах, не в сэмплах -- иначе допуск на разрыв трека меняется вместе с
+    # sample_interval (на 1 fps 3 сэмпла = 3с, на нативном fps 3 сэмпла = ~0.4с,
+    # трек рвётся в 7 раз чаще без реальной причины).
+    max_gap_frames = round(args.max_frame_gap_seconds * fps)
 
     tracks = []
     next_track_id = 0
@@ -155,14 +158,14 @@ def main():
     ap.add_argument("--videos", default="data_video")
     ap.add_argument("--video", default=None, help="обработать один конкретный файл")
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--sample-interval", type=float, default=1.0)
+    ap.add_argument("--sample-interval", type=float, default=0.01, help="0.01 ~= каждый кадр на любом реальном fps камеры; было 1.0 (1 кадр/сек) до находки, что recall лиц страдает от разреженного сэмплинга")
     ap.add_argument("--person-conf", type=float, default=0.4)
     ap.add_argument("--face-det-thresh", type=float, default=0.5)
     ap.add_argument("--min-face-px", type=int, default=30)
     ap.add_argument("--min-blur", type=float, default=8.0)
     ap.add_argument("--unknown-threshold", type=float, default=0.75, help="ниже этой уверенности трек считается неизвестным")
     ap.add_argument("--iou-threshold", type=float, default=0.2, help="минимальное пересечение боксов, чтобы считать это тем же треком")
-    ap.add_argument("--max-frame-gap", type=int, default=3, help="сколько сэмплированных кадров подряд трек может пропустить, прежде чем считаться потерянным")
+    ap.add_argument("--max-frame-gap-seconds", type=float, default=3.0, help="сколько секунд подряд трек может не детектиться, прежде чем считаться потерянным (не зависит от sample_interval)")
     ap.add_argument("--min-track-faces", type=int, default=1, help="сколько лиц нужно набрать в треке, чтобы вообще классифицировать его")
     ap.add_argument("--yolo-model", default="yolov8n.onnx")
     ap.add_argument("--face-model", default="buffalo_l")

@@ -77,22 +77,6 @@
   display: block;
 }
 
-/* Блик, пробегающий по лого после появления */
-.shine {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.7) 50%, transparent 65%);
-  mix-blend-mode: screen;
-  transform: translateX(-120%);
-  animation: shineSweep 0.7s ease-out 0.3s both;
-}
-
-@keyframes shineSweep {
-  from { transform: translateX(-120%); }
-  to { transform: translateX(120%); }
-}
-
 /* Жирный текст */
 .title {
   font-size: 42px;
@@ -142,7 +126,7 @@
     width: 180px;
     height: 180px;
   }
-  
+
   .title {
     font-size: 32px;
   }

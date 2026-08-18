@@ -19,7 +19,6 @@ export const LaunchScreen = () => {
             transition={{ duration: 0.35, ease: [0.23, 1, 0.32, 1] }}
           >
             <img src={logo} alt="Logo" className={styles.logo} />
-            <div className={styles.shine} />
           </motion.div>
         </div>
 

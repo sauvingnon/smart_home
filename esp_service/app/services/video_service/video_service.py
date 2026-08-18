@@ -879,37 +879,52 @@ class VideoService:
                 logger.error(f"❌ Не удалось проверить распознавание для {vid.get('video_id')}: {result}")
                 vid['recognized'] = None
                 vid['recognition_error'] = True
+                vid['direction'] = None
+                vid['direction_low_confidence'] = None
             else:
-                vid['recognized'] = result
+                vid['recognized'] = result['names']
+                vid['direction'] = result['direction']
+                vid['direction_low_confidence'] = result['direction_low_confidence']
 
         return [VideoItem(**vid) for vid in video_dicts]
 
-    async def _get_recognition_names(self, camera_id: str, video_id: str) -> Optional[list]:
+    async def _get_recognition_names(self, camera_id: str, video_id: str) -> dict:
         """
-        Кто распознан на видео (recognition_worker кладёт результат в S3 отдельно).
-        Кэшируется своим отдельным ключом — намеренно НЕ частью дневного кэша списка видео,
-        у которого TTL/инвалидация привязаны к моменту аплоада, а не к моменту готовности
-        распознавания (оно может доехать на 5-15 минут позже). Так поле само "дозревает"
-        на следующий запрос списка, а не залипает пустым до следующего аплоада/полуночи.
+        Кто распознан на видео + вошёл/вышел (recognition_worker кладёт результат в S3
+        отдельно). Кэшируется своим отдельным ключом — намеренно НЕ частью дневного кэша
+        списка видео, у которого TTL/инвалидация привязаны к моменту аплоада, а не к моменту
+        готовности распознавания (оно может доехать на 5-15 минут позже). Так поле само
+        "дозревает" на следующий запрос списка, а не залипает пустым до следующего
+        аплоада/полуночи.
         """
+        empty = {"names": None, "direction": None, "direction_low_confidence": None}
         if not self.s3_manager or not video_id:
-            return None
+            return empty
 
-        cache_key = f"recognition_cache:{camera_id}:{video_id}"
+        # v2 -- старый ключ (recognition_cache:) кэшировал голый список имён, а не dict;
+        # новое имя, чтобы не читать несовместимый формат из уже готовых старых записей
+        # (они без TTL, "навсегда" — сами не истекут).
+        cache_key = f"recognition_cache_v2:{camera_id}:{video_id}"
         cached = await self.cache_manager.redis_client.get(cache_key)
         if cached is not None:
-            return None if cached == "__pending__" else json.loads(cached)
+            return empty if cached == "__pending__" else json.loads(cached)
 
         result = await self.s3_manager.get_recognition_result(camera_id, video_id)
         if result is None:
             # ещё не обработано — короткий TTL, чтобы не долбить S3 на каждый запрос списка
             await self.cache_manager.redis_client.setex(cache_key, 60, "__pending__")
-            return None
+            return empty
 
         names = [name for name, info in result.get("presence", {}).items() if info.get("present")]
+        direction = result.get("direction", {})
+        info = {
+            "names": names,
+            "direction": direction.get("verdict"),
+            "direction_low_confidence": direction.get("low_confidence"),
+        }
         # результат неизменен раз готов — кэшируем без TTL
-        await self.cache_manager.redis_client.set(cache_key, json.dumps(names))
-        return names
+        await self.cache_manager.redis_client.set(cache_key, json.dumps(info))
+        return info
 
     async def _get_video_key(self, camera_id: str, video_id: str) -> Optional[str]:
         """Получить S3-ключ видео: сначала из кэша Redis, потом полный скан S3."""

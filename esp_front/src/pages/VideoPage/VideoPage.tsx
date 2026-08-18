@@ -9,7 +9,9 @@ import {
   RefreshCw,
   HardDrive,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  LogIn,
+  LogOut
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
@@ -29,6 +31,8 @@ interface VideoItem {
     thumbnail_url: string  // 🔧 Может быть null
     recognized?: string[] | null  // Кто распознан на видео (null = ещё не обработано)
     recognition_error?: boolean | null  // true = не смогли проверить статус (не путать с "ещё не обработано")
+    direction?: string | null  // "entering" | "exiting" | "nothing" | null (ещё не обработано)
+    direction_low_confidence?: boolean | null  // true = вердикт вблизи порога, не доверять слепо
 }
 
 // Метки people-эталонов (dataset/<label>/) -> отображаемое имя на фронте
@@ -425,6 +429,24 @@ export const VideosPage = () => {
                                       <div className="video-card-recognized">
                                         <Users size={18} />
                                         <span>{video.recognized.map(recognizedDisplayName).join(', ')}</span>
+                                      </div>
+                                    )}
+                                    {video.direction === 'entering' && (
+                                      <div
+                                        className="video-card-direction-entering"
+                                        title={video.direction_low_confidence ? 'Похоже, но не уверен' : undefined}
+                                      >
+                                        <LogIn size={18} />
+                                        <span>Вошёл</span>
+                                      </div>
+                                    )}
+                                    {video.direction === 'exiting' && (
+                                      <div
+                                        className="video-card-direction-exiting"
+                                        title={video.direction_low_confidence ? 'Похоже, но не уверен' : undefined}
+                                      >
+                                        <LogOut size={18} />
+                                        <span>Вышел</span>
                                       </div>
                                     )}
                                     {video.recognition_error && (

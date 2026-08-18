@@ -33,6 +33,7 @@ import joblib
 import redis
 from insightface.app import FaceAnalysis
 
+from direction_detector import process_video_direction
 from run_pipeline import process_video
 from yolo_onnx import PersonDetectorONNX
 
@@ -44,15 +45,21 @@ IZHEVSK_TZ = timezone(timedelta(hours=4))
 
 
 class PipelineArgs:
-    """Дефолты — совпадают с run_pipeline.py, чтобы process_video работал без изменений."""
-    sample_interval = 1.0
+    """Дефолты — совпадают с run_pipeline.py, чтобы process_video работал без изменений.
+
+    sample_interval было 1.0 (1 кадр/сек, экономия CPU) -- по факту recall лиц
+    страдал (продовые метрики: 42% находим лицо при 99.24% точности классификации,
+    если нашли; узкое место — recall, не классификатор). Не real-time, очередь
+    Redis всё стерпит (события ~раз в час по факту), поэтому не жалко CPU-время
+    ради recall — читаем каждый кадр."""
+    sample_interval = 0.01  # ~= каждый кадр на любом реальном fps камеры
     person_conf = 0.4
     face_det_thresh = 0.5
     min_face_px = 30
     min_blur = 8.0
     unknown_threshold = 0.75
     iou_threshold = 0.2
-    max_frame_gap = 3
+    max_frame_gap_seconds = 3.0
     min_track_faces = 1
 
 
@@ -111,6 +118,10 @@ def process_queue(r: "redis.Redis") -> None:
                     tmp.flush()
                     result = process_video(Path(tmp.name), yolo, face_app, rec_model, clf, classes, args)
                     result["video"] = f"{video_id}.mp4"  # у process_video тут был бы temp-путь, не настоящее имя
+                    # Отдельный лёгкий проход тем же YOLO (person-only, без insightface) на
+                    # почти нативном fps — process_video сэмплирует 1 кадр/сек, а v7 из
+                    # door_direction калиброван на секундных порогах, на 1 fps не работает.
+                    result["direction"] = process_video_direction(Path(tmp.name), yolo)
 
                 result_key = f"recognition/{camera_id}/{video_id}.json"
                 s3.put_object(
@@ -121,7 +132,9 @@ def process_queue(r: "redis.Redis") -> None:
                 )
                 processed += 1
                 present = [c for c, info in result["presence"].items() if info["present"]]
-                print(f"[{video_id}] готово -> {result_key} | present: {present or '-'}")
+                direction = result["direction"]
+                conf_note = " (low confidence)" if direction["low_confidence"] else ""
+                print(f"[{video_id}] готово -> {result_key} | present: {present or '-'} | direction: {direction['verdict']}{conf_note}")
 
             except Exception as e:
                 print(f"⚠️ job {job!r} упал: {e}")
