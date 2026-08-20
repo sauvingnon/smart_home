@@ -33,7 +33,7 @@ import joblib
 import redis
 from insightface.app import FaceAnalysis
 
-from direction_detector import process_video_direction
+# from direction_detector import process_video_direction  # временно отключено — сырое, грузит второй полный проход по видео
 from run_pipeline import process_video
 from yolo_onnx import PersonDetectorONNX
 
@@ -118,10 +118,11 @@ def process_queue(r: "redis.Redis") -> None:
                     tmp.flush()
                     result = process_video(Path(tmp.name), yolo, face_app, rec_model, clf, classes, args)
                     result["video"] = f"{video_id}.mp4"  # у process_video тут был бы temp-путь, не настоящее имя
-                    # Отдельный лёгкий проход тем же YOLO (person-only, без insightface) на
-                    # почти нативном fps — process_video сэмплирует 1 кадр/сек, а v7 из
-                    # door_direction калиброван на секундных порогах, на 1 fps не работает.
-                    result["direction"] = process_video_direction(Path(tmp.name), yolo)
+                    # Направление (вошёл/вышел) временно отключено — сырое, второй полный
+                    # проход по видео (ещё один YOLO-инференс на каждом кадре) заметно грузит
+                    # и без того тесную по RAM/CPU машину. esp_service уже готов к отсутствию
+                    # result["direction"] (video_service.py: result.get("direction", {})).
+                    # result["direction"] = process_video_direction(Path(tmp.name), yolo)
 
                 result_key = f"recognition/{camera_id}/{video_id}.json"
                 s3.put_object(
@@ -132,9 +133,10 @@ def process_queue(r: "redis.Redis") -> None:
                 )
                 processed += 1
                 present = [c for c, info in result["presence"].items() if info["present"]]
-                direction = result["direction"]
-                conf_note = " (low confidence)" if direction["low_confidence"] else ""
-                print(f"[{video_id}] готово -> {result_key} | present: {present or '-'} | direction: {direction['verdict']}{conf_note}")
+                # direction = result["direction"]
+                # conf_note = " (low confidence)" if direction["low_confidence"] else ""
+                # print(f"[{video_id}] готово -> {result_key} | present: {present or '-'} | direction: {direction['verdict']}{conf_note}")
+                print(f"[{video_id}] готово -> {result_key} | present: {present or '-'}")
 
             except Exception as e:
                 print(f"⚠️ job {job!r} упал: {e}")

@@ -1,5 +1,4 @@
 *.env
-*.md
 *.db
 *.log
 mosquitto/config/passwd
@@ -10,3 +9,4 @@ toilet_module/config.h
 recognition_worker/dataset/
 recognition_worker/videos_raw/
 recognition_worker/extracted_faces/
+private.md

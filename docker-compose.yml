@@ -35,6 +35,8 @@ services:
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
       - garage_data:/var/lib/garage
+    mem_limit: 512m
+    mem_reservation: 128m
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/3900' 2>/dev/null && echo 'OK' || exit 1"]
       interval: 5s
@@ -135,8 +137,8 @@ services:
       # - "8005:8005"
     volumes:
       - ./esp_service/data:/app/data
-    mem_limit: 200m
-    mem_reservation: 100m
+    mem_limit: 384m
+    mem_reservation: 150m
     cpus: "0.5"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health'); print('healthy')"]
