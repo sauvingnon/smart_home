@@ -37,6 +37,7 @@ services:
       - garage_data:/var/lib/garage
     mem_limit: 512m
     mem_reservation: 128m
+    pids_limit: 8192
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/3900' 2>/dev/null && echo 'OK' || exit 1"]
       interval: 5s
@@ -60,6 +61,7 @@ services:
     restart: unless-stopped
     mem_limit: 100m
     mem_reservation: 50m
+    pids_limit: 8192
     cpus: "0.5"
     networks:
       - internal
