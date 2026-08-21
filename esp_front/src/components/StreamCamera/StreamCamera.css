@@ -158,6 +158,29 @@
   font-weight: normal;
 }
 
+.camera-retry-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 107, 107, 0.4);
+  border-radius: 8px;
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff6b6b;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.camera-retry-btn:hover {
+  background: rgba(255, 107, 107, 0.2);
+}
+
+.camera-retry-btn:active {
+  transform: scale(0.96);
+}
+
 .recording-icon {
   color: #ef4444;
   animation: pulse-record 1.5s infinite;

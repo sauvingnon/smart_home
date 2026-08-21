@@ -9,6 +9,11 @@ interface UseCameraOptions {
   onResolutionChange?: () => void; // 👈 Колбэк для родителя
 }
 
+// Если handshake молча зависает (прокси/файрвол держат соединение, не роняя
+// его) — onOpen/onError/onClose сокета могут не сработать вообще никогда.
+// Без этого таймаута UI виснет на "Подключение к потоку..." навечно.
+const CONNECT_TIMEOUT_MS = 10000;
+
 export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
   const { disabled = false, onResolutionChange } = options;
 
@@ -17,6 +22,7 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
   const [error, setError] = useState<string | null>(null);
   const [isChangingResolution, setIsChangingResolution] = useState(false);
   const [frameStalled, setFrameStalled] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
@@ -48,11 +54,33 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
 
     console.log(`📹 useCamera: Connecting for camera ${cameraId}`);
 
+    let settled = false;
+    const connectTimeout = window.setTimeout(() => {
+      if (settled) return;
+      console.warn(`⏱️ WebSocket connect timeout for camera ${cameraId}`);
+      settled = true;
+      apiClient.closeCameraWebSocket(cameraId);
+      setConnectionState('error');
+      setError('Сервер не отвечает');
+    }, CONNECT_TIMEOUT_MS);
+
     const ws = apiClient.createCameraWebSocket(cameraId, {
       onOpen: () => {
         console.log(`✅ WebSocket opened for camera ${cameraId}`);
+        settled = true;
+        clearTimeout(connectTimeout);
         setConnectionState('connected');
         setError(null);
+      },
+      onMessage: (data: string) => {
+        if (data === 'pong' || data === 'AUTH_OK') return;
+        if (data.startsWith('ERROR:')) {
+          console.warn(`⚠️ Server message for camera ${cameraId}: ${data}`);
+          settled = true;
+          clearTimeout(connectTimeout);
+          setConnectionState('error');
+          setError(data.slice('ERROR:'.length).trim() || 'Ошибка потока');
+        }
       },
       onFrame: (blob: Blob) => {
         lastFrameTimeRef.current = Date.now();
@@ -61,33 +89,48 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
       },
       onError: (err: any) => {
         console.error(`❌ WebSocket error for camera ${cameraId}:`, err);
+        settled = true;
+        clearTimeout(connectTimeout);
         setConnectionState('error');
         setError('Connection error');
       },
       onClose: (code: number, reason: string) => {
         console.log(`🔌 WebSocket closed for camera ${cameraId}: code=${code}, reason=${reason}`);
-        setConnectionState('disconnected');
+        setConnectionState((prev) => (prev === 'error' ? prev : 'disconnected'));
         setFrameBlob(null);
+      },
+      onReconnectExhausted: () => {
+        console.warn(`🚫 Reconnect attempts exhausted for camera ${cameraId}`);
+        settled = true;
+        clearTimeout(connectTimeout);
+        setConnectionState('error');
+        setError('Не удалось восстановить соединение');
       }
     });
-    
+
     wsRef.current = ws;
 
     return () => {
       console.log(`🧹 useCamera: Cleaning up for camera ${cameraId}`);
-      
+      clearTimeout(connectTimeout);
+
       if (wsRef.current) {
-        if (wsRef.current.readyState === WebSocket.OPEN || 
+        if (wsRef.current.readyState === WebSocket.OPEN ||
             wsRef.current.readyState === WebSocket.CONNECTING) {
           apiClient.closeCameraWebSocket(cameraId);
         }
         wsRef.current = null;
       }
-      
+
       setFrameBlob(null);
       setConnectionState('disconnected');
     };
-  }, [cameraId, disabled]); // 👈 Добавили disabled в зависимости
+  }, [cameraId, disabled, retryKey]); // 👈 retryKey — форсированный ручной reconnect
+
+  const reconnect = () => {
+    apiClient.closeCameraWebSocket(cameraId);
+    setRetryKey((k) => k + 1);
+  };
 
   const setResolution = async (resolution: 'QVGA' | 'VGA' | 'HD') => {
     console.log('🎯 useCamera.setResolution called:', { resolution, cameraId });
@@ -117,6 +160,7 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
     frameStalled,
     error,
     isChangingResolution,
-    setResolution
+    setResolution,
+    reconnect
   };
 }

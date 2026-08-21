@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useCamera } from '../../hooks/useCamera';
 import './StreamCamera.css';
-import { WifiOff, Power, Video, Radio } from 'lucide-react';
+import { WifiOff, Power, Video, Radio, RotateCw } from 'lucide-react';
 
 interface CameraStreamProps {
   cameraId?: string;
@@ -14,12 +14,17 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   cameraStatus = 'offline',
   onFrameStall,
 }) => {
+  // Пока бэк явно не сказал "streaming"/"connected" — соединяться незачем:
+  // во время offline/recording/never_connected сокет всё равно бесполезен.
+  const streamReady = cameraStatus === 'streaming' || cameraStatus === 'connected';
+
   const {
     frameBlob,
     connectionState,
     frameStalled,
     error,
-  } = useCamera(cameraId);
+    reconnect,
+  } = useCamera(cameraId, { disabled: !streamReady });
 
   // Вызываем onFrameStall один раз при начале зависания кадров во время стрима
   const stalledFiredRef = useRef(false);
@@ -81,7 +86,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   };
 
   // Камера не стримит
-  if (cameraStatus !== 'streaming' && cameraStatus !== 'connected') {
+  if (!streamReady) {
     const content = getDisabledContent();
     return (
       <div className={`camera-container`}>
@@ -136,6 +141,10 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
         {connectionState === 'error' && (
           <div className="camera-state error">
             <span>⚠️ {error || 'Ошибка подключения'}</span>
+            <button type="button" className="camera-retry-btn" onClick={reconnect}>
+              <RotateCw size={16} />
+              Повторить
+            </button>
           </div>
         )}
       </div>

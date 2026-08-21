@@ -12,6 +12,7 @@ export const getWebSocketBaseUrl = (): string => {
 
 class ApiClient {
   private wsConnections: Map<string, WebSocket> = new Map();
+  private reconnectTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   async fetchRaw(endpoint: string, options: RequestInit = {}) {
     return fetch(`${API_BASE_URL}${endpoint}`, {
@@ -91,16 +92,14 @@ class ApiClient {
     });
   }
 
-  createCameraWebSocket(cameraId: string, options: any = {}) {
+  createCameraWebSocket(cameraId: string, options: any = {}, attempt: number = 0) {
     const wsUrl = `${getWebSocketBaseUrl()}/esp_service/ws/view/${cameraId}`;
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
 
-    let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
 
     ws.onopen = () => {
-      reconnectAttempts = 0;
       (ws as any).isManualClose = false;
 
       if (options.fps) {
@@ -114,6 +113,7 @@ class ApiClient {
       if (typeof event.data === 'string') {
         if (event.data === 'ping') {
           ws.send('pong');
+          return;
         }
         options.onMessage?.(event.data);
       } else {
@@ -127,21 +127,23 @@ class ApiClient {
     };
 
     ws.onclose = (event) => {
-      if ((ws as any).pingInterval) {
-        clearInterval((ws as any).pingInterval);
-      }
-
       this.wsConnections.delete(cameraId);
       options.onClose?.(event.code, event.reason);
 
       const isManual = (ws as any).isManualClose;
-      if (!isManual && reconnectAttempts < maxReconnectAttempts) {
-        reconnectAttempts++;
-        setTimeout(() => {
+      if (isManual) return;
+
+      if (attempt < maxReconnectAttempts) {
+        const nextAttempt = attempt + 1;
+        const timer = setTimeout(() => {
+          this.reconnectTimers.delete(cameraId);
           if (!this.wsConnections.has(cameraId)) {
-            this.createCameraWebSocket(cameraId, options);
+            this.createCameraWebSocket(cameraId, options, nextAttempt);
           }
-        }, 2000 * reconnectAttempts);
+        }, 2000 * nextAttempt);
+        this.reconnectTimers.set(cameraId, timer);
+      } else {
+        options.onReconnectExhausted?.();
       }
     };
 
@@ -150,6 +152,12 @@ class ApiClient {
   }
 
   closeCameraWebSocket(cameraId: string) {
+    const timer = this.reconnectTimers.get(cameraId);
+    if (timer) {
+      clearTimeout(timer);
+      this.reconnectTimers.delete(cameraId);
+    }
+
     const ws = this.wsConnections.get(cameraId);
     if (ws) {
       ws.onopen = null;
@@ -157,10 +165,6 @@ class ApiClient {
       ws.onerror = null;
       ws.onclose = null;
       (ws as any).isManualClose = true;
-
-      if ((ws as any).pingInterval) {
-        clearInterval((ws as any).pingInterval);
-      }
 
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close(1000, 'Closed by client');
@@ -171,6 +175,8 @@ class ApiClient {
   }
 
   closeAllWebSockets() {
+    this.reconnectTimers.forEach((timer) => clearTimeout(timer));
+    this.reconnectTimers.clear();
     this.wsConnections.forEach((ws) => {
       ws.close(1000, 'Closing all connections');
     });

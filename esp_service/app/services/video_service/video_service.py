@@ -532,6 +532,19 @@ class VideoService:
             self.cameras[camera_id].mode = CameraMode.OFFLINE
             logger.info(f"🔌 Камера {camera_id} отключена")
             await self.cache_manager.record_downtime_start(camera_id)
+
+        # Камера пропала — зрители иначе замирают на последнем кадре без
+        # какого-либо сигнала, пока их не догонит REST-поллинг статуса.
+        # Уведомляем их сразу и рвём сокеты, чтобы фронт честно показал разрыв.
+        viewers = self.viewers.pop(camera_id, None)
+        if viewers:
+            for viewer in list(viewers):
+                try:
+                    await viewer.send_text("ERROR: Camera offline")
+                    await viewer.close()
+                except:
+                    pass
+            logger.info(f"👁️ Отключено {len(viewers)} зрителей {camera_id} (камера офлайн)")
     
     # ---- Команды камере ----
     async def send_command(self, camera_id: str, command: str) -> bool:
