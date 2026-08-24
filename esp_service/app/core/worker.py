@@ -14,6 +14,7 @@ from app.schemas.weather_data import WeatherData
 from app.schemas.settings import SettingsData
 from app.schemas.device_status import DeviceStatus
 from app.services.video_service.video_service import VideoService
+from app.services.chat_service.chat_service import ChatService
 from app.services.monitor_db.telemetry_storage import TelemetryStorage
 from app.services.ai_api.deepseek_client import ai_message_request
 from app.utils.time import _get_izhevsk_time
@@ -35,21 +36,23 @@ class BackgroundWorker:
     _lock = asyncio.Lock()
     
     def __init__(
-            self, 
-            cache_manager: CacheManager, 
+            self,
+            cache_manager: CacheManager,
             weather_service: WeatherService,
             video_service: VideoService,
             mqtt_service: MQTTService,
-            storage: TelemetryStorage
+            storage: TelemetryStorage,
+            chat_service: ChatService,
             ):
         if BackgroundWorker._instance is not None:
             raise RuntimeError("Используйте BackgroundWorker.get_instance()")
-        
+
         self.cache = cache_manager
         self.mqtt_service = mqtt_service
         self.service = weather_service
         self.storage = storage
         self.video_service = video_service
+        self.chat_service = chat_service
         self.is_running = False
         self.update_board_weather_interval = DEFAULT_WEATHER_UPDATE_INTERVAL 
         self.update_time_interval = DEFAULT_TIME_UPDATE_INTERVAL
@@ -77,15 +80,16 @@ class BackgroundWorker:
         video_service: VideoService = None,
         mqtt_service: MQTTService = None,
         storage: TelemetryStorage = None,
+        chat_service: ChatService = None,
     ) -> 'BackgroundWorker':
         """Получить единственный экземпляр воркера"""
         if cls._instance is None:
-            if cache_manager is None or weather_service is None or mqtt_service is None or storage is None or video_service is None:
+            if cache_manager is None or weather_service is None or mqtt_service is None or storage is None or video_service is None or chat_service is None:
                 raise ValueError("При первом создании нужно передать все зависимости")
-            
-            cls._instance = cls(cache_manager, weather_service, video_service, mqtt_service, storage)
+
+            cls._instance = cls(cache_manager, weather_service, video_service, mqtt_service, storage, chat_service)
         return cls._instance
-    
+
     @classmethod
     async def get_instance_async(
         cls,
@@ -93,11 +97,12 @@ class BackgroundWorker:
         weather_service: WeatherService = None,
         video_service: VideoService = None,
         mqtt_service: MQTTService = None,
-        storage: TelemetryStorage = None
+        storage: TelemetryStorage = None,
+        chat_service: ChatService = None,
     ) -> 'BackgroundWorker':
         """Асинхронная версия получения инстанса (с блокировкой)"""
         async with cls._lock:
-            return cls.get_instance(cache_manager, weather_service, video_service, mqtt_service, storage)
+            return cls.get_instance(cache_manager, weather_service, video_service, mqtt_service, storage, chat_service)
     
     @property
     def auth(self):
@@ -114,6 +119,9 @@ class BackgroundWorker:
 
         # Восстанавливаем ключи авторизации из файлового бэкапа (на случай очистки Redis)
         await self.cache.restore_keys_from_backup()
+
+        # Досоздаём недостающих юзеров из захардкоженного списка (набор людей фиксирован)
+        await self.cache.seed_users_if_missing()
 
         # 5 минут grace period — не пишем даунтайм пока всё поднимается
         self.cache.set_startup_grace(300)
@@ -170,6 +178,7 @@ class BackgroundWorker:
             self._check_heartbeat_esp_loop(),
             self._check_time_update_loop(),
             self._server_heartbeat_loop(),
+            self._chat_retention_loop(),
         )
 
     def _update_device_status(self) -> DeviceStatus:
@@ -431,6 +440,15 @@ class BackgroundWorker:
             except Exception as e:
                 logger.error(f"❌ Ошибка server heartbeat: {e}")
             await asyncio.sleep(300)
+
+    async def _chat_retention_loop(self):
+        """Раз в сутки удаляет сообщения чата (и их медиа в S3) старше 30 дней."""
+        while self.is_running:
+            try:
+                await self.chat_service.trim_old_messages(days=30)
+            except Exception as e:
+                logger.error(f"❌ Ошибка очистки старых сообщений чата: {e}")
+            await asyncio.sleep(24 * 3600)
 
     async def _check_heartbeat_esp_loop(self):
         """Периодическая проверка статусов устройств + трекинг даунтайма."""

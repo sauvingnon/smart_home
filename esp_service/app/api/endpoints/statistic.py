@@ -7,9 +7,9 @@ from app.schemas.telemetry_history import (
     StatsResponse,
     TelemetryRecord
 )
-from app.core.auth import get_current_user_id_dep
+from app.core.auth import get_current_user_id_dep, get_auth_manager
 from app.utils.time import _get_izhevsk_time
-from config import CAMERA_ID, ADMIN_USER_ID
+from config import CAMERA_ID
 
 router = APIRouter(
     prefix="/esp_service",
@@ -50,11 +50,12 @@ async def get_login_stats_endpoint(
     user_id: int = Depends(get_current_user_id_dep)
 ):
     """Статистика входов пользователей. Только для администратора."""
-    if user_id != ADMIN_USER_ID:
+    auth = get_auth_manager()
+    if not await auth.is_admin(user_id):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     worker = BackgroundWorker.get_instance()
-    return await worker.cache.get_visit_stats(exclude_user_id=ADMIN_USER_ID, days=7)
+    return await worker.cache.get_visit_stats(exclude_user_id=user_id, days=7)
 
 
 @router.get("/stats", response_model=StatsResponse)

@@ -496,6 +496,24 @@ class S3Manager:
             logger.exception(f"❌ Ошибка сохранения: {e}")
             return None
     
+    async def save_chat_media(self, key: str, data: bytes, content_type: str) -> bool:
+        """Сохраняет медиафайл чата (фото/голосовое/видео) по готовому ключу.
+        В отличие от save_video — без камеро-специфичных метаданных."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            await self._client.put_object(
+                Bucket=self.bucket_name,
+                Key=key,
+                Body=data,
+                ContentType=content_type,
+            )
+            logger.info(f"💾 Медиа чата сохранено: {key} ({len(data)} байт)")
+            return True
+        except Exception as e:
+            logger.exception(f"❌ Ошибка сохранения медиа чата: {e}")
+            return False
+
     async def save_thumbnail(self, camera_id: str, video_id: str, thumbnail_data: bytes) -> bool:
         """Сохранить thumbnail по UUID видео"""
         if not await self._ensure_connection():

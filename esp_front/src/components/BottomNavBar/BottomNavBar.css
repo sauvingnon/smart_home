@@ -46,9 +46,36 @@
 }
 
 /* Иконки */
+.nav-icon-wrap {
+  position: relative;
+  display: flex;
+}
+
 .nav-icon {
   font-size: 22px;
   transition: transform 0.2s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+/* Бейдж непрочитанных чата */
+.nav-badge {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #ff3b30;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--nav-badge-ring, rgba(255, 255, 255, 0.72));
+}
+
+.bottom-nav.dark .nav-badge {
+  --nav-badge-ring: rgba(28, 28, 30, 0.72);
 }
 
 /* Активная иконка - увеличение */

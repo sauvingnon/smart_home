@@ -9,11 +9,12 @@ from app.services.weather_service.yandex_weather import WeatherService
 from app.services.monitor_db.telemetry_storage import get_telemetry_storage
 from app.services.s3_service.s3_manager import S3Manager
 from app.services.video_service.video_service import VideoService
+from app.services.chat_service.chat_service import ChatService
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.core.worker import BackgroundWorker
 from config import YANDEX_WEATHER_API_KEY, REDIS_URL, MQTT_BROKER_HOST, MQTT_BROKER_PORT
 import os
-from app.api.endpoints import telemetry, settings, weather, auth, statistic, ai_report, stream
+from app.api.endpoints import telemetry, settings, weather, auth, statistic, ai_report, stream, chat
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -68,14 +69,16 @@ async def lifespan(app: FastAPI):
         app.state.mqtt_service = mqtt_service
 
         video_service = VideoService(s3_manager, cache_manager)
-        
+        chat_service = ChatService(cache_manager, s3_manager)
+
         # 4. Worker
         worker = BackgroundWorker.get_instance(
             cache_manager=cache_manager,
             weather_service=weather_service,
             video_service=video_service,
             mqtt_service=mqtt_service,
-            storage=storage
+            storage=storage,
+            chat_service=chat_service,
         )
 
         app.state.worker = worker
@@ -165,3 +168,4 @@ app.include_router(auth.router)
 app.include_router(statistic.router)
 app.include_router(ai_report.router)
 app.include_router(stream.router)
+app.include_router(chat.router)

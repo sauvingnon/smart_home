@@ -23,4 +23,10 @@ CAMERA_ACCESS_KEY = os.getenv("CAMERA_ACCESS_KEY")
 DEFAULT_RECORDING_DAYS = int(os.getenv("DEFAULT_RECORDING_DAYS", "7"))
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")  # "development" | "production"
 COOKIE_SECURE = ENVIRONMENT != "development"
-ADMIN_USER_ID = 1245
+
+# Web Push (уведомления чата когда приложение полностью закрыто). Ключи
+# генерируются один раз командой `vapid --gen` (пакет py-vapid, тянется
+# вместе с pywebpush) и кладутся в esp_service/.env — так же, как остальные секреты.
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
+VAPID_CONTACT_EMAIL = os.getenv("VAPID_CONTACT_EMAIL", "admin@example.com")
