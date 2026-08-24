@@ -9,4 +9,4 @@ toilet_module/config.h
 recognition_worker/dataset/
 recognition_worker/videos_raw/
 recognition_worker/extracted_faces/
-private.md
+docs/private.md
