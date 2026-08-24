@@ -486,7 +486,7 @@ class CacheManager:
     SEED_USERS: list = [
         {"user_id": 1245, "username": "grisha", "display_name": "Гриша", "role": "admin"},
         {"user_id": 61327489, "username": "kamelia", "display_name": "Камелия", "role": "user"},
-        {"user_id": 4382099, "username": "lilia", "display_name": "Лилия", "role": "user"},
+        {"user_id": 4382099, "username": "liliya", "display_name": "Лилия", "role": "user"},
         {"user_id": 987654, "username": "andrey", "display_name": "Андрей", "role": "user"},
     ]
 
