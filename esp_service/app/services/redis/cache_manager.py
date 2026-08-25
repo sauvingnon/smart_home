@@ -524,6 +524,30 @@ class CacheManager:
         await self.redis_client.sadd(self.USERS_INDEX_KEY, user_id)
         return True
 
+    async def delete_user(self, user_id: int) -> bool:
+        """Удаляет юзера (hash + запись в индексе). Ключи не трогает — это
+        отдельный шаг, см. revoke_all_keys_for_user."""
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.delete(f"{self.USER_KEY_PREFIX}{user_id}")
+        await self.redis_client.srem(self.USERS_INDEX_KEY, user_id)
+        return True
+
+    async def revoke_all_keys_for_user(self, user_id: int) -> int:
+        """Отзывает все ключи конкретного юзера (по файловому бэкапу — это
+        единственное место с обратным маппингом key -> user_id). Возвращает
+        количество отозванных ключей."""
+        if not await self._ensure_connection():
+            return 0
+        backup = self._load_keys_backup()
+        keys_to_revoke = [k for k, entry in backup.items() if entry.get("user_id") == user_id]
+        for key in keys_to_revoke:
+            await self.redis_client.delete(f"{self.key_prefix}{key}")
+            del backup[key]
+        if keys_to_revoke:
+            self._save_keys_backup(backup)
+        return len(keys_to_revoke)
+
     async def seed_users_if_missing(self) -> None:
         """При старте сервиса досоздаёт недостающих юзеров из SEED_USERS. Идемпотентно —
         существующих не трогает, безопасно вызывать при каждом запуске."""

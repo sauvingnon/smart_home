@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Key, LogIn, AlertCircle, Send, Loader } from 'lucide-react';
+import { Key, LogIn, AlertCircle, Loader } from 'lucide-react';
 import './Login.css';
 
 interface LoginProps {
@@ -43,8 +43,6 @@ export const Login: React.FC<LoginProps> = ({ error, onLoginSuccess }) => {
       setIsLoading(false);
     }
   };
-
-  const telegramLink = "https://t.me/my_tiny_smart_house_bot";
 
   return (
     <div className="login-container">

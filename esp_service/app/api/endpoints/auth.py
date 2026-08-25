@@ -1,9 +1,8 @@
 # api/endpoints/auth.py
-from fastapi import APIRouter, HTTPException, Request, Response, Header
+from fastapi import APIRouter, HTTPException, Request, Response
 from app.core.worker import BackgroundWorker
 from app.core.auth import get_auth_manager, COOKIE_NAME
-from app.schemas.auth import KeyResponse
-from config import BOT_SECRET, COOKIE_SECURE
+from config import COOKIE_SECURE
 
 router = APIRouter(
     prefix="/auth",
@@ -60,18 +59,3 @@ async def me(request: Request):
         "role": user["role"] if user else "user",
         "is_admin": user is not None and user["role"] == "admin",
     }
-
-
-@router.post("/generate_key", response_model=KeyResponse)
-async def generate_key_endpoint(
-    user_id: int,
-    request: Request,
-    x_bot_secret: str = Header(...),
-):
-    """Генерация ключа доступа. Вызывать вручную через curl с BOT_SECRET."""
-    if x_bot_secret != BOT_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid bot secret")
-
-    worker = BackgroundWorker.get_instance()
-    key = await worker.cache.generate_key(user_id)
-    return KeyResponse(key=key, expires_in_days=180)
