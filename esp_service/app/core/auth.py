@@ -6,6 +6,18 @@ from logger import logger
 
 COOKIE_NAME = "esp_session"
 
+
+def get_client_ip(request: Request) -> str:
+    """Реальный IP клиента из-за nginx-реверс-прокси. esp_service слушает
+    только 127.0.0.1 (наружу не торчит), поэтому доверяем X-Forwarded-For —
+    подделать его может только сам nginx, а не внешний клиент напрямую.
+    Берём ПОСЛЕДНИЙ адрес в списке (тот, что дописал именно nginx), а не
+    первый — первый в списке как раз может быть подделан клиентом."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
 class AuthManager:
     def __init__(self, cache):
         self.cache = cache

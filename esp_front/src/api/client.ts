@@ -86,6 +86,13 @@ class ApiClient {
     return this.fetch(`/esp_service/videos${queryString ? `?${queryString}` : ''}`);
   }
 
+  async shareVideoToChat(cameraId: string, videoId: string): Promise<ChatMessage> {
+    return this.fetch('/chat/share_video', {
+      method: 'POST',
+      body: JSON.stringify({ camera_id: cameraId, video_id: videoId }),
+    });
+  }
+
   async downloadVideo(cameraId: string, videoId: string): Promise<Blob> {
     const response = await this.fetchRaw(
       `/esp_service/videos/download?video_id=${encodeURIComponent(videoId)}&camera_id=${encodeURIComponent(cameraId)}`
@@ -255,8 +262,12 @@ class ApiClient {
     return this.fetch('/chat/unread_count');
   }
 
-  async getChatMediaUrl(mediaKey: string): Promise<{ url: string }> {
-    return this.fetch(`/chat/media/${mediaKey}`);
+  // Бэкенд стримит байты сам (как /esp_service/videos/stream) — Garage/S3
+  // никогда не выставляется наружу, поэтому это просто URL, а не отдельный
+  // запрос за presigned-ссылкой. Cookie-сессия уходит с запросом автоматически
+  // (тот же origin), <img>/<audio>/<video> её сами подхватывают.
+  getChatMediaSrc(mediaKey: string): string {
+    return `${API_BASE_URL}/chat/media/${mediaKey}`;
   }
 
   async getVapidPublicKey(): Promise<{ public_key: string }> {

@@ -10,3 +10,4 @@ recognition_worker/dataset/
 recognition_worker/videos_raw/
 recognition_worker/extracted_faces/
 docs/private.md
+esp_service/data/

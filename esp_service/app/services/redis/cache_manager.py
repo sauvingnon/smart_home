@@ -348,6 +348,20 @@ class CacheManager:
         
         return None
     
+    async def check_login_rate_limit(self, ip: str, max_attempts: int = 10, window_seconds: int = 300) -> bool:
+        """Фиксированное окно на попытки логина по IP. Ключ 256-бит случайный —
+        перебором его не угадать, это скорее защита от долбёжки эндпоинта,
+        чем от реального брутфорса. Возвращает True, если можно пробовать
+        дальше, False — лимит исчерпан."""
+        if not await self._ensure_connection():
+            return True  # Redis лёг — не блокируем логин из-за этого
+
+        redis_key = f"login_attempts:{ip}"
+        count = await self.redis_client.incr(redis_key)
+        if count == 1:
+            await self.redis_client.expire(redis_key, window_seconds)
+        return count <= max_attempts
+
     async def revoke_key(self, key: str) -> bool:
         """Отзывает ключ"""
         redis_key = f"{self.key_prefix}{key}"

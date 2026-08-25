@@ -53,3 +53,8 @@ class PushSubscriptionIn(BaseModel):
 
 class VapidPublicKeyResponse(BaseModel):
     public_key: str
+
+
+class ShareVideoIn(BaseModel):
+    camera_id: str
+    video_id: str

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Video,
@@ -13,7 +14,8 @@ import {
   AlertCircle,
   LogIn,
   LogOut,
-  Loader2
+  Loader2,
+  MessageCircle
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
@@ -70,6 +72,7 @@ const itemVar = {
 
 export const VideosPage = () => {
   const { theme } = useTheme()
+  const navigate = useNavigate()
   const [videos, setVideos] = useState<VideoItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)
@@ -77,6 +80,7 @@ export const VideosPage = () => {
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [downloadProgress, setDownloadProgress] = useState(0) // -1 = подготовка, 0-100 = прогресс
+  const [sharingId, setSharingId] = useState<string | null>(null)
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
 
   const toggleFilter = (label: string) => {
@@ -252,6 +256,24 @@ export const VideosPage = () => {
       }
   }
 
+
+  const handleShare = async (video: VideoItem, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const videoId = video.video_id || video.key.split('/').pop()?.replace('.mp4', '')
+    const cameraId = video.camera_id
+    if (!videoId || !cameraId || sharingId) return
+
+    setSharingId(videoId)
+    try {
+      await apiClient.shareVideoToChat(cameraId, videoId)
+      navigate('/chat')
+    } catch (error) {
+      console.error('Failed to share video to chat:', error)
+      alert('Не удалось переслать видео в чат')
+    } finally {
+      setSharingId(null)
+    }
+  }
 
   const closeModal = () => {
     if (videoRef.current) {
@@ -491,6 +513,17 @@ export const VideosPage = () => {
                                       <div className="video-card-subtitle">
                                         {formatDate(video.start_time || video.last_modified)}
                                       </div>
+                                      <button
+                                        className="download-btn small"
+                                        onClick={(e) => handleShare(video, e)}
+                                        title="Переслать в чат"
+                                        disabled={sharingId !== null}
+                                      >
+                                        {sharingId === (video.video_id || video.key.split('/').pop()?.replace('.mp4', ''))
+                                          ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ display: 'flex' }}><RefreshCw size={18} /></motion.div>
+                                          : <MessageCircle size={18} />
+                                        }
+                                      </button>
                                       <button
                                         className="download-btn small"
                                         onClick={(e) => handleDownload(video, e)}

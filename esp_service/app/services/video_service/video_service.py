@@ -939,6 +939,12 @@ class VideoService:
         await self.cache_manager.redis_client.set(cache_key, json.dumps(info))
         return info
 
+    async def resolve_video_key(self, camera_id: str, video_id: str) -> Optional[str]:
+        """Публичная обёртка над _get_video_key — для сценариев вне стриминга
+        (например, пересылка видео в чат), где нужно просто проверить, что
+        видео реально существует, и получить его S3-ключ."""
+        return await self._get_video_key(camera_id, video_id)
+
     async def _get_video_key(self, camera_id: str, video_id: str) -> Optional[str]:
         """Получить S3-ключ видео: сначала из кэша Redis, потом полный скан S3."""
         key = await self.cache_manager.get_cached_video_key(camera_id, video_id)

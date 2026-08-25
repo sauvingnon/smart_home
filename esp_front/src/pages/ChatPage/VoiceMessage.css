@@ -1,0 +1,73 @@
+.voice-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+  padding: 2px 0;
+}
+
+.voice-play-button {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  background: var(--accent-blue);
+  color: #ffffff;
+}
+
+.voice-message.mine .voice-play-button {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.voice-waveform {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.voice-bar {
+  flex: 1 1 auto;
+  min-width: 2px;
+  max-width: 3px;
+  border-radius: 2px;
+  background: var(--text-tertiary);
+  opacity: 0.5;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.voice-bar.played {
+  background: var(--accent-blue);
+  opacity: 1;
+}
+
+.voice-message.mine .voice-bar {
+  background: rgba(255, 255, 255, 0.3);
+  opacity: 1;
+}
+
+.voice-message.mine .voice-bar.played {
+  background: #ffffff;
+  opacity: 1;
+}
+
+.voice-duration {
+  flex: 0 0 auto;
+  min-width: 32px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  text-align: right;
+}
+
+.voice-message.mine .voice-duration {
+  color: rgba(255, 255, 255, 0.8);
+}

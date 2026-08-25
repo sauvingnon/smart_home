@@ -1,7 +1,7 @@
 # api/endpoints/auth.py
 from fastapi import APIRouter, HTTPException, Request, Response
 from app.core.worker import BackgroundWorker
-from app.core.auth import get_auth_manager, COOKIE_NAME
+from app.core.auth import get_auth_manager, get_client_ip, COOKIE_NAME
 from config import COOKIE_SECURE
 
 router = APIRouter(
@@ -21,6 +21,12 @@ async def login(request: Request, response: Response):
         raise HTTPException(status_code=400, detail="Key required")
 
     worker = BackgroundWorker.get_instance()
+
+    ip = get_client_ip(request)
+    allowed = await worker.cache.check_login_rate_limit(ip)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Слишком много попыток входа, попробуйте позже")
+
     user_id = await worker.cache.validate_key(key)
     if not user_id:
         raise HTTPException(status_code=403, detail="Invalid or expired key")

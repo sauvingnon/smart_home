@@ -18,8 +18,8 @@ CHAT_MEDIA_MAX_BYTES = 25 * 1024 * 1024  # 25 МБ
 
 ALLOWED_MEDIA_TYPES = {
     "image/jpeg", "image/png", "image/webp",
-    "audio/webm", "audio/ogg", "audio/mpeg",
-    "video/webm", "video/mp4",
+    "audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4",  # audio/mp4 — дефолт MediaRecorder на iOS Safari
+    "video/webm", "video/mp4", "video/quicktime",  # .mov — типичный формат iPhone-галереи
 }
 
 _EXT_BY_CONTENT_TYPE = {
@@ -29,8 +29,10 @@ _EXT_BY_CONTENT_TYPE = {
     "audio/webm": "webm",
     "audio/ogg": "ogg",
     "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
     "video/webm": "webm",
     "video/mp4": "mp4",
+    "video/quicktime": "mov",
 }
 
 _PUSH_BODY_BY_TYPE = {
@@ -125,6 +127,10 @@ class ChatService:
         media_kind: Optional[str] = None,
     ) -> dict:
         text = (text or "").strip()
+        # Браузер иногда шлёт content-type с параметрами (audio/webm;codecs=opus) —
+        # сверяем и сохраняем по чистому base type, коды кодеков не проверяем.
+        if content_type:
+            content_type = content_type.split(";")[0].strip()
         if msg_type == "text" and not text:
             raise ValueError("Пустое текстовое сообщение")
         if msg_type != "text" and not media_bytes:
@@ -144,6 +150,20 @@ class ChatService:
             if not ok:
                 raise RuntimeError("Не удалось сохранить медиафайл")
 
+        return await self._finalize_message(seq, user_id, msg_type, text, media_key, media_kind)
+
+    async def share_video(self, user_id: int, video_key: str) -> dict:
+        """Переслать уже существующее видео (из архива камеры) в чат — без
+        повторной загрузки байт, просто ссылка на тот же объект в S3. Не
+        копируем файл: если камера почистит его по своему retention раньше,
+        чем чат — сообщение останется, но отдача медиа вернёт 404 (фронт
+        показывает 'видео недоступно' вместо копирования на каждый шаринг)."""
+        seq = await self.cache.chat_next_seq()
+        return await self._finalize_message(seq, user_id, "video", "", video_key, None)
+
+    async def _finalize_message(
+        self, seq: int, user_id: int, msg_type: str, text: str, media_key: str, media_kind: Optional[str]
+    ) -> dict:
         user = await self.cache.get_user(user_id)
         message = {
             "seq": seq,
@@ -204,9 +224,6 @@ class ChatService:
 
     async def get_unread_count(self, user_id: int) -> int:
         return await self.cache.get_chat_unread_count(user_id)
-
-    async def get_media_url(self, media_key: str, expires_in: int = 3600) -> Optional[str]:
-        return await self.s3.get_video_presigned_url(media_key, expires_in)
 
     async def trim_old_messages(self, days: int = 30):
         """Удаляет сообщения (и их медиа в S3) старше `days`."""

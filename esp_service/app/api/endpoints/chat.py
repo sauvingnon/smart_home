@@ -1,7 +1,8 @@
 # app/api/endpoints/chat.py
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, WebSocket
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, WebSocket
+from fastapi.responses import StreamingResponse
 
 from app.core.auth import get_current_user_id_dep
 from app.core.worker import BackgroundWorker
@@ -11,6 +12,7 @@ from app.schemas.chat import (
     MarkReadResponse,
     PushSubscriptionIn,
     ReadReceiptsResponse,
+    ShareVideoIn,
     UnreadCountResponse,
     VapidPublicKeyResponse,
 )
@@ -59,6 +61,25 @@ async def send_message(
     return message
 
 
+@router.post("/share_video", response_model=ChatMessageOut)
+async def share_video(
+    payload: ShareVideoIn,
+    user_id: int = Depends(get_current_user_id_dep),
+):
+    """Переслать видео с камеры в чат — без повторной загрузки, только ссылка
+    на существующий объект в S3. Ключ резолвим сами на сервере (не доверяем
+    строке от клиента), чтобы через чат нельзя было подсунуть произвольный
+    S3-путь."""
+    worker = BackgroundWorker.get_instance()
+
+    video_key = await worker.video_service.resolve_video_key(payload.camera_id, payload.video_id)
+    if not video_key:
+        raise HTTPException(status_code=404, detail="Видео не найдено")
+
+    message = await worker.chat_service.share_video(user_id=user_id, video_key=video_key)
+    return message
+
+
 @router.get("/messages", response_model=ChatMessagesResponse)
 async def list_messages(
     before_seq: Optional[int] = Query(None, description="Пагинация: сообщения до этого seq"),
@@ -94,13 +115,45 @@ async def unread_count(user_id: int = Depends(get_current_user_id_dep)):
 
 
 @router.get("/media/{media_key:path}")
-async def get_media_url(media_key: str, user_id: int = Depends(get_current_user_id_dep)):
-    """Presigned URL на файл медиа чата (авторизация проверяется здесь, до выдачи URL)."""
+async def get_media(
+    media_key: str,
+    request: Request,
+    user_id: int = Depends(get_current_user_id_dep),
+):
+    """Стримит медиафайл чата байтами через бэкенд — тот же паттерн, что у
+    /esp_service/videos/stream. Garage/S3 никогда не выставляется наружу."""
     worker = BackgroundWorker.get_instance()
-    url = await worker.chat_service.get_media_url(media_key)
-    if not url:
+    s3 = worker.chat_service.s3
+
+    content_type = await s3.get_object_content_type(media_key)
+    if not content_type:
         raise HTTPException(status_code=404, detail="Медиа не найдено")
-    return {"url": url}
+
+    range_header = request.headers.get("range")
+    start, end = 0, None
+    if range_header:
+        try:
+            parts = range_header.replace("bytes=", "").split("-")
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if len(parts) > 1 and parts[1] else None
+        except Exception:
+            pass
+
+    stream, file_size, actual_end = await s3.stream_range(media_key, start, end)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Медиа не найдено")
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(actual_end - start + 1),
+        "Cache-Control": "private, max-age=3600",
+    }
+    status_code = 200
+    if range_header:
+        status_code = 206
+        headers["Content-Range"] = f"bytes {start}-{actual_end}/{file_size}"
+
+    return StreamingResponse(stream, status_code=status_code, media_type=content_type, headers=headers)
 
 
 @router.get("/push/vapid_public_key", response_model=VapidPublicKeyResponse)
