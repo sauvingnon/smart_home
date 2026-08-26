@@ -512,19 +512,6 @@
   cursor: default;
 }
 
-.chat-recording-indicator {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px 6px 6px;
-  border-radius: 24px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  font-size: 14px;
-}
-
 .chat-recording-dot {
   width: 10px;
   height: 10px;
@@ -545,8 +532,7 @@
   color: var(--text-primary);
 }
 
-.chat-recording-cancel,
-.chat-recording-send {
+.chat-recording-cancel {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -556,9 +542,6 @@
   border: none;
   border-radius: 50%;
   cursor: pointer;
-}
-
-.chat-recording-cancel {
   background: transparent;
   color: #ef4444;
 }
@@ -569,8 +552,17 @@
   }
 }
 
-.chat-recording-send {
+.chat-mic-button {
   margin-left: auto;
+  transition: transform 0.15s ease;
+}
+
+/* Пока идёт запись, кнопка визуально увеличивается — "безопасная зона",
+   чтобы отпускание не читалось как случайность даже если палец слегка
+   съехал (сама отправка на самом деле уже защищена через setPointerCapture
+   в handleMicPointerDown, это чисто про ощущение). */
+.chat-mic-button.recording {
+  transform: scale(1.2);
   background: var(--accent-blue);
   color: #ffffff;
 }

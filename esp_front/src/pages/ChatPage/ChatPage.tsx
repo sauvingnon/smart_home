@@ -11,6 +11,7 @@ import { VoiceMessage } from './VoiceMessage';
 import './ChatPage.css';
 
 const MAX_RECORD_MS = 60_000;
+const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "держит", отпустил — отправить сразу
 const MAX_TEXTAREA_HEIGHT = 120; // px, ~5 строк — дальше внутренний скролл
 
 type NotifStatus = 'unsupported' | 'ios-not-installed' | 'default' | 'denied' | 'granted';
@@ -124,6 +125,9 @@ export const ChatPage: React.FC = () => {
   const lastSeqRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heldLongEnoughRef = useRef(false);
+  const pressWasSecondTapRef = useRef(false);
 
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
@@ -172,6 +176,7 @@ export const ChatPage: React.FC = () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       if (recordTimeoutRef.current) clearTimeout(recordTimeoutRef.current);
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     };
   }, []);
 
@@ -410,6 +415,51 @@ export const ChatPage: React.FC = () => {
     setRecordingSeconds(0);
   };
 
+  // Одна и та же кнопка обслуживает оба сценария записи:
+  // 1) короткий тап — запись стартует по pointerdown и остаётся идти, ждём
+  //    второй тап (или крестик), чтобы отправить/отменить.
+  // 2) удержание дольше HOLD_THRESHOLD_MS — отпустил палец → сразу отправляем,
+  //    как в Telegram/WhatsApp.
+  // setPointerCapture держит все дальнейшие события на этой кнопке, даже если
+  // палец во время удержания уехал за её физические границы — не нужно отдельно
+  // расширять hit-area, отпускание/движение всё равно долетит до нас.
+  const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (sending) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const wasAlreadyRecording = recording;
+    pressWasSecondTapRef.current = wasAlreadyRecording;
+    if (!wasAlreadyRecording) {
+      startRecording();
+      heldLongEnoughRef.current = false;
+      holdTimerRef.current = setTimeout(() => {
+        heldLongEnoughRef.current = true;
+      }, HOLD_THRESHOLD_MS);
+    }
+  };
+
+  const handleMicPointerUp = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    // Отправляем, если это было удержание (успело сработать heldLongEnoughRef)
+    // ИЛИ это уже второй тап поверх идущей записи. Короткий первый тап —
+    // просто остаёмся в режиме ожидания.
+    if (pressWasSecondTapRef.current || heldLongEnoughRef.current) {
+      stopRecording();
+    }
+  };
+
+  // pointercancel (система прервала жест — например распознала скролл) —
+  // намеренно ничего не отменяем и не отправляем: реальный звук мог уже
+  // записаться, юзер сам решит через крестик или повторный тап.
+  const handleMicPointerCancel = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  };
+
   const formatDuration = (totalSeconds: number) => {
     const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
     const s = (totalSeconds % 60).toString().padStart(2, '0');
@@ -626,73 +676,76 @@ export const ChatPage: React.FC = () => {
           </div>
         )}
 
-        {recording && (
-          <div className="chat-recording-indicator">
-            <button className="chat-recording-cancel" onClick={cancelRecording} title="Отменить">
-              <Trash2 size={18} />
-            </button>
+        <div className="chat-input-row">
+          {!recording && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,video/*"
+                hidden
+                onChange={handleGallerySelected}
+              />
 
-            <span className="chat-recording-dot" />
-            <span className="chat-recording-timer">{formatDuration(recordingSeconds)}</span>
-
-            <button className="chat-recording-send" onClick={() => stopRecording()} title="Отправить">
-              <Send size={18} />
-            </button>
-          </div>
-        )}
-
-        {!recording && (
-          <div className="chat-input-row">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,video/*"
-              hidden
-              onChange={handleGallerySelected}
-            />
-
-            <button
-              className="chat-icon-button"
-              disabled={sending}
-              onClick={() => fileInputRef.current?.click()}
-              title="Галерея"
-            >
-              <Paperclip size={20} />
-            </button>
-
-            <textarea
-              ref={textInputRef}
-              className="chat-text-input"
-              rows={1}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onFocus={() => setInputFocused(true)}
-              onBlur={() => setInputFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendText();
-                }
-              }}
-              placeholder="Сообщение…"
-            />
-
-            {inputText.trim() ? (
-              <button className="chat-send-button" disabled={sending} onClick={handleSendText}>
-                {sending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-              </button>
-            ) : (
               <button
                 className="chat-icon-button"
                 disabled={sending}
-                onClick={() => startRecording()}
-                title="Голосовое"
+                onClick={() => fileInputRef.current?.click()}
+                title="Галерея"
               >
-                <Mic size={20} />
+                <Paperclip size={20} />
               </button>
-            )}
-          </div>
-        )}
+
+              <textarea
+                ref={textInputRef}
+                className="chat-text-input"
+                rows={1}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendText();
+                  }
+                }}
+                placeholder="Сообщение…"
+              />
+            </>
+          )}
+
+          {recording && (
+            <>
+              <button className="chat-recording-cancel" onClick={cancelRecording} title="Отменить">
+                <Trash2 size={18} />
+              </button>
+              <span className="chat-recording-dot" />
+              <span className="chat-recording-timer">{formatDuration(recordingSeconds)}</span>
+            </>
+          )}
+
+          {/* Одна и та же кнопка живёт и как "начать голосовое", и как "тап/отпускание
+              чтобы отправить" — специально НЕ размонтируется между этими состояниями
+              (см. handleMicPointerDown), иначе setPointerCapture слетит на середине
+              удержания. */}
+          {!recording && inputText.trim() ? (
+            <button className="chat-send-button" disabled={sending} onClick={handleSendText}>
+              {sending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+            </button>
+          ) : (
+            <button
+              className={`chat-icon-button chat-mic-button ${recording ? 'recording' : ''}`}
+              disabled={sending}
+              onPointerDown={handleMicPointerDown}
+              onPointerUp={handleMicPointerUp}
+              onPointerCancel={handleMicPointerCancel}
+              title={recording ? 'Отпустите, чтобы отправить, или тапните ещё раз' : 'Голосовое: тап — начать, ещё тап — отправить; или удержите и отпустите'}
+            >
+              {recording ? <Send size={18} /> : <Mic size={20} />}
+            </button>
+          )}
+        </div>
       </div>
 
       {!inputFocused && <BottomNavBar />}
