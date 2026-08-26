@@ -209,6 +209,40 @@ class ChatService:
                 # ошибка здесь (например, VAPID не настроен) не должна ронять send_message.
                 logger.warning(f"⚠️ Не удалось отправить push юзеру {uid}: {e}")
 
+    async def pin_message(self, seq: int) -> dict:
+        """Закрепить сообщение — один слот на весь чат, новое закрепление
+        тихо заменяет старое (как в личках Telegram, не стек)."""
+        message = await self.cache.get_chat_message(seq)
+        if not message:
+            raise ValueError("Сообщение не найдено")
+        await self.cache.set_chat_pinned(seq)
+        await self.broadcast({"type": "pinned", "data": message})
+        return message
+
+    async def unpin_message(self) -> None:
+        await self.cache.clear_chat_pinned()
+        await self.broadcast({"type": "unpinned", "data": {}})
+
+    async def get_pinned_message(self) -> Optional[dict]:
+        seq = await self.cache.get_chat_pinned_seq()
+        if seq is None:
+            return None
+        return await self.cache.get_chat_message(seq)
+
+    async def get_push_status(self) -> list:
+        """Кто из юзеров сейчас подписан на Web Push — для UI 'кто получит
+        уведомление, если закроет приложение'."""
+        users = await self.cache.list_users()
+        status = []
+        for user in users:
+            subscription = await self.cache.get_push_subscription(user["user_id"])
+            status.append({
+                "user_id": user["user_id"],
+                "display_name": user["display_name"],
+                "subscribed": subscription is not None,
+            })
+        return status
+
     async def mark_read(self, user_id: int) -> dict:
         seq = await self.cache.chat_current_seq()
         await self.cache.set_chat_read(user_id, seq)
@@ -237,5 +271,11 @@ class ChatService:
                     await self.s3.delete_video(media_key)
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось удалить медиа чата {media_key}: {e}")
-        removed = await self.cache.delete_chat_messages([m["seq"] for m in expired])
+        expired_seqs = [m["seq"] for m in expired]
+        removed = await self.cache.delete_chat_messages(expired_seqs)
+
+        pinned_seq = await self.cache.get_chat_pinned_seq()
+        if pinned_seq is not None and pinned_seq in expired_seqs:
+            await self.unpin_message()
+
         logger.info(f"🧹 Чат: удалено {removed} сообщений старше {days} дней")

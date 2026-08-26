@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, VideoOff } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, VideoOff, Pin, PinOff } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { useChat } from '../../context/ChatContext';
+import { useChat, previewForMessage } from '../../context/ChatContext';
 import { apiClient } from '../../api/client';
-import type { ChatMessage } from '../../api/client';
+import type { ChatMessage, PushStatusEntry } from '../../api/client';
 import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 import { VoiceMessage } from './VoiceMessage';
 import './ChatPage.css';
@@ -100,7 +100,10 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 export const ChatPage: React.FC = () => {
   const { theme } = useTheme();
   const { userId } = useAuth();
-  const { messages, reads, connectionState, loadingHistory, hasMoreHistory, loadMoreHistory, sendMessage, markRead } = useChat();
+  const {
+    messages, reads, connectionState, loadingHistory, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
+    pinnedMessage, pinMessage, unpinMessage,
+  } = useChat();
 
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
@@ -109,6 +112,8 @@ export const ChatPage: React.FC = () => {
   const [sendError, setSendError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const [mediaErrors, setMediaErrors] = useState<Set<number>>(new Set());
+  const [pinTarget, setPinTarget] = useState<ChatMessage | null>(null);
+  const [pushStatuses, setPushStatuses] = useState<PushStatusEntry[]>([]);
 
   const [notifStatus, setNotifStatus] = useState<NotifStatus>('default');
   const [pushBusy, setPushBusy] = useState(false);
@@ -117,6 +122,8 @@ export const ChatPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const lastSeqRef = useRef<number | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
 
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
@@ -205,6 +212,12 @@ export const ChatPage: React.FC = () => {
     }
     setNotifStatus('default');
   }, []);
+
+  // Кто из юзеров сейчас подписан на пуш — рефетчим и при собственной смене
+  // статуса (например, только что включил уведомления сам).
+  useEffect(() => {
+    apiClient.getChatPushStatus().then((res) => setPushStatuses(res.statuses)).catch(() => {});
+  }, [notifStatus]);
 
   // Разрешение уже есть (выдано раньше) — просто синхронизируем подписку с
   // сервером молча, без всякого UI и без повторного системного диалога.
@@ -403,6 +416,42 @@ export const ChatPage: React.FC = () => {
     return `${m}:${s}`;
   };
 
+  // Long-press (и правый клик на десктопе) по пузырю открывает мини-меню
+  // закрепить/открепить — тап-и-клик на медиа внутри пузыря при этом должен
+  // молчать один раз, иначе после долгого нажатия ещё и лайтбокс откроется.
+  const LONG_PRESS_MS = 450;
+
+  const startLongPress = (message: ChatMessage) => {
+    longPressFiredRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      navigator.vibrate?.(10);
+      setPinTarget(message);
+    }, LONG_PRESS_MS);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const suppressClickIfLongPress = (e: React.MouseEvent): boolean => {
+    if (longPressFiredRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      longPressFiredRef.current = false;
+      return true;
+    }
+    return false;
+  };
+
+  const scrollToMessage = (seq: number) => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
   const renderMedia = (message: ChatMessage, isMine: boolean) => {
     const url = apiClient.getChatMediaSrc(message.media_key);
     if (message.type === 'image') {
@@ -412,7 +461,7 @@ export const ChatPage: React.FC = () => {
           alt=""
           className="chat-media-image"
           loading="lazy"
-          onClick={() => setLightbox({ src: url, type: 'image' })}
+          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'image' }); }}
         />
       );
     }
@@ -434,7 +483,7 @@ export const ChatPage: React.FC = () => {
       return (
         <div
           className={`chat-video-thumb ${message.media_kind === 'circle' ? 'circle' : ''}`}
-          onClick={() => setLightbox({ src: url, type: 'video' })}
+          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'video' }); }}
         >
           <video
             src={url}
@@ -463,6 +512,28 @@ export const ChatPage: React.FC = () => {
           </span>
         )}
       </div>
+
+      {pushStatuses.length > 0 && (
+        <div className="chat-push-status">
+          <Bell size={12} />
+          <span>
+            {(() => {
+              const names = pushStatuses.filter((s) => s.subscribed).map((s) => s.display_name);
+              return names.length > 0 ? `Уведомления получат: ${names.join(', ')}` : 'Никто не включил уведомления';
+            })()}
+          </span>
+        </div>
+      )}
+
+      {pinnedMessage && (
+        <div className="chat-pinned-banner" onClick={() => scrollToMessage(pinnedMessage.seq)}>
+          <Pin size={14} />
+          <span className="chat-pinned-text">{previewForMessage(pinnedMessage)}</span>
+          <button onClick={(e) => { e.stopPropagation(); unpinMessage(); }} title="Открепить">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {notifStatus !== 'granted' && (
         <div className={`chat-notif-banner chat-notif-banner--${notifStatus}`}>
@@ -517,11 +588,18 @@ export const ChatPage: React.FC = () => {
             return (
               <motion.div
                 key={message.seq}
+                data-seq={message.seq}
                 className={`chat-bubble-row ${isMine ? 'mine' : ''}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
               >
-                <div className="chat-bubble">
+                <div
+                  className="chat-bubble"
+                  onPointerDown={() => startLongPress(message)}
+                  onPointerUp={cancelLongPress}
+                  onPointerCancel={cancelLongPress}
+                  onContextMenu={(e) => { e.preventDefault(); setPinTarget(message); }}
+                >
                   {!isMine && <div className="chat-bubble-author">{message.username}</div>}
                   {message.text && <div className="chat-bubble-text">{message.text}</div>}
                   {message.media_key && renderMedia(message, isMine)}
@@ -652,6 +730,41 @@ export const ChatPage: React.FC = () => {
                 onClick={(e) => e.stopPropagation()}
               />
             )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {pinTarget && (
+          <motion.div
+            className="chat-pin-sheet-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setPinTarget(null)}
+          >
+            <motion.div
+              className="chat-pin-sheet"
+              initial={{ y: 40, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 40, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={async () => {
+                  const target = pinTarget;
+                  setPinTarget(null);
+                  if (pinnedMessage?.seq === target.seq) {
+                    await unpinMessage();
+                  } else {
+                    await pinMessage(target.seq);
+                  }
+                }}
+              >
+                {pinnedMessage?.seq === pinTarget.seq ? <PinOff size={18} /> : <Pin size={18} />}
+                {pinnedMessage?.seq === pinTarget.seq ? 'Открепить сообщение' : 'Закрепить сообщение'}
+              </button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

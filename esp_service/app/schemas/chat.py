@@ -58,3 +58,21 @@ class VapidPublicKeyResponse(BaseModel):
 class ShareVideoIn(BaseModel):
     camera_id: str
     video_id: str
+
+
+class PinMessageIn(BaseModel):
+    seq: int
+
+
+class PinnedMessageResponse(BaseModel):
+    message: Optional[ChatMessageOut] = None
+
+
+class PushStatusEntry(BaseModel):
+    user_id: int
+    display_name: str
+    subscribed: bool
+
+
+class PushStatusResponse(BaseModel):
+    statuses: List[PushStatusEntry]

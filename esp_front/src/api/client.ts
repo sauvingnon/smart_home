@@ -28,9 +28,17 @@ export interface ChatReadState {
   read_at: string | null;
 }
 
+export interface PushStatusEntry {
+  user_id: number;
+  display_name: string;
+  subscribed: boolean;
+}
+
 export type ChatWsEvent =
   | { type: 'message'; data: ChatMessage }
-  | { type: 'read'; data: { user_id: number; seq: number; at: string } };
+  | { type: 'read'; data: { user_id: number; seq: number; at: string } }
+  | { type: 'pinned'; data: ChatMessage }
+  | { type: 'unpinned'; data: Record<string, never> };
 
 class ApiClient {
   private wsConnections: Map<string, WebSocket> = new Map();
@@ -260,6 +268,22 @@ class ApiClient {
 
   async getChatUnreadCount(): Promise<{ unread_count: number }> {
     return this.fetch('/chat/unread_count');
+  }
+
+  async pinChatMessage(seq: number): Promise<ChatMessage> {
+    return this.fetch('/chat/pin', { method: 'POST', body: JSON.stringify({ seq }) });
+  }
+
+  async unpinChatMessage(): Promise<{ status: string }> {
+    return this.fetch('/chat/unpin', { method: 'POST' });
+  }
+
+  async getPinnedChatMessage(): Promise<{ message: ChatMessage | null }> {
+    return this.fetch('/chat/pinned');
+  }
+
+  async getChatPushStatus(): Promise<{ statuses: PushStatusEntry[] }> {
+    return this.fetch('/chat/push/status');
   }
 
   // Бэкенд стримит байты сам (как /esp_service/videos/stream) — Garage/S3

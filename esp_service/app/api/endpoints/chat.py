@@ -10,6 +10,9 @@ from app.schemas.chat import (
     ChatMessageOut,
     ChatMessagesResponse,
     MarkReadResponse,
+    PinMessageIn,
+    PinnedMessageResponse,
+    PushStatusResponse,
     PushSubscriptionIn,
     ReadReceiptsResponse,
     ShareVideoIn,
@@ -112,6 +115,44 @@ async def unread_count(user_id: int = Depends(get_current_user_id_dep)):
     worker = BackgroundWorker.get_instance()
     count = await worker.chat_service.get_unread_count(user_id)
     return {"unread_count": count}
+
+
+@router.post("/pin", response_model=ChatMessageOut)
+async def pin_message(
+    payload: PinMessageIn,
+    user_id: int = Depends(get_current_user_id_dep),
+):
+    """Закрепить сообщение — один слот на чат, новое закрепление заменяет старое."""
+    worker = BackgroundWorker.get_instance()
+    try:
+        message = await worker.chat_service.pin_message(payload.seq)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return message
+
+
+@router.post("/unpin")
+async def unpin_message(user_id: int = Depends(get_current_user_id_dep)):
+    worker = BackgroundWorker.get_instance()
+    await worker.chat_service.unpin_message()
+    return {"status": "ok"}
+
+
+@router.get("/pinned", response_model=PinnedMessageResponse)
+async def get_pinned(user_id: int = Depends(get_current_user_id_dep)):
+    """Текущее закреплённое сообщение (или null) — для начальной загрузки,
+    до того как WS доставит событие pinned/unpinned."""
+    worker = BackgroundWorker.get_instance()
+    message = await worker.chat_service.get_pinned_message()
+    return {"message": message}
+
+
+@router.get("/push/status", response_model=PushStatusResponse)
+async def push_status(user_id: int = Depends(get_current_user_id_dep)):
+    """Кто из юзеров сейчас подписан на Web Push."""
+    worker = BackgroundWorker.get_instance()
+    statuses = await worker.chat_service.get_push_status()
+    return {"statuses": statuses}
 
 
 @router.get("/media/{media_key:path}")

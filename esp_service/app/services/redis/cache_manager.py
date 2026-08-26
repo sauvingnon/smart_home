@@ -582,6 +582,7 @@ class CacheManager:
     CHAT_MESSAGES_ZSET = "chat:messages"
     CHAT_MSG_PREFIX = "chat:msg:"
     CHAT_READ_PREFIX = "chat:read:"
+    CHAT_PINNED_KEY = "chat:pinned"
 
     async def chat_next_seq(self) -> int:
         """Инкрементирует и возвращает новый seq для сообщения."""
@@ -624,6 +625,36 @@ class CacheManager:
             messages.append(data)
         messages.reverse()
         return messages
+
+    async def get_chat_message(self, seq: int) -> Optional[dict]:
+        """Одно сообщение по seq — нужно для баннера закреплённого сообщения."""
+        if not await self._ensure_connection():
+            return None
+        data = await self.redis_client.hgetall(f"{self.CHAT_MSG_PREFIX}{seq}")
+        if not data:
+            return None
+        data["seq"] = int(data["seq"])
+        data["user_id"] = int(data["user_id"])
+        return data
+
+    async def set_chat_pinned(self, seq: int) -> bool:
+        """Закрепляет сообщение — один слот, новое закрепление заменяет старое."""
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.set(self.CHAT_PINNED_KEY, seq)
+        return True
+
+    async def get_chat_pinned_seq(self) -> Optional[int]:
+        if not await self._ensure_connection():
+            return None
+        val = await self.redis_client.get(self.CHAT_PINNED_KEY)
+        return int(val) if val else None
+
+    async def clear_chat_pinned(self) -> bool:
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.delete(self.CHAT_PINNED_KEY)
+        return True
 
     async def get_expired_chat_messages(self, older_than_days: int = 30) -> list:
         """Сообщения старше N дней (seq растёт вместе с временем — как только

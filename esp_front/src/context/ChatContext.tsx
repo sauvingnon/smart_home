@@ -19,6 +19,9 @@ interface ChatContextType {
   loadMoreHistory: () => Promise<void>;
   sendMessage: (payload: Parameters<typeof apiClient.sendChatMessage>[0]) => Promise<void>;
   markRead: () => Promise<void>;
+  pinnedMessage: ChatMessage | null;
+  pinMessage: (seq: number) => Promise<void>;
+  unpinMessage: () => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -26,7 +29,7 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined);
 const HISTORY_PAGE_SIZE = 50;
 const TOAST_DURATION_MS = 4000;
 
-const previewForMessage = (message: ChatMessage): string => {
+export const previewForMessage = (message: ChatMessage): string => {
   if (message.text) return message.text;
   if (message.type === 'image') return '📷 Фото';
   if (message.type === 'audio') return '🎤 Голосовое сообщение';
@@ -53,6 +56,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [toast, setToast] = useState<ChatMessage | null>(null);
+  const [pinnedMessage, setPinnedMessage] = useState<ChatMessage | null>(null);
 
   const isOnChatPageRef = useRef(isOnChatPage);
   useEffect(() => {
@@ -76,16 +80,18 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (async () => {
       setLoadingHistory(true);
       try {
-        const [historyRes, unreadRes, readsRes] = await Promise.all([
+        const [historyRes, unreadRes, readsRes, pinnedRes] = await Promise.all([
           apiClient.getChatMessages(),
           apiClient.getChatUnreadCount(),
           apiClient.getChatReadStates(),
+          apiClient.getPinnedChatMessage(),
         ]);
         if (cancelled) return;
         setMessages(historyRes.messages);
         setHasMoreHistory(historyRes.messages.length >= HISTORY_PAGE_SIZE);
         setUnreadCount(unreadRes.unread_count);
         setReads(readsRes.reads);
+        setPinnedMessage(pinnedRes.message);
       } catch {
         // WS всё равно досинхронизирует новые события
       } finally {
@@ -126,6 +132,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             return next;
           });
+        } else if (event.type === 'pinned') {
+          setPinnedMessage(event.data);
+        } else if (event.type === 'unpinned') {
+          setPinnedMessage(null);
         }
       },
       onError: () => setConnectionState('error'),
@@ -158,6 +168,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [loadingHistory, hasMoreHistory, messages]);
 
+  const pinMessage = useCallback(async (seq: number) => {
+    const message = await apiClient.pinChatMessage(seq);
+    setPinnedMessage(message);
+  }, []);
+
+  const unpinMessage = useCallback(async () => {
+    await apiClient.unpinChatMessage();
+    setPinnedMessage(null);
+  }, []);
+
   const sendMessage = useCallback(async (payload: Parameters<typeof apiClient.sendChatMessage>[0]) => {
     const message = await apiClient.sendChatMessage(payload);
     setMessages((prev) => (prev.some((m) => m.seq === message.seq) ? prev : [...prev, message]));
@@ -177,6 +197,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loadMoreHistory,
       sendMessage,
       markRead,
+      pinnedMessage,
+      pinMessage,
+      unpinMessage,
     }}>
       {children}
       <AnimatePresence>
