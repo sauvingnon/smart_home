@@ -1,9 +1,8 @@
 # api/endpoints/auth.py
-from fastapi import APIRouter, HTTPException, Request, Response, Header
+from fastapi import APIRouter, HTTPException, Request, Response
 from app.core.worker import BackgroundWorker
-from app.core.auth import get_auth_manager, COOKIE_NAME
-from app.schemas.auth import KeyResponse
-from config import BOT_SECRET, COOKIE_SECURE, ADMIN_USER_ID
+from app.core.auth import get_auth_manager, get_client_ip, COOKIE_NAME
+from config import COOKIE_SECURE
 
 router = APIRouter(
     prefix="/auth",
@@ -22,6 +21,12 @@ async def login(request: Request, response: Response):
         raise HTTPException(status_code=400, detail="Key required")
 
     worker = BackgroundWorker.get_instance()
+
+    ip = get_client_ip(request)
+    allowed = await worker.cache.check_login_rate_limit(ip)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Слишком много попыток входа, попробуйте позже")
+
     user_id = await worker.cache.validate_key(key)
     if not user_id:
         raise HTTPException(status_code=403, detail="Invalid or expired key")
@@ -49,19 +54,14 @@ async def me(request: Request):
     """Проверить текущую сессию."""
     auth = get_auth_manager()
     user_id = await auth.verify_access_key(request)
-    return {"user_id": user_id, "is_admin": user_id == ADMIN_USER_ID}
-
-
-@router.post("/generate_key", response_model=KeyResponse)
-async def generate_key_endpoint(
-    user_id: int,
-    request: Request,
-    x_bot_secret: str = Header(...),
-):
-    """Генерация ключа доступа. Вызывать вручную через curl с BOT_SECRET."""
-    if x_bot_secret != BOT_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid bot secret")
 
     worker = BackgroundWorker.get_instance()
-    key = await worker.cache.generate_key(user_id)
-    return KeyResponse(key=key, expires_in_days=180)
+    user = await worker.cache.get_user(user_id)
+
+    return {
+        "user_id": user_id,
+        "username": user["username"] if user else None,
+        "display_name": user["display_name"] if user else None,
+        "role": user["role"] if user else "user",
+        "is_admin": user is not None and user["role"] == "admin",
+    }

@@ -5,6 +5,9 @@ interface AuthContextType {
   accessKey: string | null;
   isLoading: boolean;
   isAdmin: boolean;
+  userId: number | null;
+  username: string | null;
+  displayName: string | null;
   setAccessKey: (key: string) => Promise<void>;
   clearAccessKey: () => void;
 }
@@ -14,6 +17,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [accessKey, setAccessKeyState] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userId, setUserId] = useState<number | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchMe = async (): Promise<boolean> => {
@@ -24,6 +30,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.ok) {
         const data = await res.json();
         setIsAdmin(Boolean(data.is_admin));
+        setUserId(typeof data.user_id === 'number' ? data.user_id : null);
+        setUsername(data.username ?? null);
+        setDisplayName(data.display_name ?? null);
         return true;
       }
     } catch {}
@@ -82,6 +91,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }).catch(() => {});
     setAccessKeyState(null);
     setIsAdmin(false);
+    setUserId(null);
+    setUsername(null);
+    setDisplayName(null);
   };
 
   return (
@@ -89,6 +101,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       accessKey,
       isLoading,
       isAdmin,
+      userId,
+      username,
+      displayName,
       setAccessKey: handleSetKey,
       clearAccessKey,
     }}>

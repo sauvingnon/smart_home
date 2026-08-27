@@ -3,13 +3,28 @@ from fastapi import Request, HTTPException
 from fastapi import status
 from starlette.websockets import WebSocket
 from logger import logger
-from config import ADMIN_USER_ID
 
 COOKIE_NAME = "esp_session"
+
+
+def get_client_ip(request: Request) -> str:
+    """Реальный IP клиента из-за nginx-реверс-прокси. esp_service слушает
+    только 127.0.0.1 (наружу не торчит), поэтому доверяем X-Forwarded-For —
+    подделать его может только сам nginx, а не внешний клиент напрямую.
+    Берём ПОСЛЕДНИЙ адрес в списке (тот, что дописал именно nginx), а не
+    первый — первый в списке как раз может быть подделан клиентом."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
 
 class AuthManager:
     def __init__(self, cache):
         self.cache = cache
+
+    async def is_admin(self, user_id: int) -> bool:
+        user = await self.cache.get_user(user_id)
+        return user is not None and user.get("role") == "admin"
 
     async def verify_access_key(self, request: Request | str) -> int:
         if isinstance(request, Request):
@@ -31,7 +46,7 @@ class AuthManager:
             )
 
         logger.debug(f"✅ Session validated for user {user_id}")
-        if user_id != ADMIN_USER_ID and isinstance(request, Request):
+        if isinstance(request, Request) and not await self.is_admin(user_id):
             # request.url.path — сырой путь С учётом root_path ("/api/esp_service/...");
             # ROUTE_LABELS сравнивается с путём БЕЗ root_path, иначе ни один
             # префикс никогда не совпадёт (root_path у FastAPI = "/api").

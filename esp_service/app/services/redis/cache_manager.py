@@ -20,6 +20,7 @@ class CacheManager:
         self.redis_url = redis_url
         self.key_prefix = "access_key:"
         self.key_ttl = timedelta(days=180)  # 180 дней жизни ключа
+        self.user_keys_prefix = "user_keys:"  # user_id -> set ключей, для revoke_all_keys_for_user
 
         # Токены для просмотра видео
         self.video_token_prefix = "video_token:"   # token -> video_key
@@ -321,6 +322,7 @@ class CacheManager:
 
         try:
             await self.redis_client.setex(redis_key, self.key_ttl, str(user_id))
+            await self.redis_client.sadd(f"{self.user_keys_prefix}{user_id}", key)
 
             backup = self._load_keys_backup()
             backup[key] = {"user_id": user_id, "expires_at": expires_at}
@@ -348,6 +350,20 @@ class CacheManager:
         
         return None
     
+    async def check_login_rate_limit(self, ip: str, max_attempts: int = 10, window_seconds: int = 300) -> bool:
+        """Фиксированное окно на попытки логина по IP. Ключ 256-бит случайный —
+        перебором его не угадать, это скорее защита от долбёжки эндпоинта,
+        чем от реального брутфорса. Возвращает True, если можно пробовать
+        дальше, False — лимит исчерпан."""
+        if not await self._ensure_connection():
+            return True  # Redis лёг — не блокируем логин из-за этого
+
+        redis_key = f"login_attempts:{ip}"
+        count = await self.redis_client.incr(redis_key)
+        if count == 1:
+            await self.redis_client.expire(redis_key, window_seconds)
+        return count <= max_attempts
+
     async def revoke_key(self, key: str) -> bool:
         """Отзывает ключ"""
         redis_key = f"{self.key_prefix}{key}"
@@ -475,12 +491,279 @@ class CacheManager:
             logger.exception(f"❌ Ошибка получения недельного отчёта из кэша: {e}")
             return None
         
-    USER_NAMES: dict = {
-        61327489: "Камелия",
-        4382099: "Лилия",
-        987654: "Андрей",
-    }
     IZHEVSK_TZ = timezone(timedelta(hours=4))
+
+    # ───────────────────── ЮЗЕРЫ ─────────────────────
+    # Конечный, фиксированный набор людей — новые не добавляются через UI,
+    # поэтому сидирование хардкодом при старте безопаснее отдельной админки.
+    USER_KEY_PREFIX = "user:"
+    USERS_INDEX_KEY = "users:index"
+
+    SEED_USERS: list = [
+        {"user_id": 1245, "username": "grisha", "display_name": "Гриша", "role": "admin"},
+        {"user_id": 61327489, "username": "kamelia", "display_name": "Камелия", "role": "user"},
+        {"user_id": 4382099, "username": "liliya", "display_name": "Лилия", "role": "user"},
+        {"user_id": 987654, "username": "andrey", "display_name": "Андрей", "role": "user"},
+    ]
+
+    async def get_user(self, user_id: int) -> Optional[dict]:
+        """Получить юзера по ID. None если не существует."""
+        if not await self._ensure_connection():
+            return None
+        data = await self.redis_client.hgetall(f"{self.USER_KEY_PREFIX}{user_id}")
+        if not data:
+            return None
+        return {"user_id": user_id, **data}
+
+    async def list_users(self) -> list:
+        """Все юзеры, отсортированные по имени."""
+        if not await self._ensure_connection():
+            return []
+        ids = await self.redis_client.smembers(self.USERS_INDEX_KEY)
+        users = []
+        for uid in ids:
+            user = await self.get_user(int(uid))
+            if user:
+                users.append(user)
+        return sorted(users, key=lambda u: u["display_name"])
+
+    async def create_user(self, user_id: int, username: str, display_name: str, role: str = "user") -> bool:
+        """Создать (или перезаписать) юзера."""
+        if not await self._ensure_connection():
+            return False
+        key = f"{self.USER_KEY_PREFIX}{user_id}"
+        await self.redis_client.hset(key, mapping={
+            "username": username,
+            "display_name": display_name,
+            "role": role,
+        })
+        await self.redis_client.sadd(self.USERS_INDEX_KEY, user_id)
+        return True
+
+    async def delete_user(self, user_id: int) -> bool:
+        """Удаляет юзера (hash + запись в индексе). Ключи не трогает — это
+        отдельный шаг, см. revoke_all_keys_for_user."""
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.delete(f"{self.USER_KEY_PREFIX}{user_id}")
+        await self.redis_client.srem(self.USERS_INDEX_KEY, user_id)
+        return True
+
+    async def revoke_all_keys_for_user(self, user_id: int) -> int:
+        """Отзывает все ключи конкретного юзера. Обратный маппинг user_id -> ключи
+        живёт в Redis (user_keys:{id}) — это авторитетный источник, а не файловый
+        бэкап: если бэкап на диске отстанет или потеряется (запись в него не
+        атомарна с записью ключа в Redis), отзыв по одному только бэкапу тихо
+        пропустит ключ, и удалённый юзер останется с рабочей сессией-призраком.
+        Бэкап всё равно подчищаем заодно — он используется отдельно для
+        restore_keys_from_backup при холодном старте."""
+        if not await self._ensure_connection():
+            return 0
+        index_key = f"{self.user_keys_prefix}{user_id}"
+        indexed_keys = await self.redis_client.smembers(index_key)
+
+        backup = self._load_keys_backup()
+        backup_keys = {k for k, entry in backup.items() if entry.get("user_id") == user_id}
+
+        keys_to_revoke = set(indexed_keys) | backup_keys
+        for key in keys_to_revoke:
+            await self.redis_client.delete(f"{self.key_prefix}{key}")
+            backup.pop(key, None)
+        await self.redis_client.delete(index_key)
+        if backup_keys:
+            self._save_keys_backup(backup)
+        return len(keys_to_revoke)
+
+    async def seed_users_if_missing(self) -> None:
+        """При старте сервиса досоздаёт недостающих юзеров из SEED_USERS. Идемпотентно —
+        существующих не трогает, безопасно вызывать при каждом запуске."""
+        if not await self._ensure_connection():
+            logger.warning("⚠️ Не удалось засеять юзеров: нет соединения с Redis")
+            return
+        for seed in self.SEED_USERS:
+            if await self.get_user(seed["user_id"]):
+                continue
+            await self.create_user(seed["user_id"], seed["username"], seed["display_name"], seed["role"])
+            logger.info(f"👤 Создан юзер {seed['display_name']} ({seed['user_id']})")
+
+    # ───────────────────── ЧАТ ─────────────────────
+    # Один общий чат на всех — без сущности "conversation". Сообщения нумеруются
+    # инкрементным seq (а не Stream ID), потому что непрочитанные считаются как
+    # простое вычитание chat:seq - last_read_seq, без сканирования истории.
+    CHAT_SEQ_KEY = "chat:seq"
+    CHAT_MESSAGES_ZSET = "chat:messages"
+    CHAT_MSG_PREFIX = "chat:msg:"
+    CHAT_READ_PREFIX = "chat:read:"
+    CHAT_PINNED_KEY = "chat:pinned"
+
+    async def chat_next_seq(self) -> int:
+        """Инкрементирует и возвращает новый seq для сообщения."""
+        if not await self._ensure_connection():
+            raise RuntimeError("Redis недоступен")
+        return await self.redis_client.incr(self.CHAT_SEQ_KEY)
+
+    async def chat_current_seq(self) -> int:
+        """Текущий seq (= общее количество отправленных сообщений)."""
+        if not await self._ensure_connection():
+            return 0
+        val = await self.redis_client.get(self.CHAT_SEQ_KEY)
+        return int(val) if val else 0
+
+    async def save_chat_message(self, seq: int, message: dict) -> bool:
+        """Сохраняет сообщение по его seq и добавляет в ленту."""
+        if not await self._ensure_connection():
+            return False
+        key = f"{self.CHAT_MSG_PREFIX}{seq}"
+        await self.redis_client.hset(key, mapping={k: str(v) for k, v in message.items()})
+        await self.redis_client.zadd(self.CHAT_MESSAGES_ZSET, {str(seq): seq})
+        return True
+
+    async def get_chat_messages(self, before_seq: Optional[int] = None, limit: int = 50) -> list:
+        """История чата, новые сначала внутри страницы, но список возвращается
+        в хронологическом порядке (старые сверху) — готов для рендера ленты."""
+        if not await self._ensure_connection():
+            return []
+        max_score = f"({before_seq}" if before_seq is not None else "+inf"
+        seqs = await self.redis_client.zrevrangebyscore(
+            self.CHAT_MESSAGES_ZSET, max_score, "-inf", start=0, num=limit
+        )
+        messages = []
+        for s in seqs:
+            data = await self.redis_client.hgetall(f"{self.CHAT_MSG_PREFIX}{s}")
+            if not data:
+                continue
+            data["seq"] = int(data["seq"])
+            data["user_id"] = int(data["user_id"])
+            messages.append(data)
+        messages.reverse()
+        return messages
+
+    async def get_chat_message(self, seq: int) -> Optional[dict]:
+        """Одно сообщение по seq — нужно для баннера закреплённого сообщения."""
+        if not await self._ensure_connection():
+            return None
+        data = await self.redis_client.hgetall(f"{self.CHAT_MSG_PREFIX}{seq}")
+        if not data:
+            return None
+        data["seq"] = int(data["seq"])
+        data["user_id"] = int(data["user_id"])
+        return data
+
+    async def set_chat_pinned(self, seq: int) -> bool:
+        """Закрепляет сообщение — один слот, новое закрепление заменяет старое."""
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.set(self.CHAT_PINNED_KEY, seq)
+        return True
+
+    async def get_chat_pinned_seq(self) -> Optional[int]:
+        if not await self._ensure_connection():
+            return None
+        val = await self.redis_client.get(self.CHAT_PINNED_KEY)
+        return int(val) if val else None
+
+    async def clear_chat_pinned(self) -> bool:
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.delete(self.CHAT_PINNED_KEY)
+        return True
+
+    async def get_expired_chat_messages(self, older_than_days: int = 30) -> list:
+        """Сообщения старше N дней (seq растёт вместе с временем — как только
+        встретили ещё не протухшее, дальше можно не проверять)."""
+        if not await self._ensure_connection():
+            return []
+        cutoff = datetime.now(tz=self.IZHEVSK_TZ) - timedelta(days=older_than_days)
+        seqs = await self.redis_client.zrange(self.CHAT_MESSAGES_ZSET, 0, -1)
+        expired = []
+        for s in seqs:
+            data = await self.redis_client.hgetall(f"{self.CHAT_MSG_PREFIX}{s}")
+            if not data:
+                continue
+            try:
+                ts = datetime.fromisoformat(data["ts"])
+            except (KeyError, ValueError):
+                continue
+            if ts >= cutoff:
+                break
+            data["seq"] = int(s)
+            expired.append(data)
+        return expired
+
+    async def delete_chat_messages(self, seqs: list) -> int:
+        """Удаляет сообщения по seq (из hash'ей и из ленты). Не трогает S3 — файлы
+        медиа удаляет вызывающая сторона (ChatService), у CacheManager нет доступа к S3."""
+        if not seqs or not await self._ensure_connection():
+            return 0
+        removed = 0
+        for s in seqs:
+            await self.redis_client.delete(f"{self.CHAT_MSG_PREFIX}{s}")
+            await self.redis_client.zrem(self.CHAT_MESSAGES_ZSET, s)
+            removed += 1
+        return removed
+
+    async def set_chat_read(self, user_id: int, seq: int) -> bool:
+        """Отмечает, что юзер прочитал чат по последнее сообщение seq."""
+        if not await self._ensure_connection():
+            return False
+        key = f"{self.CHAT_READ_PREFIX}{user_id}"
+        now_iso = datetime.now(tz=self.IZHEVSK_TZ).isoformat()
+        await self.redis_client.hset(key, mapping={"last_read_seq": seq, "read_at": now_iso})
+        return True
+
+    async def get_chat_read(self, user_id: int) -> Optional[dict]:
+        """Последняя прочитанная юзером позиция. None если юзер ещё не открывал чат."""
+        if not await self._ensure_connection():
+            return None
+        data = await self.redis_client.hgetall(f"{self.CHAT_READ_PREFIX}{user_id}")
+        if not data:
+            return None
+        return {"last_read_seq": int(data["last_read_seq"]), "read_at": data["read_at"]}
+
+    async def get_all_chat_reads(self) -> list:
+        """Read-состояние всех юзеров разом — фронт сам считает по нему 'кем и когда
+        прочитано' для каждого сообщения (сравнением seq с last_read_seq)."""
+        users = await self.list_users()
+        reads = []
+        for u in users:
+            r = await self.get_chat_read(u["user_id"])
+            reads.append({
+                "user_id": u["user_id"],
+                "display_name": u["display_name"],
+                "last_read_seq": r["last_read_seq"] if r else 0,
+                "read_at": r["read_at"] if r else None,
+            })
+        return reads
+
+    async def get_chat_unread_count(self, user_id: int) -> int:
+        """Непрочитанные = текущий seq - последний прочитанный юзером seq."""
+        current = await self.chat_current_seq()
+        read = await self.get_chat_read(user_id)
+        last_read_seq = read["last_read_seq"] if read else 0
+        return max(0, current - last_read_seq)
+
+    # ───────────────────── WEB PUSH ─────────────────────
+    # Одна подписка на юзера (последняя выигрывает) — как и с video_token,
+    # усложнять до "подписка на устройство" незачем при 4 юзерах.
+    PUSH_SUB_PREFIX = "push_sub:"
+
+    async def save_push_subscription(self, user_id: int, subscription: dict) -> bool:
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.set(f"{self.PUSH_SUB_PREFIX}{user_id}", json.dumps(subscription))
+        return True
+
+    async def get_push_subscription(self, user_id: int) -> Optional[dict]:
+        if not await self._ensure_connection():
+            return None
+        raw = await self.redis_client.get(f"{self.PUSH_SUB_PREFIX}{user_id}")
+        return json.loads(raw) if raw else None
+
+    async def delete_push_subscription(self, user_id: int) -> bool:
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.delete(f"{self.PUSH_SUB_PREFIX}{user_id}")
+        return True
 
     # Префикс пути → название раздела приложения, для статистики "кто что открывал".
     # Порядок важен: смотрим на первое совпадение по startswith.
@@ -572,8 +855,9 @@ class CacheManager:
                 visits = [json.loads(e) for e in raw_entries]
 
                 if uid not in user_data:
+                    user = await self.get_user(uid)
                     user_data[uid] = {
-                        "name": self.USER_NAMES.get(uid, f"ID {uid}"),
+                        "name": user["display_name"] if user else f"ID {uid}",
                         "days": {}
                     }
 

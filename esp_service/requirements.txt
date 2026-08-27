@@ -8,3 +8,4 @@ openai
 ffmpeg
 aiobotocore
 python-multipart
+pywebpush

@@ -10,6 +10,36 @@ export const getWebSocketBaseUrl = (): string => {
   return `${protocol}//${window.location.host}${API_BASE_URL}`;
 };
 
+export interface ChatMessage {
+  seq: number;
+  user_id: number;
+  username: string;
+  type: 'text' | 'image' | 'audio' | 'video';
+  text: string;
+  media_key: string;
+  media_kind: string; // '' | 'circle'
+  ts: string;
+}
+
+export interface ChatReadState {
+  user_id: number;
+  display_name: string;
+  last_read_seq: number;
+  read_at: string | null;
+}
+
+export interface PushStatusEntry {
+  user_id: number;
+  display_name: string;
+  subscribed: boolean;
+}
+
+export type ChatWsEvent =
+  | { type: 'message'; data: ChatMessage }
+  | { type: 'read'; data: { user_id: number; seq: number; at: string } }
+  | { type: 'pinned'; data: ChatMessage }
+  | { type: 'unpinned'; data: Record<string, never> };
+
 class ApiClient {
   private wsConnections: Map<string, WebSocket> = new Map();
   private reconnectTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
@@ -62,6 +92,13 @@ class ApiClient {
     if (camera_id) queryParams.append('camera_id', camera_id);
     const queryString = queryParams.toString();
     return this.fetch(`/esp_service/videos${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async shareVideoToChat(cameraId: string, videoId: string): Promise<ChatMessage> {
+    return this.fetch('/chat/share_video', {
+      method: 'POST',
+      body: JSON.stringify({ camera_id: cameraId, video_id: videoId }),
+    });
   }
 
   async downloadVideo(cameraId: string, videoId: string): Promise<Blob> {
@@ -181,6 +218,183 @@ class ApiClient {
       ws.close(1000, 'Closing all connections');
     });
     this.wsConnections.clear();
+  }
+
+  // ───────────────────── ЧАТ ─────────────────────
+
+  async getChatMessages(beforeSeq?: number, limit = 50): Promise<{ messages: ChatMessage[] }> {
+    const params = new URLSearchParams();
+    if (beforeSeq !== undefined) params.append('before_seq', String(beforeSeq));
+    params.append('limit', String(limit));
+    return this.fetch(`/chat/messages?${params.toString()}`);
+  }
+
+  async sendChatMessage(payload: {
+    type: 'text' | 'image' | 'audio' | 'video';
+    text?: string;
+    mediaKind?: string;
+    file?: Blob;
+    fileName?: string;
+  }): Promise<ChatMessage> {
+    const form = new FormData();
+    form.append('type', payload.type);
+    if (payload.text) form.append('text', payload.text);
+    if (payload.mediaKind) form.append('media_kind', payload.mediaKind);
+    if (payload.file) form.append('file', payload.file, payload.fileName ?? 'upload');
+
+    const response = await fetch(`${API_BASE_URL}/chat/messages`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include',
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      throw new AuthError('Invalid or expired session');
+    }
+    if (!response.ok) {
+      const detail = await response.json().catch(() => null);
+      throw new Error(detail?.detail ?? `HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async markChatRead(): Promise<{ user_id: number; seq: number; at: string }> {
+    return this.fetch('/chat/read', { method: 'POST' });
+  }
+
+  async getChatReadStates(): Promise<{ reads: ChatReadState[] }> {
+    return this.fetch('/chat/read_states');
+  }
+
+  async getChatUnreadCount(): Promise<{ unread_count: number }> {
+    return this.fetch('/chat/unread_count');
+  }
+
+  async pinChatMessage(seq: number): Promise<ChatMessage> {
+    return this.fetch('/chat/pin', { method: 'POST', body: JSON.stringify({ seq }) });
+  }
+
+  async unpinChatMessage(): Promise<{ status: string }> {
+    return this.fetch('/chat/unpin', { method: 'POST' });
+  }
+
+  async getPinnedChatMessage(): Promise<{ message: ChatMessage | null }> {
+    return this.fetch('/chat/pinned');
+  }
+
+  async getChatPushStatus(): Promise<{ statuses: PushStatusEntry[] }> {
+    return this.fetch('/chat/push/status');
+  }
+
+  // Бэкенд стримит байты сам (как /esp_service/videos/stream) — Garage/S3
+  // никогда не выставляется наружу, поэтому это просто URL, а не отдельный
+  // запрос за presigned-ссылкой. Cookie-сессия уходит с запросом автоматически
+  // (тот же origin), <img>/<audio>/<video> её сами подхватывают.
+  getChatMediaSrc(mediaKey: string): string {
+    return `${API_BASE_URL}/chat/media/${mediaKey}`;
+  }
+
+  async getVapidPublicKey(): Promise<{ public_key: string }> {
+    return this.fetch('/chat/push/vapid_public_key');
+  }
+
+  async subscribeChatPush(subscription: PushSubscriptionJSON): Promise<{ status: string }> {
+    return this.fetch('/chat/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(subscription),
+    });
+  }
+
+  async unsubscribeChatPush(): Promise<{ status: string }> {
+    return this.fetch('/chat/push/unsubscribe', { method: 'POST' });
+  }
+
+  createChatWebSocket(options: {
+    onOpen?: () => void;
+    onEvent?: (event: ChatWsEvent) => void;
+    onError?: (error: any) => void;
+    onClose?: (code: number, reason: string) => void;
+  } = {}, attempt: number = 0) {
+    const wsKey = 'chat';
+    const wsUrl = `${getWebSocketBaseUrl()}/chat/ws`;
+    const ws = new WebSocket(wsUrl);
+
+    const maxReconnectAttempts = 5;
+
+    ws.onopen = () => {
+      (ws as any).isManualClose = false;
+      options.onOpen?.();
+    };
+
+    ws.onmessage = (event) => {
+      if (typeof event.data !== 'string') return;
+
+      if (event.data === 'ping') {
+        ws.send('pong');
+        return;
+      }
+      if (event.data === 'pong' || event.data === 'AUTH_OK') return;
+      if (event.data.startsWith('ERROR')) {
+        options.onError?.(event.data);
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(event.data) as ChatWsEvent;
+        options.onEvent?.(parsed);
+      } catch {
+        // не JSON-событие — игнорируем
+      }
+    };
+
+    ws.onerror = (error) => {
+      options.onError?.(error);
+    };
+
+    ws.onclose = (event) => {
+      this.wsConnections.delete(wsKey);
+      options.onClose?.(event.code, event.reason);
+
+      const isManual = (ws as any).isManualClose;
+      if (isManual) return;
+
+      if (attempt < maxReconnectAttempts) {
+        const nextAttempt = attempt + 1;
+        const timer = setTimeout(() => {
+          this.reconnectTimers.delete(wsKey);
+          if (!this.wsConnections.has(wsKey)) {
+            this.createChatWebSocket(options, nextAttempt);
+          }
+        }, 2000 * nextAttempt);
+        this.reconnectTimers.set(wsKey, timer);
+      }
+    };
+
+    this.wsConnections.set(wsKey, ws);
+    return ws;
+  }
+
+  closeChatWebSocket() {
+    const timer = this.reconnectTimers.get('chat');
+    if (timer) {
+      clearTimeout(timer);
+      this.reconnectTimers.delete('chat');
+    }
+
+    const ws = this.wsConnections.get('chat');
+    if (ws) {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      (ws as any).isManualClose = true;
+
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000, 'Closed by client');
+      }
+
+      this.wsConnections.delete('chat');
+    }
   }
 }
 

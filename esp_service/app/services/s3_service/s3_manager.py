@@ -496,6 +496,50 @@ class S3Manager:
             logger.exception(f"❌ Ошибка сохранения: {e}")
             return None
     
+    async def get_object_content_type(self, key: str) -> Optional[str]:
+        """Content-Type объекта таким, каким он был сохранён при аплоаде. Нужен
+        для generic-медиа вроде чата, где по одному расширению не всегда понятно
+        что внутри (.webm бывает и аудио, и видео)."""
+        if not await self._ensure_connection():
+            return None
+        try:
+            head = await self._client.head_object(Bucket=self.bucket_name, Key=key)
+            return head.get('ContentType')
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось получить Content-Type для {key}: {e}")
+            return None
+
+    async def get_object_size(self, key: str) -> Optional[int]:
+        """Размер объекта в байтах — нужен, чтобы разрулить suffix-range
+        (bytes=-N) до вызова stream_range, который сам знает размер только
+        после того, как ему уже передали start/end."""
+        if not await self._ensure_connection():
+            return None
+        try:
+            head = await self._client.head_object(Bucket=self.bucket_name, Key=key)
+            return head.get('ContentLength')
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось получить размер объекта {key}: {e}")
+            return None
+
+    async def save_chat_media(self, key: str, data: bytes, content_type: str) -> bool:
+        """Сохраняет медиафайл чата (фото/голосовое/видео) по готовому ключу.
+        В отличие от save_video — без камеро-специфичных метаданных."""
+        if not await self._ensure_connection():
+            return False
+        try:
+            await self._client.put_object(
+                Bucket=self.bucket_name,
+                Key=key,
+                Body=data,
+                ContentType=content_type,
+            )
+            logger.info(f"💾 Медиа чата сохранено: {key} ({len(data)} байт)")
+            return True
+        except Exception as e:
+            logger.exception(f"❌ Ошибка сохранения медиа чата: {e}")
+            return False
+
     async def save_thumbnail(self, camera_id: str, video_id: str, thumbnail_data: bytes) -> bool:
         """Сохранить thumbnail по UUID видео"""
         if not await self._ensure_connection():
