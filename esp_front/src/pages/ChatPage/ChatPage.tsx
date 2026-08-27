@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, VideoOff, Pin, PinOff } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -102,13 +102,14 @@ export const ChatPage: React.FC = () => {
   const { theme } = useTheme();
   const { userId } = useAuth();
   const {
-    messages, reads, connectionState, loadingHistory, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
+    messages, pendingUploads, reads, connectionState, loadingHistory, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
     pinnedMessage, pinMessage, unpinMessage,
   } = useChat();
 
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [micPressed, setMicPressed] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
@@ -426,6 +427,7 @@ export const ChatPage: React.FC = () => {
   const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (sending) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    setMicPressed(true);
     const wasAlreadyRecording = recording;
     pressWasSecondTapRef.current = wasAlreadyRecording;
     if (!wasAlreadyRecording) {
@@ -438,6 +440,7 @@ export const ChatPage: React.FC = () => {
   };
 
   const handleMicPointerUp = () => {
+    setMicPressed(false);
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -454,6 +457,7 @@ export const ChatPage: React.FC = () => {
   // намеренно ничего не отменяем и не отправляем: реальный звук мог уже
   // записаться, юзер сам решит через крестик или повторный тап.
   const handleMicPointerCancel = () => {
+    setMicPressed(false);
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -635,34 +639,91 @@ export const ChatPage: React.FC = () => {
               ? reads.filter((r) => r.user_id !== message.user_id && r.last_read_seq >= message.seq)
               : [];
 
+            const isPinned = pinnedMessage?.seq === message.seq;
+            // Булавка сидит в "пустом" гуттере рядом с пузырём — у своих слева
+            // (пузырь прижат к правому краю), у чужих справа (пузырь у левого
+            // края), поэтому порядок в DOM буквально разный, не просто CSS order.
+            const pinButton = (
+              <button
+                className={`chat-pin-toggle ${isPinned ? 'pinned' : ''}`}
+                onClick={() => setPinTarget(message)}
+                title={isPinned ? 'Открепить' : 'Закрепить'}
+              >
+                <Pin size={14} />
+              </button>
+            );
+
             return (
               <motion.div
                 key={message.seq}
                 data-seq={message.seq}
-                className={`chat-bubble-row ${isMine ? 'mine' : ''}`}
+                className={`chat-bubble-outer ${isMine ? 'mine' : ''}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
               >
-                <div
-                  className="chat-bubble"
-                  onPointerDown={() => startLongPress(message)}
-                  onPointerUp={cancelLongPress}
-                  onPointerCancel={cancelLongPress}
-                  onContextMenu={(e) => { e.preventDefault(); setPinTarget(message); }}
-                >
-                  {!isMine && <div className="chat-bubble-author">{message.username}</div>}
-                  {message.text && <div className="chat-bubble-text">{message.text}</div>}
-                  {message.media_key && renderMedia(message, isMine)}
-                  <div className="chat-bubble-time">{formatTime(message.ts)}</div>
-                </div>
-                {readers.length > 0 && (
-                  <div className="chat-read-receipt">
-                    Прочитано: {readers.map((r) => `${r.display_name} в ${r.read_at ? formatTime(r.read_at) : ''}`).join(', ')}
+                {isMine && pinButton}
+                <div className="chat-bubble-col">
+                  <div
+                    className="chat-bubble"
+                    onPointerDown={() => startLongPress(message)}
+                    onPointerUp={cancelLongPress}
+                    onPointerCancel={cancelLongPress}
+                    onContextMenu={(e) => { e.preventDefault(); setPinTarget(message); }}
+                  >
+                    {!isMine && <div className="chat-bubble-author">{message.username}</div>}
+                    {message.text && <div className="chat-bubble-text">{message.text}</div>}
+                    {message.media_key && renderMedia(message, isMine)}
+                    <div className="chat-bubble-time">{formatTime(message.ts)}</div>
                   </div>
-                )}
+                  {readers.length > 0 && (
+                    <div className="chat-read-receipt">
+                      Прочитано: {readers.map((r) => `${r.display_name} в ${r.read_at ? formatTime(r.read_at) : ''}`).join(', ')}
+                    </div>
+                  )}
+                </div>
+                {!isMine && pinButton}
               </motion.div>
             );
           })}
+
+          {pendingUploads.map((upload) => (
+            <motion.div
+              key={upload.localId}
+              className="chat-bubble-outer mine"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="chat-bubble-col">
+              <div className="chat-bubble chat-bubble--uploading">
+                <div className={`chat-upload-preview ${upload.type === 'audio' ? 'chat-upload-preview--audio' : ''}`}>
+                  {upload.type === 'image' && upload.previewUrl && (
+                    <img src={upload.previewUrl} alt="" />
+                  )}
+                  {upload.type === 'video' && upload.previewUrl && (
+                    <video src={upload.previewUrl} muted preload="metadata" />
+                  )}
+                  {upload.type === 'video' && !upload.previewUrl && (
+                    <div className="chat-upload-audio-placeholder"><Video size={22} /></div>
+                  )}
+                  <div className="chat-upload-overlay">
+                    {upload.type === 'audio' && <Mic size={18} />}
+                    <svg className="chat-upload-ring" viewBox="0 0 40 40">
+                      <circle className="chat-upload-ring-track" cx="20" cy="20" r="17" />
+                      <circle
+                        className="chat-upload-ring-progress"
+                        cx="20" cy="20" r="17"
+                        strokeDasharray={2 * Math.PI * 17}
+                        strokeDashoffset={2 * Math.PI * 17 * (1 - upload.progress)}
+                      />
+                    </svg>
+                    <span className="chat-upload-percent">{Math.round(upload.progress * 100)}%</span>
+                  </div>
+                </div>
+              </div>
+              </div>
+            </motion.div>
+          ))}
         </AnimatePresence>
       </div>
 
@@ -704,6 +765,7 @@ export const ChatPage: React.FC = () => {
                 onChange={(e) => setInputText(e.target.value)}
                 onFocus={() => setInputFocused(true)}
                 onBlur={() => setInputFocused(false)}
+                enterKeyHint="send"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -730,12 +792,17 @@ export const ChatPage: React.FC = () => {
               (см. handleMicPointerDown), иначе setPointerCapture слетит на середине
               удержания. */}
           {!recording && inputText.trim() ? (
-            <button className="chat-send-button" disabled={sending} onClick={handleSendText}>
+            <button
+              className="chat-send-button"
+              disabled={sending}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleSendText}
+            >
               {sending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
             </button>
           ) : (
             <button
-              className={`chat-icon-button chat-mic-button ${recording ? 'recording' : ''}`}
+              className={`chat-icon-button chat-mic-button ${recording ? 'recording' : ''} ${micPressed ? 'chat-mic-button--pressed' : ''}`}
               disabled={sending}
               onPointerDown={handleMicPointerDown}
               onPointerUp={handleMicPointerUp}
@@ -774,14 +841,15 @@ export const ChatPage: React.FC = () => {
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <video
-                src={lightbox.src}
-                controls
-                autoPlay
-                playsInline
-                className="chat-lightbox-video"
-                onClick={(e) => e.stopPropagation()}
-              />
+              <div className="chat-lightbox-video-container" onClick={(e) => e.stopPropagation()}>
+                <video
+                  src={lightbox.src}
+                  controls
+                  autoPlay
+                  playsInline
+                  className="chat-lightbox-video"
+                />
+              </div>
             )}
           </motion.div>
         )}

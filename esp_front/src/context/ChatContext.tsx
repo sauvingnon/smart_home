@@ -9,8 +9,19 @@ import './ChatContext.css';
 
 type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 
+// Локальный превью-пузырь "идёт загрузка" — существует только у отправителя,
+// пока апложится файл (как в Telegram/VK); другим участникам ничего не шлём,
+// они просто увидят готовое сообщение через WS, когда оно появится.
+export interface PendingUpload {
+  localId: string;
+  type: 'image' | 'audio' | 'video';
+  previewUrl: string | null;
+  progress: number;
+}
+
 interface ChatContextType {
   messages: ChatMessage[];
+  pendingUploads: PendingUpload[];
   reads: ChatReadState[];
   unreadCount: number;
   connectionState: ConnectionState;
@@ -50,6 +61,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isOnChatPage = location.pathname === '/chat';
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [reads, setReads] = useState<ChatReadState[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -179,16 +191,45 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const sendMessage = useCallback(async (payload: Parameters<typeof apiClient.sendChatMessage>[0]) => {
-    const message = await apiClient.sendChatMessage(payload);
-    setMessages((prev) => (prev.some((m) => m.seq === message.seq) ? prev : [...prev, message]));
-    // Своё сообщение считается прочитанным собой сразу — иначе после
-    // перезахода бейдж покажет непрочитанным то, что сам же и отправил.
-    await markRead();
+    // Прогресс-пузырь только для медиа (текст улетает мгновенно, показывать
+    // нечего) и только локально у отправителя — превью из локального Blob,
+    // не с сервера.
+    const localId = payload.file && payload.type !== 'text'
+      ? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      : null;
+    if (localId && payload.file) {
+      const previewUrl = payload.type === 'audio' ? null : URL.createObjectURL(payload.file);
+      setPendingUploads((prev) => [
+        ...prev,
+        { localId, type: payload.type as 'image' | 'audio' | 'video', previewUrl, progress: 0 },
+      ]);
+    }
+    try {
+      const message = await apiClient.sendChatMessage({
+        ...payload,
+        onProgress: localId
+          ? (ratio) => setPendingUploads((prev) => prev.map((p) => (p.localId === localId ? { ...p, progress: ratio } : p)))
+          : undefined,
+      });
+      setMessages((prev) => (prev.some((m) => m.seq === message.seq) ? prev : [...prev, message]));
+      // Своё сообщение считается прочитанным собой сразу — иначе после
+      // перезахода бейдж покажет непрочитанным то, что сам же и отправил.
+      await markRead();
+    } finally {
+      if (localId) {
+        setPendingUploads((prev) => {
+          const found = prev.find((p) => p.localId === localId);
+          if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl);
+          return prev.filter((p) => p.localId !== localId);
+        });
+      }
+    }
   }, [markRead]);
 
   return (
     <ChatContext.Provider value={{
       messages,
+      pendingUploads,
       reads,
       unreadCount,
       connectionState,

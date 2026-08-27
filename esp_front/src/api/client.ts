@@ -235,6 +235,7 @@ class ApiClient {
     mediaKind?: string;
     file?: Blob;
     fileName?: string;
+    onProgress?: (ratio: number) => void;
   }): Promise<ChatMessage> {
     const form = new FormData();
     form.append('type', payload.type);
@@ -242,20 +243,40 @@ class ApiClient {
     if (payload.mediaKind) form.append('media_kind', payload.mediaKind);
     if (payload.file) form.append('file', payload.file, payload.fileName ?? 'upload');
 
-    const response = await fetch(`${API_BASE_URL}/chat/messages`, {
-      method: 'POST',
-      body: form,
-      credentials: 'include',
-    });
+    // fetch() не даёт событий прогресса загрузки (только скачивания, через
+    // ReadableStream) — для полосы аплоада большого фото/видео нужен именно
+    // XHR, у него есть upload.onprogress.
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE_URL}/chat/messages`);
+      xhr.withCredentials = true;
 
-    if (response.status === 401 || response.status === 403) {
-      throw new AuthError('Invalid or expired session');
-    }
-    if (!response.ok) {
-      const detail = await response.json().catch(() => null);
-      throw new Error(detail?.detail ?? `HTTP error! status: ${response.status}`);
-    }
-    return response.json();
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) payload.onProgress?.(e.loaded / e.total);
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 401 || xhr.status === 403) {
+          reject(new AuthError('Invalid or expired session'));
+          return;
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          const detail = (() => {
+            try { return JSON.parse(xhr.responseText)?.detail; } catch { return null; }
+          })();
+          reject(new Error(detail ?? `HTTP error! status: ${xhr.status}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error('Некорректный ответ сервера'));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Сетевая ошибка'));
+
+      xhr.send(form);
+    });
   }
 
   async markChatRead(): Promise<{ user_id: number; seq: number; at: string }> {
