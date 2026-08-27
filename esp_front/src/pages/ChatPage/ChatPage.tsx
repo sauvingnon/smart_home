@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, ChevronDown, Sun, Moon } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, ChevronDown, Sun, Moon, Settings } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -124,8 +124,11 @@ export const ChatPage: React.FC = () => {
 
   const listRef = useRef<HTMLDivElement>(null);
   const messagesContentRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
   const [scrollBtnBottom, setScrollBtnBottom] = useState(90);
+  const [headerPadTop, setHeaderPadTop] = useState(76);
+  const [messagesPadBottom, setMessagesPadBottom] = useState(78);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const lastSeqRef = useRef<number | null>(null);
@@ -204,7 +207,13 @@ export const ChatPage: React.FC = () => {
     if (!bar) return;
     const recalc = () => {
       const rect = bar.getBoundingClientRect();
-      setScrollBtnBottom(Math.max(0, window.innerHeight - rect.top) + 12);
+      const clearance = Math.max(0, window.innerHeight - rect.top);
+      setScrollBtnBottom(clearance + 12);
+      // .chat-input-bar сам теперь position: fixed (иначе на iOS его вместе
+      // с шапкой утаскивало скроллом body при фокусе поля — см. комментарий
+      // у .chat-header ниже), поэтому лента больше не получает это место
+      // бесплатно через flex-раскладку — резервируем его явно отступом.
+      setMessagesPadBottom(clearance + 8);
     };
     recalc();
     const ro = new ResizeObserver(recalc);
@@ -215,6 +224,26 @@ export const ChatPage: React.FC = () => {
       window.removeEventListener('resize', recalc);
     };
   }, [inputFocused]);
+
+  // Шапка чата тоже переехала в position: fixed (та же причина, что у
+  // инпута), так что и под неё лента с баннерами больше не подстраивается
+  // сама — меряем реальную высоту (с учётом safe-area) и подкладываем это
+  // как padding-top всей странице.
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const recalc = () => {
+      setHeaderPadTop(header.getBoundingClientRect().bottom);
+    };
+    recalc();
+    const ro = new ResizeObserver(recalc);
+    ro.observe(header);
+    window.addEventListener('resize', recalc);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', recalc);
+    };
+  }, []);
 
   useEffect(() => {
     const container = listRef.current;
@@ -356,6 +385,10 @@ export const ChatPage: React.FC = () => {
   const handleSendText = async () => {
     const text = inputText.trim();
     if (!text || sending) return;
+    if (connectionState !== 'connected') {
+      setSendError('Нет соединения — дождись переподключения и отправь ещё раз');
+      return;
+    }
     setSending(true);
     try {
       await sendMessage({ type: 'text', text });
@@ -378,6 +411,10 @@ export const ChatPage: React.FC = () => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || sending) return;
+    if (connectionState !== 'connected') {
+      setSendError('Нет соединения — дождись переподключения и отправь ещё раз');
+      return;
+    }
 
     setSending(true);
     try {
@@ -458,6 +495,10 @@ export const ChatPage: React.FC = () => {
     const blob = new Blob(recordedChunksRef.current, { type: actualMimeType });
     recordedChunksRef.current = [];
     if (blob.size === 0) return;
+    if (connectionState !== 'connected') {
+      setSendError('Нет соединения — запись потеряна, дождись переподключения и попробуй снова');
+      return;
+    }
 
     setSending(true);
     try {
@@ -632,16 +673,20 @@ export const ChatPage: React.FC = () => {
   };
 
   return (
-    <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`}>
-      <div className="chat-header">
+    <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`} style={{ paddingTop: headerPadTop }}>
+      <div className="chat-header" ref={headerRef}>
         <h1>Чат</h1>
         {connectionState !== 'connected' && (
           <span className="chat-connection-hint">
             {connectionState === 'connecting' ? 'Подключение…' : 'Нет соединения — переподключаемся…'}
           </span>
         )}
+        {/* Пока просто заглушка в шапке — действия нет, экран настроек ещё не сделан. */}
+        <button className="chat-header-icon-button chat-settings-button" title="Настройки">
+          <Settings size={18} />
+        </button>
         <button
-          className="chat-theme-toggle"
+          className="chat-header-icon-button"
           onClick={toggleTheme}
           title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
         >
@@ -663,10 +708,10 @@ export const ChatPage: React.FC = () => {
 
       {pinnedMessage && (
         <div className="chat-pinned-banner" onClick={() => scrollToMessage(pinnedMessage.seq)}>
-          <Pin size={14} />
+          <Pin size={18} />
           <span className="chat-pinned-text">{previewForMessage(pinnedMessage)}</span>
           <button onClick={(e) => { e.stopPropagation(); unpinMessage(); }} title="Открепить">
-            <X size={14} />
+            <X size={20} />
           </button>
         </div>
       )}
@@ -703,7 +748,7 @@ export const ChatPage: React.FC = () => {
         </div>
       )}
 
-      <div className="chat-messages" ref={listRef} onScroll={handleScroll}>
+      <div className="chat-messages" ref={listRef} onScroll={handleScroll} style={{ paddingBottom: messagesPadBottom }}>
         {loadingHistory && messages.length === 0 && (
           <div className="chat-loading"><Loader2 size={20} className="spin" /></div>
         )}
@@ -732,7 +777,7 @@ export const ChatPage: React.FC = () => {
                 onClick={() => setPinTarget(message)}
                 title={isPinned ? 'Открепить' : 'Закрепить'}
               >
-                <Pin size={14} />
+                <Pin size={18} />
               </button>
             );
 
@@ -819,7 +864,7 @@ export const ChatPage: React.FC = () => {
           onClick={scrollToBottom}
           title="К последним сообщениям"
         >
-          <ChevronDown size={20} />
+          <ChevronDown size={38} />
         </button>
       )}
 
@@ -889,10 +934,11 @@ export const ChatPage: React.FC = () => {
               удержания. */}
           {!recording && inputText.trim() ? (
             <button
-              className="chat-send-button"
+              className={`chat-send-button ${connectionState !== 'connected' ? 'chat-send-button--offline' : ''}`}
               disabled={sending}
               onMouseDown={(e) => e.preventDefault()}
               onClick={handleSendText}
+              title={connectionState !== 'connected' ? 'Нет соединения — отправка не пройдёт' : undefined}
             >
               {sending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
             </button>
