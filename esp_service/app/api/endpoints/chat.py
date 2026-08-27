@@ -205,6 +205,22 @@ async def get_media(
     return StreamingResponse(stream, status_code=status_code, media_type=content_type, headers=headers)
 
 
+@router.post("/push/test")
+async def test_push():
+    """Тестовая отправка пуша самому себе через Swagger, без авторизации —
+    временный ручной инструмент для проверки доставки перед раскаткой на всех.
+    Всегда шлёт админу (see ChatService.send_test_push), убрать/закрыть
+    авторизацией после того, как push подтверждён живьём."""
+    worker = BackgroundWorker.get_instance()
+    try:
+        sent = await worker.chat_service.send_test_push()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return {"sent": sent}
+
+
 @router.get("/push/vapid_public_key", response_model=VapidPublicKeyResponse)
 async def get_vapid_public_key():
     """Публичный VAPID-ключ для подписки через PushManager на клиенте."""

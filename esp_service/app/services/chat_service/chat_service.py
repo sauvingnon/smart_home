@@ -225,6 +225,27 @@ class ChatService:
                 # ошибка здесь (например, VAPID не настроен) не должна ронять send_message.
                 logger.warning(f"⚠️ Не удалось отправить push юзеру {uid}: {e}")
 
+    async def send_test_push(self) -> bool:
+        """Тестовый пуш админу напрямую, в обход сообщений/подписчиков —
+        специально хардкожено на role=='admin', а не на произвольный user_id,
+        чтобы даже без авторизации на эндпоинте (сделано намеренно, для
+        прогона через Swagger) им нельзя было дёрнуть пуш кому-то ещё."""
+        users = await self.cache.list_users()
+        admin = next((u for u in users if u["role"] == "admin"), None)
+        if not admin:
+            raise ValueError("Админ не найден")
+
+        subscription = await self.cache.get_push_subscription(admin["user_id"])
+        if not subscription:
+            raise ValueError("Админ ещё не подписан на push (нажми колокольчик в чате)")
+
+        payload = {"title": "Тестовый пуш", "body": "Если видишь это — доставка работает", "url": "/chat"}
+        try:
+            return await send_push(subscription, payload)
+        except PushSubscriptionExpired:
+            await self.cache.delete_push_subscription(admin["user_id"])
+            raise ValueError("Подписка протухла и удалена, подпишись заново")
+
     async def pin_message(self, seq: int) -> dict:
         """Закрепить сообщение — один слот на весь чат, новое закрепление
         тихо заменяет старое (как в личках Telegram, не стек)."""
