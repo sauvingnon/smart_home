@@ -311,10 +311,24 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Раньше история просто щёлкала на экран разом, как только приходил ответ
+   сервера — AnimatePresence initial={false} у пузырей ниже намеренно не
+   анимирует их по одному (иначе при каждом возврате на /chat 50 сообщений
+   заново бы "выезжали"), так что первая загрузка ничем не смягчалась.
+   Вместо анимации по каждому пузырю — один плавный фейд всей ленты целиком,
+   один раз за сессию (historyReady в ChatContext не сбрасывается обратно).
+   Скролл-к-низу (см. ChatPage.tsx) успевает отработать, пока opacity ещё 0 —
+   так что фейд-ин показывает уже готовую, докрученную ленту. */
 .chat-messages-content {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.chat-messages-content--ready {
+  opacity: 1;
 }
 
 /* fixed относительно экрана, а не относительно .chat-messages — иначе

@@ -26,6 +26,7 @@ interface ChatContextType {
   unreadCount: number;
   connectionState: ConnectionState;
   loadingHistory: boolean;
+  historyReady: boolean;
   hasMoreHistory: boolean;
   loadMoreHistory: () => Promise<void>;
   sendMessage: (payload: Parameters<typeof apiClient.sendChatMessage>[0]) => Promise<void>;
@@ -66,6 +67,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [unreadCount, setUnreadCount] = useState(0);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [loadingHistory, setLoadingHistory] = useState(false);
+  // Once true, stays true for the whole app session — историю грузим один
+  // раз на уровне App-шелла (см. комментарий у ChatProvider), а не заново
+  // при каждом заходе на /chat, так что и плавное появление ленты должно
+  // случиться один раз, а не при каждом возврате на страницу.
+  const [historyReady, setHistoryReady] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [toast, setToast] = useState<ChatMessage | null>(null);
   const [pinnedMessage, setPinnedMessage] = useState<ChatMessage | null>(null);
@@ -107,7 +113,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {
         // WS всё равно досинхронизирует новые события
       } finally {
-        if (!cancelled) setLoadingHistory(false);
+        if (!cancelled) {
+          setLoadingHistory(false);
+          setHistoryReady(true);
+        }
       }
     })();
 
@@ -234,6 +243,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unreadCount,
       connectionState,
       loadingHistory,
+      historyReady,
       hasMoreHistory,
       loadMoreHistory,
       sendMessage,

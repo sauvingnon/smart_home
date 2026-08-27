@@ -102,7 +102,7 @@ export const ChatPage: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   const { userId } = useAuth();
   const {
-    messages, pendingUploads, reads, connectionState, loadingHistory, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
+    messages, pendingUploads, reads, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
     pinnedMessage, pinMessage, unpinMessage,
   } = useChat();
 
@@ -693,7 +693,7 @@ export const ChatPage: React.FC = () => {
           <h1>Чат</h1>
           {connectionState !== 'connected' && (
             <span className="chat-connection-hint">
-              {connectionState === 'connecting' ? 'Подключение…' : 'Нет соединения — переподключаемся…'}
+              {connectionState === 'connecting' ? 'Подключение…' : 'Переподключение…'}
             </span>
           )}
           {/* Пока просто заглушка в шапке — действия нет, экран настроек ещё не сделан. */}
@@ -774,7 +774,10 @@ export const ChatPage: React.FC = () => {
           </div>
         )}
 
-        <div className="chat-messages-content" ref={messagesContentRef}>
+        <div
+          className={`chat-messages-content ${historyReady ? 'chat-messages-content--ready' : ''}`}
+          ref={messagesContentRef}
+        >
         <AnimatePresence initial={false}>
           {messages.map((message, idx) => {
             const isMine = message.user_id === userId;
