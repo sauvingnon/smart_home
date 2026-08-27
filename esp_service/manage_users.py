@@ -78,6 +78,7 @@ async def cmd_delete(cache: CacheManager):
 
     revoked = await cache.revoke_all_keys_for_user(user_id)
     await cache.delete_user(user_id)
+    await cache.delete_push_subscription(user_id)
     print(f"✅ Юзер {user['display_name']} удалён, отозвано ключей: {revoked}")
 
 

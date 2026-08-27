@@ -20,6 +20,7 @@ class CacheManager:
         self.redis_url = redis_url
         self.key_prefix = "access_key:"
         self.key_ttl = timedelta(days=180)  # 180 дней жизни ключа
+        self.user_keys_prefix = "user_keys:"  # user_id -> set ключей, для revoke_all_keys_for_user
 
         # Токены для просмотра видео
         self.video_token_prefix = "video_token:"   # token -> video_key
@@ -321,6 +322,7 @@ class CacheManager:
 
         try:
             await self.redis_client.setex(redis_key, self.key_ttl, str(user_id))
+            await self.redis_client.sadd(f"{self.user_keys_prefix}{user_id}", key)
 
             backup = self._load_keys_backup()
             backup[key] = {"user_id": user_id, "expires_at": expires_at}
@@ -548,17 +550,27 @@ class CacheManager:
         return True
 
     async def revoke_all_keys_for_user(self, user_id: int) -> int:
-        """Отзывает все ключи конкретного юзера (по файловому бэкапу — это
-        единственное место с обратным маппингом key -> user_id). Возвращает
-        количество отозванных ключей."""
+        """Отзывает все ключи конкретного юзера. Обратный маппинг user_id -> ключи
+        живёт в Redis (user_keys:{id}) — это авторитетный источник, а не файловый
+        бэкап: если бэкап на диске отстанет или потеряется (запись в него не
+        атомарна с записью ключа в Redis), отзыв по одному только бэкапу тихо
+        пропустит ключ, и удалённый юзер останется с рабочей сессией-призраком.
+        Бэкап всё равно подчищаем заодно — он используется отдельно для
+        restore_keys_from_backup при холодном старте."""
         if not await self._ensure_connection():
             return 0
+        index_key = f"{self.user_keys_prefix}{user_id}"
+        indexed_keys = await self.redis_client.smembers(index_key)
+
         backup = self._load_keys_backup()
-        keys_to_revoke = [k for k, entry in backup.items() if entry.get("user_id") == user_id]
+        backup_keys = {k for k, entry in backup.items() if entry.get("user_id") == user_id}
+
+        keys_to_revoke = set(indexed_keys) | backup_keys
         for key in keys_to_revoke:
             await self.redis_client.delete(f"{self.key_prefix}{key}")
-            del backup[key]
-        if keys_to_revoke:
+            backup.pop(key, None)
+        await self.redis_client.delete(index_key)
+        if backup_keys:
             self._save_keys_backup(backup)
         return len(keys_to_revoke)
 
