@@ -125,12 +125,17 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [userId]);
 
+  const connectionStateRef = useRef<ConnectionState>('connecting');
+  useEffect(() => {
+    connectionStateRef.current = connectionState;
+  }, [connectionState]);
+
   useEffect(() => {
     if (!userId) return;
 
     setConnectionState('connecting');
 
-    apiClient.createChatWebSocket({
+    const wsOptions = {
       onOpen: () => setConnectionState('connected'),
       onEvent: (event: ChatWsEvent) => {
         if (event.type === 'message') {
@@ -161,9 +166,23 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       },
       onError: () => setConnectionState('error'),
       onClose: () => setConnectionState('disconnected'),
-    });
+    };
+
+    apiClient.createChatWebSocket(wsOptions);
+
+    // Телефон разблокировали — не ждём, пока браузер сам заметит мёртвый
+    // сокет (может тянуться долго), а сразу форсируем реконнект.
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && connectionStateRef.current !== 'connected') {
+        apiClient.closeChatWebSocket();
+        setConnectionState('connecting');
+        apiClient.createChatWebSocket(wsOptions);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
       apiClient.closeChatWebSocket();
     };
   }, [userId]);

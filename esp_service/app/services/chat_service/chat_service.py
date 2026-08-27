@@ -88,7 +88,7 @@ class ChatService:
 
             while True:
                 try:
-                    msg = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
+                    msg = await asyncio.wait_for(websocket.receive_text(), timeout=8.0)
                     if msg == "ping":
                         await websocket.send_text("pong")
                 except asyncio.TimeoutError:

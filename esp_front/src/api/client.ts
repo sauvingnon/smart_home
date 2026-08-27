@@ -135,8 +135,6 @@ class ApiClient {
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
 
-    const maxReconnectAttempts = 5;
-
     ws.onopen = () => {
       (ws as any).isManualClose = false;
 
@@ -171,18 +169,18 @@ class ApiClient {
       const isManual = (ws as any).isManualClose;
       if (isManual) return;
 
-      if (attempt < maxReconnectAttempts) {
-        const nextAttempt = attempt + 1;
-        const timer = setTimeout(() => {
-          this.reconnectTimers.delete(cameraId);
-          if (!this.wsConnections.has(cameraId)) {
-            this.createCameraWebSocket(cameraId, options, nextAttempt);
-          }
-        }, 2000 * nextAttempt);
-        this.reconnectTimers.set(cameraId, timer);
-      } else {
-        options.onReconnectExhausted?.();
-      }
+      // Как и у чата — бэкофф с потолком 30с, но без сдачи насовсем: если
+      // телефон был заблокирован дольше, чем хватало 5 попыток (~30с), поток
+      // просто умирал до ручного нажатия "Повторить".
+      const nextAttempt = attempt + 1;
+      const delay = Math.min(2000 * nextAttempt, 30_000);
+      const timer = setTimeout(() => {
+        this.reconnectTimers.delete(cameraId);
+        if (!this.wsConnections.has(cameraId)) {
+          this.createCameraWebSocket(cameraId, options, nextAttempt);
+        }
+      }, delay);
+      this.reconnectTimers.set(cameraId, timer);
     };
 
     this.wsConnections.set(cameraId, ws);

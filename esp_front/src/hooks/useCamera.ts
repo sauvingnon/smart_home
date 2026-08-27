@@ -99,13 +99,6 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
         setConnectionState((prev) => (prev === 'error' ? prev : 'disconnected'));
         setFrameBlob(null);
       },
-      onReconnectExhausted: () => {
-        console.warn(`🚫 Reconnect attempts exhausted for camera ${cameraId}`);
-        settled = true;
-        clearTimeout(connectTimeout);
-        setConnectionState('error');
-        setError('Не удалось восстановить соединение');
-      }
     });
 
     wsRef.current = ws;
@@ -131,6 +124,24 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
     apiClient.closeCameraWebSocket(cameraId);
     setRetryKey((k) => k + 1);
   };
+
+  // Телефон разблокировали — не ждём, пока браузер сам заметит мёртвый
+  // сокет (может тянуться долго), а сразу форсируем реконнект.
+  const connectionStateRef = useRef(connectionState);
+  useEffect(() => {
+    connectionStateRef.current = connectionState;
+  }, [connectionState]);
+
+  useEffect(() => {
+    if (disabled) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && connectionStateRef.current !== 'connected') {
+        reconnect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [disabled, cameraId]);
 
   const setResolution = async (resolution: 'QVGA' | 'VGA' | 'HD') => {
     console.log('🎯 useCamera.setResolution called:', { resolution, cameraId });
