@@ -91,6 +91,10 @@
   border-bottom: 1px solid var(--glass-border);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
+  /* Подстраховка от горизонтального скролла: если что-то внутри всё же не
+     впишется в ширину (см. .chat-header-top ниже), обрежется тут, а не
+     раздует вьюпорт всей страницы. */
+  overflow: hidden;
 }
 
 .chat-page.light .chat-header {
@@ -101,17 +105,29 @@
   display: flex;
   align-items: baseline;
   gap: 12px;
+  min-width: 0;
 }
 
 .chat-header h1 {
   font-size: 22px;
   font-weight: 700;
   margin: 0;
+  flex: 0 0 auto;
 }
 
+/* Без min-width:0 и явного сжатия текстовый span в flex-строке не мог
+   ужаться уже своего содержимого и раздвигал .chat-header-top шире экрана —
+   это и было причиной горизонтального скролла на всей странице (см.
+   overflow-x:hidden в index.css — та же беда, подстраховка на уровне
+   страницы, а это — сама причина). */
 .chat-connection-hint {
   font-size: 12px;
   color: var(--text-tertiary);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-header-icon-button {
@@ -728,6 +744,35 @@
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   box-shadow: var(--glass-shadow);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+/* Пока реально печатают — сплошной белый фон вместо стекла (как в
+   iMessage/Telegram), независимо от темы. :focus-within, а не состояние в
+   JS — срабатывает и уходит вместе с фокусом textarea, без лишних ре-рендеров.
+   Иконки/плейсхолдер/текст переопределяем отдельно ниже — в тёмной теме их
+   цвет (почти белый) иначе стал бы невидимым на белой подложке. */
+.chat-input-row:focus-within {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.chat-input-row:focus-within .chat-text-input {
+  color: #1e293b;
+}
+
+.chat-input-row:focus-within .chat-text-input::placeholder {
+  color: #94a3b8;
+}
+
+.chat-input-row:focus-within .chat-icon-button:not(.recording) {
+  color: #475569;
+}
+
+@media (hover: hover) {
+  .chat-input-row:focus-within .chat-icon-button:not(.recording):hover:not(:disabled) {
+    background: rgba(15, 23, 42, 0.06);
+  }
 }
 
 .chat-icon-button {
