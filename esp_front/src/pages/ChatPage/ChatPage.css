@@ -36,7 +36,8 @@
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(135deg, var(--bg-gradient-from), var(--bg-gradient-to));
+  /* Фон теперь #app-background (position:fixed, вне React-дерева, см.
+     index.html/index.css) — не дублируем его тут. */
   color: var(--text-primary);
   font-family: system-ui, -apple-system, sans-serif;
   /* padding-top реальной высотой .chat-header (см. ChatPage.tsx) — она
@@ -84,8 +85,8 @@
   z-index: 100;
   padding: 16px 20px 8px;
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
   background: var(--glass-bg);
   border-bottom: 1px solid var(--glass-border);
   backdrop-filter: blur(20px) saturate(180%);
@@ -94,6 +95,12 @@
 
 .chat-page.light .chat-header {
   background: rgba(255, 255, 255, 0.55);
+}
+
+.chat-header-top {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .chat-header h1 {
@@ -128,12 +135,9 @@
 }
 
 .chat-push-status {
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 16px 6px;
-  padding: 0 4px;
   font-size: 11px;
   color: var(--text-tertiary);
 }
@@ -294,9 +298,11 @@
 
 /* fixed относительно экрана, а не относительно .chat-messages — иначе
    кнопка ехала вместе с флекс-контейнером ленты и норовила залезть под
-   инпут/навбар. bottom считается в JS от реальной верхней грани
-   .chat-input-bar (см. ChatPage.tsx), которая сама гуляет из-за растущего
-   textarea и скрытия BottomNavBar при фокусе. */
+   инпут/навбар. bottom и размер считаются в JS от реального поля ввода
+   (см. ChatPage.tsx: bottom — от .chat-input-bar, размер — 0.8 высоты
+   .chat-input-row). transition ниже — той же длительности/кривой, что у
+   .chat-input-bar, иначе во время анимации показа/скрытия клавиатуры бар
+   плавно едет 0.2s, а кнопка прыгала бы на новое место мгновенно. */
 .chat-scroll-bottom-btn {
   position: fixed;
   right: 16px;
@@ -304,8 +310,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 76px;
-  height: 76px;
   border: 1px solid var(--glass-border);
   border-radius: 50%;
   background: var(--glass-bg);
@@ -314,6 +318,7 @@
   box-shadow: var(--glass-shadow);
   color: var(--text-primary);
   cursor: pointer;
+  transition: bottom 0.2s ease;
 }
 
 @media (hover: hover) {

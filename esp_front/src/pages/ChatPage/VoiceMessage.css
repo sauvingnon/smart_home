@@ -1,9 +1,9 @@
 .voice-message {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 200px;
-  padding: 2px 0;
+  gap: 10px;
+  min-width: 220px;
+  padding: 4px 0;
 }
 
 .voice-play-button {
@@ -11,8 +11,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 46px;
+  height: 46px;
   border: none;
   border-radius: 50%;
   cursor: pointer;
@@ -34,15 +34,15 @@
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 2px;
-  height: 28px;
+  gap: 3px;
+  height: 36px;
   cursor: pointer;
 }
 
 .voice-bar {
   flex: 1 1 auto;
-  min-width: 2px;
-  max-width: 3px;
+  min-width: 3px;
+  max-width: 4px;
   border-radius: 2px;
   background: var(--text-tertiary);
   opacity: 0.5;
@@ -66,8 +66,8 @@
 
 .voice-duration {
   flex: 0 0 auto;
-  min-width: 32px;
-  font-size: 11px;
+  min-width: 38px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
   text-align: right;

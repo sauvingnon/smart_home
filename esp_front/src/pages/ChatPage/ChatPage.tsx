@@ -126,7 +126,9 @@ export const ChatPage: React.FC = () => {
   const messagesContentRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
+  const inputRowRef = useRef<HTMLDivElement>(null);
   const [scrollBtnBottom, setScrollBtnBottom] = useState(90);
+  const [scrollBtnSize, setScrollBtnSize] = useState(38);
   const [headerPadTop, setHeaderPadTop] = useState(76);
   const [messagesPadBottom, setMessagesPadBottom] = useState(78);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -224,6 +226,18 @@ export const ChatPage: React.FC = () => {
       window.removeEventListener('resize', recalc);
     };
   }, [inputFocused]);
+
+  // Размер кнопки — 0.8 от реальной высоты пилюли поля ввода (а не хардкод),
+  // чтобы она всегда была соразмерна инпуту, а не своей произвольной величиной.
+  useEffect(() => {
+    const row = inputRowRef.current;
+    if (!row) return;
+    const recalc = () => setScrollBtnSize(row.getBoundingClientRect().height * 0.8);
+    recalc();
+    const ro = new ResizeObserver(recalc);
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, []);
 
   // Шапка чата тоже переехала в position: fixed (та же причина, что у
   // инпута), так что и под неё лента с баннерами больше не подстраивается
@@ -675,36 +689,38 @@ export const ChatPage: React.FC = () => {
   return (
     <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`} style={{ paddingTop: headerPadTop }}>
       <div className="chat-header" ref={headerRef}>
-        <h1>Чат</h1>
-        {connectionState !== 'connected' && (
-          <span className="chat-connection-hint">
-            {connectionState === 'connecting' ? 'Подключение…' : 'Нет соединения — переподключаемся…'}
-          </span>
-        )}
-        {/* Пока просто заглушка в шапке — действия нет, экран настроек ещё не сделан. */}
-        <button className="chat-header-icon-button chat-settings-button" title="Настройки">
-          <Settings size={18} />
-        </button>
-        <button
-          className="chat-header-icon-button"
-          onClick={toggleTheme}
-          title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-        >
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
-      </div>
-
-      {pushStatuses.length > 0 && (
-        <div className="chat-push-status">
-          <Bell size={12} />
-          <span>
-            {(() => {
-              const names = pushStatuses.filter((s) => s.subscribed).map((s) => s.display_name);
-              return names.length > 0 ? `Уведомления получат: ${names.join(', ')}` : 'Никто не включил уведомления';
-            })()}
-          </span>
+        <div className="chat-header-top">
+          <h1>Чат</h1>
+          {connectionState !== 'connected' && (
+            <span className="chat-connection-hint">
+              {connectionState === 'connecting' ? 'Подключение…' : 'Нет соединения — переподключаемся…'}
+            </span>
+          )}
+          {/* Пока просто заглушка в шапке — действия нет, экран настроек ещё не сделан. */}
+          <button className="chat-header-icon-button chat-settings-button" title="Настройки">
+            <Settings size={18} />
+          </button>
+          <button
+            className="chat-header-icon-button"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
         </div>
-      )}
+
+        {pushStatuses.length > 0 && (
+          <div className="chat-push-status">
+            <Bell size={12} />
+            <span>
+              {(() => {
+                const names = pushStatuses.filter((s) => s.subscribed).map((s) => s.display_name);
+                return names.length > 0 ? `Уведомления получат: ${names.join(', ')}` : 'Никто не включил уведомления';
+              })()}
+            </span>
+          </div>
+        )}
+      </div>
 
       {pinnedMessage && (
         <div className="chat-pinned-banner" onClick={() => scrollToMessage(pinnedMessage.seq)}>
@@ -860,11 +876,11 @@ export const ChatPage: React.FC = () => {
       {showScrollDown && (
         <button
           className="chat-scroll-bottom-btn"
-          style={{ bottom: scrollBtnBottom }}
+          style={{ bottom: scrollBtnBottom, width: scrollBtnSize, height: scrollBtnSize }}
           onClick={scrollToBottom}
           title="К последним сообщениям"
         >
-          <ChevronDown size={38} />
+          <ChevronDown size={Math.round(scrollBtnSize * 0.5)} />
         </button>
       )}
 
@@ -878,7 +894,7 @@ export const ChatPage: React.FC = () => {
           </div>
         )}
 
-        <div className="chat-input-row">
+        <div className="chat-input-row" ref={inputRowRef}>
           {!recording && (
             <>
               <input

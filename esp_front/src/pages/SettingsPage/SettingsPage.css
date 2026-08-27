@@ -52,7 +52,8 @@
 
 .settings-page {
   min-height: 100vh;
-  background: linear-gradient(135deg, var(--bg-gradient-from), var(--bg-gradient-to));
+  /* Фон теперь #app-background (position:fixed, вне React-дерева, см.
+     index.html/index.css) — не дублируем его тут. */
   color: var(--text-primary);
   position: relative;
   overflow-x: hidden;

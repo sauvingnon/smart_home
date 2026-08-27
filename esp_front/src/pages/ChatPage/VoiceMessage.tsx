@@ -16,6 +16,11 @@ interface VoiceMessageProps {
   mine: boolean;
 }
 
+// Как в Telegram/WhatsApp — играет только одно голосовое одновременно.
+// Модульный синглтон, а не React-контекст, потому что это чисто императивное
+// "останови предыдущее", без надобности где-либо читать это как состояние.
+let activePlayer: { audio: HTMLAudioElement; stop: () => void } | null = null;
+
 // Настоящая амплитудная огибающая (как в Telegram/WhatsApp), не подделка и не
 // анализ спектра — просто пик громкости по срезам семплов. Декодируется через
 // Web Audio API один раз при монтировании, много дешевле, чем кажется: минутный
@@ -89,6 +94,11 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
     };
   }, [src]);
 
+  // objectUrl появляется асинхронно (после fetch), а <audio> рендерится
+  // только когда он уже есть — на самом первом маунте компонента audioRef.current
+  // ещё null, и с пустым [] этот эффект так и не перевешивался бы заново после
+  // того как элемент реально появился в DOM. Отсюда была "тишина" анимации и
+  // залипшая кнопка (ended никогда не срабатывал).
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -102,17 +112,25 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
       setIsPlaying(false);
       setProgress(0);
       setCurrentTime(0);
+      if (activePlayer?.audio === audio) activePlayer = null;
+    };
+    const onPause = () => {
+      setIsPlaying(false);
+      if (activePlayer?.audio === audio) activePlayer = null;
     };
 
     audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('loadedmetadata', onLoaded);
     audio.addEventListener('ended', onEnd);
+    audio.addEventListener('pause', onPause);
     return () => {
       audio.removeEventListener('timeupdate', onTime);
       audio.removeEventListener('loadedmetadata', onLoaded);
       audio.removeEventListener('ended', onEnd);
+      audio.removeEventListener('pause', onPause);
+      if (activePlayer?.audio === audio) activePlayer = null;
     };
-  }, []);
+  }, [objectUrl]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -121,8 +139,14 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
       audio.pause();
       setIsPlaying(false);
     } else {
+      // Останавливаем то, что играло до этого — иначе можно было запустить
+      // сколько угодно голосовых сразу.
+      if (activePlayer && activePlayer.audio !== audio) {
+        activePlayer.stop();
+      }
       audio.play();
       setIsPlaying(true);
+      activePlayer = { audio, stop: () => audio.pause() };
     }
   };
 
@@ -147,7 +171,7 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
         disabled={!objectUrl}
         title={!objectUrl ? 'Загрузка…' : isPlaying ? 'Пауза' : 'Слушать'}
       >
-        {!objectUrl ? <Loader2 size={16} className="spin" /> : isPlaying ? <Pause size={16} /> : <Play size={16} />}
+        {!objectUrl ? <Loader2 size={20} className="spin" /> : isPlaying ? <Pause size={20} /> : <Play size={20} />}
       </button>
       <div className="voice-waveform" onClick={seekTo}>
         {bars.map((p, i) => (

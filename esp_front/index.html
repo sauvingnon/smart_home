@@ -69,6 +69,11 @@
 
   </head>
   <body>
+    <!-- Живёт вне React-дерева нарочно: position:fixed сам по себе уже
+         игнорирует скролл/паддинги body (в т.ч. ту айосовскую багу, когда
+         Safari скроллит body целиком при фокусе поля ввода), так что фону
+         не нужно ни знать про роуты, ни пересоздаваться между страницами. -->
+    <div id="app-background"></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

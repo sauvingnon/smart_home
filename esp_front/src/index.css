@@ -27,6 +27,32 @@ body {
   color: #0f172a;
 }
 
+/* Единый фон на всё приложение — общие токены (страницы дублируют те же
+   значения локально под свои .light/.dark классы, это не трогаем), но тут
+   ещё и завязка на data-theme, который ThemeProvider вешает на <html> —
+   единственная привязка к теме, доступная вне React-дерева странице фона. */
+:root {
+  --bg-gradient-from: #e0f2fe;
+  --bg-gradient-to: #f0f9ff;
+}
+
+:root[data-theme="dark"] {
+  --bg-gradient-from: #0f172a;
+  --bg-gradient-to: #1e1b4b;
+}
+
+/* fixed относительно вьюпорта и вне #root — не едет вместе с контентом ни
+   при скролле страницы, ни при айосовской баге со скроллом body на фокусе
+   поля, и заливает зону под чёлкой/Dynamic Island, потому что inset:0 не
+   ограничен паддингом body сверху (тот паддинг — только для контента). */
+#app-background {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, var(--bg-gradient-from), var(--bg-gradient-to));
+  pointer-events: none;
+  transition: background 0.3s ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
