@@ -1,5 +1,5 @@
 // src/contexts/ThemeContext.tsx
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
 
 type Theme = 'light' | 'dark'
 
@@ -30,21 +30,26 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   }
 
   const [theme, setTheme] = useState<Theme>(getThemeByTime)
+  // Ручное переключение (кнопкой) должно "залипать" — иначе автосмена по
+  // времени суток перетирала бы выбор пользователя в течение минуты.
+  const manualOverrideRef = useRef(false)
 
   // Применяем тему к документу
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
 
-  // Автоматически переключаем тему по времени суток каждую минуту
+  // Автоматически переключаем тему по времени суток каждую минуту, пока юзер
+  // не переключил её вручную в этой сессии.
   useEffect(() => {
     const interval = setInterval(() => {
-      setTheme(getThemeByTime())
+      if (!manualOverrideRef.current) setTheme(getThemeByTime())
     }, 60_000)
     return () => clearInterval(interval)
   }, [])
 
   const toggleTheme = () => {
+    manualOverrideRef.current = true
     setTheme(prev => prev === 'light' ? 'dark' : 'light')
   }
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, ChevronDown } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, ChevronDown, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -99,7 +99,7 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 }
 
 export const ChatPage: React.FC = () => {
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const { userId } = useAuth();
   const {
     messages, pendingUploads, reads, connectionState, loadingHistory, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
@@ -124,6 +124,8 @@ export const ChatPage: React.FC = () => {
 
   const listRef = useRef<HTMLDivElement>(null);
   const messagesContentRef = useRef<HTMLDivElement>(null);
+  const inputBarRef = useRef<HTMLDivElement>(null);
+  const [scrollBtnBottom, setScrollBtnBottom] = useState(90);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const lastSeqRef = useRef<number | null>(null);
@@ -192,6 +194,28 @@ export const ChatPage: React.FC = () => {
   // мимо настоящего низа, если медиа раздвигает список уже после. Пока юзер и так
   // внизу — держим его там же при любом росте контента ленты, а не только по
   // приходу нового сообщения.
+  // Кнопка "вниз" — position: fixed относительно всего экрана (не относительно
+  // ленты сообщений), иначе она едет вместе со скроллом чата и может залезать
+  // под инпут/навбар. Держим её всегда впритык над реальной верхней гранью
+  // .chat-input-bar, чей отступ от низа экрана меняется (растущий textarea,
+  // скрытие BottomNavBar при фокусе, safe-area) — поэтому меряем, а не хардкодим.
+  useEffect(() => {
+    const bar = inputBarRef.current;
+    if (!bar) return;
+    const recalc = () => {
+      const rect = bar.getBoundingClientRect();
+      setScrollBtnBottom(Math.max(0, window.innerHeight - rect.top) + 12);
+    };
+    recalc();
+    const ro = new ResizeObserver(recalc);
+    ro.observe(bar);
+    window.addEventListener('resize', recalc);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', recalc);
+    };
+  }, [inputFocused]);
+
   useEffect(() => {
     const container = listRef.current;
     const content = messagesContentRef.current;
@@ -616,6 +640,13 @@ export const ChatPage: React.FC = () => {
             {connectionState === 'connecting' ? 'Подключение…' : 'Нет соединения — переподключаемся…'}
           </span>
         )}
+        <button
+          className="chat-theme-toggle"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+        >
+          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
       </div>
 
       {pushStatuses.length > 0 && (
@@ -779,14 +810,20 @@ export const ChatPage: React.FC = () => {
         </AnimatePresence>
         </div>
 
-        {showScrollDown && (
-          <button className="chat-scroll-bottom-btn" onClick={scrollToBottom} title="К последним сообщениям">
-            <ChevronDown size={20} />
-          </button>
-        )}
       </div>
 
-      <div className="chat-input-bar">
+      {showScrollDown && (
+        <button
+          className="chat-scroll-bottom-btn"
+          style={{ bottom: scrollBtnBottom }}
+          onClick={scrollToBottom}
+          title="К последним сообщениям"
+        >
+          <ChevronDown size={20} />
+        </button>
+      )}
+
+      <div className="chat-input-bar" ref={inputBarRef}>
         {sendError && (
           <div className="chat-send-error">
             <span>{sendError}</span>
@@ -892,23 +929,42 @@ export const ChatPage: React.FC = () => {
             >
               <X size={22} />
             </button>
+            {/* Свайп вниз закрывает — как на странице "Видео"/большинстве
+                чатов. drag только на самом медиа (не на бэкдропе), чтобы не
+                перехватывать тап по крестику; при отпускании дальше 100px
+                или с достаточной скоростью — закрываем, иначе framer сам
+                пружинит обратно в 0 (dragConstraints top:0 bottom:0). */}
             {lightbox.type === 'image' ? (
-              <img
+              <motion.img
                 src={lightbox.src}
                 alt=""
                 className="chat-lightbox-image"
                 onClick={(e) => e.stopPropagation()}
+                drag="y"
+                dragConstraints={{ top: 0, bottom: 0 }}
+                dragElastic={0.8}
+                onDragEnd={(_, info) => {
+                  if (Math.abs(info.offset.y) > 100 || Math.abs(info.velocity.y) > 500) setLightbox(null);
+                }}
               />
             ) : (
-              <div className="chat-lightbox-video-container" onClick={(e) => e.stopPropagation()}>
+              <motion.div
+                className="chat-lightbox-video-container"
+                onClick={(e) => e.stopPropagation()}
+                drag="y"
+                dragConstraints={{ top: 0, bottom: 0 }}
+                dragElastic={0.8}
+                onDragEnd={(_, info) => {
+                  if (Math.abs(info.offset.y) > 100 || Math.abs(info.velocity.y) > 500) setLightbox(null);
+                }}
+              >
                 <video
                   src={lightbox.src}
                   controls
                   autoPlay
-                  playsInline
                   className="chat-lightbox-video"
                 />
-              </div>
+              </motion.div>
             )}
           </motion.div>
         )}

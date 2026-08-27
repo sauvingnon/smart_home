@@ -341,8 +341,6 @@ class ApiClient {
     const wsUrl = `${getWebSocketBaseUrl()}/chat/ws`;
     const ws = new WebSocket(wsUrl);
 
-    const maxReconnectAttempts = 5;
-
     ws.onopen = () => {
       (ws as any).isManualClose = false;
       options.onOpen?.();
@@ -380,16 +378,19 @@ class ApiClient {
       const isManual = (ws as any).isManualClose;
       if (isManual) return;
 
-      if (attempt < maxReconnectAttempts) {
-        const nextAttempt = attempt + 1;
-        const timer = setTimeout(() => {
-          this.reconnectTimers.delete(wsKey);
-          if (!this.wsConnections.has(wsKey)) {
-            this.createChatWebSocket(options, nextAttempt);
-          }
-        }, 2000 * nextAttempt);
-        this.reconnectTimers.set(wsKey, timer);
-      }
+      // Раньше реконнект сдавался насовсем после 5 попыток (~30с) — если
+      // разрыв (например тот самый код 1005) пришёлся на момент, когда юзер
+      // не смотрит в экран, чат отваливался до перезагрузки страницы.
+      // Теперь бэкофф просто упирается в потолок 30с и пробует бесконечно.
+      const nextAttempt = attempt + 1;
+      const delay = Math.min(2000 * nextAttempt, 30_000);
+      const timer = setTimeout(() => {
+        this.reconnectTimers.delete(wsKey);
+        if (!this.wsConnections.has(wsKey)) {
+          this.createChatWebSocket(options, nextAttempt);
+        }
+      }, delay);
+      this.reconnectTimers.set(wsKey, timer);
     };
 
     this.wsConnections.set(wsKey, ws);

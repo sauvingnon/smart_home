@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause } from 'lucide-react';
+import { Play, Pause, Loader2 } from 'lucide-react';
 import './VoiceMessage.css';
 
 const BAR_COUNT = 40;
@@ -23,21 +23,38 @@ interface VoiceMessageProps {
 export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [peaks, setPeaks] = useState<number[] | null>(null);
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
 
+  // Раньше файл качался дважды: один раз тут ради waveform, второй раз
+  // браузером через <audio src>, когда жмут play — и на время второй
+  // скачки играющая кнопка просто "молчала", будто зависла. Теперь качаем
+  // один раз, строим и waveform, и blob-URL для самого <audio> из тех же
+  // байт — play срабатывает мгновенно, а спиннер честно показывает именно
+  // тот единственный сетевой запрос, который идёт по этому сообщению.
   useEffect(() => {
     let cancelled = false;
+    let createdUrl: string | null = null;
 
     (async () => {
       try {
-        const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         const response = await fetch(src);
+        const contentType = response.headers.get('content-type') || 'audio/webm';
         const arrayBuffer = await response.arrayBuffer();
+
+        if (!cancelled) {
+          createdUrl = URL.createObjectURL(new Blob([arrayBuffer], { type: contentType }));
+          setObjectUrl(createdUrl);
+        }
+
+        const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         const audioCtx = new AudioContextCtor();
-        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        // decodeAudioData нейтрализует переданный буфер — отдаём ему копию,
+        // оригинал ещё нужен для blob-URL выше.
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
         const channel = audioBuffer.getChannelData(0);
         const blockSize = Math.max(1, Math.floor(channel.length / BAR_COUNT));
 
@@ -56,13 +73,19 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
         await audioCtx.close();
         if (!cancelled) setPeaks(rawPeaks.map((p) => Math.max(0.12, p / max)));
       } catch (err) {
-        console.error('Не удалось построить waveform', err);
-        if (!cancelled) setPeaks(Array(BAR_COUNT).fill(0.3));
+        console.error('Не удалось загрузить голосовое', err);
+        if (!cancelled) {
+          setPeaks(Array(BAR_COUNT).fill(0.3));
+          // Без своего blob-URL — пусть браузер попробует стримить исходный
+          // src сам, как и раньше, до этой оптимизации.
+          if (!createdUrl) setObjectUrl(src);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [src]);
 
@@ -93,7 +116,7 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
 
   const togglePlay = () => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !objectUrl) return;
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
@@ -117,9 +140,14 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
 
   return (
     <div className={`voice-message ${mine ? 'mine' : ''}`}>
-      <audio ref={audioRef} src={src} preload="metadata" />
-      <button className="voice-play-button" onClick={togglePlay} title={isPlaying ? 'Пауза' : 'Слушать'}>
-        {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+      {objectUrl && <audio ref={audioRef} src={objectUrl} preload="metadata" />}
+      <button
+        className="voice-play-button"
+        onClick={togglePlay}
+        disabled={!objectUrl}
+        title={!objectUrl ? 'Загрузка…' : isPlaying ? 'Пауза' : 'Слушать'}
+      >
+        {!objectUrl ? <Loader2 size={16} className="spin" /> : isPlaying ? <Pause size={16} /> : <Play size={16} />}
       </button>
       <div className="voice-waveform" onClick={seekTo}>
         {bars.map((p, i) => (

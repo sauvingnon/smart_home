@@ -84,6 +84,21 @@
   color: var(--text-tertiary);
 }
 
+.chat-theme-toggle {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--glass-border);
+  border-radius: 50%;
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
 .chat-push-status {
   flex: 0 0 auto;
   display: flex;
@@ -236,14 +251,15 @@
   gap: 10px;
 }
 
-/* absolute внутри .chat-messages якорится к её собственному clientHeight,
-   а не к прокрученному контенту — поэтому висит у нижнего края видимой
-   области чата независимо от scrollTop, без position:sticky-костылей. */
+/* fixed относительно экрана, а не относительно .chat-messages — иначе
+   кнопка ехала вместе с флекс-контейнером ленты и норовила залезть под
+   инпут/навбар. bottom считается в JS от реальной верхней грани
+   .chat-input-bar (см. ChatPage.tsx), которая сама гуляет из-за растущего
+   textarea и скрытия BottomNavBar при фокусе. */
 .chat-scroll-bottom-btn {
-  position: absolute;
+  position: fixed;
   right: 16px;
-  bottom: 16px;
-  z-index: 20;
+  z-index: 120;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -480,7 +496,7 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  touch-action: pinch-zoom pan-x pan-y;
+  cursor: grab;
 }
 
 /* Как в модалке на странице "Видео" — не голый плеер на подложке, а
@@ -603,6 +619,14 @@
 .chat-input-bar {
   flex: 0 0 auto;
   padding: 10px 16px;
+  background: var(--glass-bg);
+  border-top: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.chat-page.light .chat-input-bar {
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .chat-send-error {
