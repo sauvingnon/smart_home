@@ -174,9 +174,17 @@ async def get_media(
     start, end = 0, None
     if range_header:
         try:
-            parts = range_header.replace("bytes=", "").split("-")
-            start = int(parts[0]) if parts[0] else 0
-            end = int(parts[1]) if len(parts) > 1 and parts[1] else None
+            range_start, _, range_end = range_header.replace("bytes=", "").partition("-")
+            if range_start == "":
+                # Suffix-range ("bytes=-500" — последние 500 байт файла), а не
+                # обычный "от X до Y": без размера объекта его не разрешить,
+                # плоский int(parts[0] or 0) тут молча читал бы файл с начала.
+                suffix_length = int(range_end)
+                size = await s3.get_object_size(media_key)
+                start = max(0, size - suffix_length) if size else 0
+            else:
+                start = int(range_start)
+                end = int(range_end) if range_end else None
         except Exception:
             pass
 

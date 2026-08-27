@@ -509,6 +509,19 @@ class S3Manager:
             logger.warning(f"⚠️ Не удалось получить Content-Type для {key}: {e}")
             return None
 
+    async def get_object_size(self, key: str) -> Optional[int]:
+        """Размер объекта в байтах — нужен, чтобы разрулить suffix-range
+        (bytes=-N) до вызова stream_range, который сам знает размер только
+        после того, как ему уже передали start/end."""
+        if not await self._ensure_connection():
+            return None
+        try:
+            head = await self._client.head_object(Bucket=self.bucket_name, Key=key)
+            return head.get('ContentLength')
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось получить размер объекта {key}: {e}")
+            return None
+
     async def save_chat_media(self, key: str, data: bytes, content_type: str) -> bool:
         """Сохраняет медиафайл чата (фото/голосовое/видео) по готовому ключу.
         В отличие от save_video — без камеро-специфичных метаданных."""
