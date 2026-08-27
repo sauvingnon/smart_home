@@ -1,11 +1,12 @@
 # app/services/chat_service/chat_service.py
 import asyncio
 import json
+import uuid
 from typing import Optional, Set
 
 from fastapi import WebSocket
 
-from app.core.auth import get_auth_manager, COOKIE_NAME
+from app.core.auth import COOKIE_NAME
 from app.services.push_service.push_service import send_push, PushSubscriptionExpired
 from app.services.redis.cache_manager import CacheManager
 from app.services.s3_service.s3_manager import S3Manager
@@ -67,8 +68,13 @@ class ChatService:
                 await websocket.send_text("ERROR: Not authenticated")
                 return
 
-            auth_manager = get_auth_manager()
-            user_id = await auth_manager.verify_access_key(access_key)
+            # Именно cache.validate_key, а не auth_manager.verify_access_key —
+            # тот при невалидном ключе кидает HTTPException вместо None, и ветка
+            # "ERROR: Invalid session" ниже была бы мертва: исключение улетало бы
+            # в except-блок и просто рвало соединение без внятного сообщения,
+            # из-за чего фронт трактовал бы протухшую сессию как обрыв связи и
+            # уходил в бесконечный реконнект.
+            user_id = await self.cache.validate_key(access_key)
             if not user_id:
                 await websocket.send_text("ERROR: Invalid session")
                 return
@@ -109,7 +115,10 @@ class ChatService:
             return
         data = json.dumps(payload, ensure_ascii=False)
         dead = []
-        for ws in self.viewers:
+        # Копия — self.viewers мутируется конкурентно (handle_ws добавляет/убирает
+        # соединения), а await ws.send_text ниже отдаёт управление event loop'у;
+        # итерация напрямую по мутирующемуся множеству роняла бы RuntimeError.
+        for ws in list(self.viewers):
             try:
                 await ws.send_text(data)
             except Exception:
@@ -140,16 +149,18 @@ class ChatService:
         if media_bytes and content_type not in ALLOWED_MEDIA_TYPES:
             raise ValueError(f"Недопустимый тип файла: {content_type}")
 
-        seq = await self.cache.chat_next_seq()
-
+        # Аплоад — до INCR seq: если save_chat_media упадёт, seq не тратится
+        # впустую (ключ файла не зависит от seq, поэтому порядок можно
+        # поменять местами без побочных эффектов).
         media_key = ""
         if media_bytes:
             ext = _EXT_BY_CONTENT_TYPE.get(content_type, "bin")
-            media_key = f"chat/{seq}.{ext}"
+            media_key = f"chat/{uuid.uuid4().hex}.{ext}"
             ok = await self.s3.save_chat_media(media_key, media_bytes, content_type)
             if not ok:
                 raise RuntimeError("Не удалось сохранить медиафайл")
 
+        seq = await self.cache.chat_next_seq()
         return await self._finalize_message(seq, user_id, msg_type, text, media_key, media_kind)
 
     async def share_video(self, user_id: int, video_key: str) -> dict:
@@ -159,10 +170,11 @@ class ChatService:
         чем чат — сообщение останется, но отдача медиа вернёт 404 (фронт
         показывает 'видео недоступно' вместо копирования на каждый шаринг)."""
         seq = await self.cache.chat_next_seq()
-        return await self._finalize_message(seq, user_id, "video", "", video_key, None)
+        return await self._finalize_message(seq, user_id, "video", "", video_key, None, shared=True)
 
     async def _finalize_message(
-        self, seq: int, user_id: int, msg_type: str, text: str, media_key: str, media_kind: Optional[str]
+        self, seq: int, user_id: int, msg_type: str, text: str, media_key: str,
+        media_kind: Optional[str], shared: bool = False,
     ) -> dict:
         user = await self.cache.get_user(user_id)
         message = {
@@ -173,6 +185,10 @@ class ChatService:
             "text": text,
             "media_key": media_key,
             "media_kind": media_kind or "",
+            # shared — сообщение ссылается на чужой объект в S3 (архив камеры), а не
+            # на свою загрузку. Нужно, чтобы trim_old_messages не удалял по истечении
+            # чатового retention файл, которым всё ещё владеет и распоряжается камера.
+            "shared": "1" if shared else "",
             "ts": _get_izhevsk_time().isoformat(),
         }
 
@@ -266,7 +282,9 @@ class ChatService:
             return
         for msg in expired:
             media_key = msg.get("media_key")
-            if media_key:
+            # shared-сообщения ссылаются на объект, которым владеет архив камеры —
+            # его удаление им не принадлежит, об этом заботится retention камеры.
+            if media_key and not msg.get("shared"):
                 try:
                     await self.s3.delete_video(media_key)
                 except Exception as e:
