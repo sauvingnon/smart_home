@@ -314,16 +314,14 @@ class ApiClient {
     onEvent?: (event: ChatWsEvent) => void;
     onError?: (error: any) => void;
     onClose?: (code: number, reason: string) => void;
-  } = {}) {
+  } = {}, attempt: number = 0) {
     const wsKey = 'chat';
     const wsUrl = `${getWebSocketBaseUrl()}/chat/ws`;
     const ws = new WebSocket(wsUrl);
 
-    let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
 
     ws.onopen = () => {
-      reconnectAttempts = 0;
       (ws as any).isManualClose = false;
       options.onOpen?.();
     };
@@ -358,13 +356,17 @@ class ApiClient {
       options.onClose?.(event.code, event.reason);
 
       const isManual = (ws as any).isManualClose;
-      if (!isManual && reconnectAttempts < maxReconnectAttempts) {
-        reconnectAttempts++;
-        setTimeout(() => {
+      if (isManual) return;
+
+      if (attempt < maxReconnectAttempts) {
+        const nextAttempt = attempt + 1;
+        const timer = setTimeout(() => {
+          this.reconnectTimers.delete(wsKey);
           if (!this.wsConnections.has(wsKey)) {
-            this.createChatWebSocket(options);
+            this.createChatWebSocket(options, nextAttempt);
           }
-        }, 2000 * reconnectAttempts);
+        }, 2000 * nextAttempt);
+        this.reconnectTimers.set(wsKey, timer);
       }
     };
 
@@ -373,6 +375,12 @@ class ApiClient {
   }
 
   closeChatWebSocket() {
+    const timer = this.reconnectTimers.get('chat');
+    if (timer) {
+      clearTimeout(timer);
+      this.reconnectTimers.delete('chat');
+    }
+
     const ws = this.wsConnections.get('chat');
     if (ws) {
       ws.onopen = null;
