@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, ChevronDown } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -116,11 +116,14 @@ export const ChatPage: React.FC = () => {
   const [mediaErrors, setMediaErrors] = useState<Set<number>>(new Set());
   const [pinTarget, setPinTarget] = useState<ChatMessage | null>(null);
   const [pushStatuses, setPushStatuses] = useState<PushStatusEntry[]>([]);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+  const nearBottomRef = useRef(true);
 
   const [notifStatus, setNotifStatus] = useState<NotifStatus>('default');
   const [pushBusy, setPushBusy] = useState(false);
 
   const listRef = useRef<HTMLDivElement>(null);
+  const messagesContentRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const lastSeqRef = useRef<number | null>(null);
@@ -158,17 +161,49 @@ export const ChatPage: React.FC = () => {
   }, [inputText]);
 
   // Автоскролл вниз только когда добавилось НОВОЕ сообщение в конец (не при
-  // подгрузке истории вверх — там последний seq не меняется).
+  // подгрузке истории вверх — там последний seq не меняется), и только если
+  // юзер и так был внизу ленты или сообщение своё — иначе, читая историю,
+  // его будет каждый раз выдёргивать к новому сообщению. В обратном случае
+  // просто показываем стрелку "вниз" вместо принудительного скролла.
   useEffect(() => {
     const last = messages[messages.length - 1];
     if (!last) return;
+    // Первое заполнение ленты при заходе на страницу — прыгаем вниз мгновенно
+    // (как Telegram/WhatsApp), а не анимированно: 'smooth' на моментальном же
+    // requestAnimationFrame ещё и гонится с ResizeObserver-коррекцией ниже за
+    // тот же scrollTop, если картинки/видео в ленте досчитывают размеры чуть
+    // позже первого рендера — smooth-анимация может "выиграть" гонку и
+    // застрять на промежуточной, ещё не окончательной высоте контента.
+    const isInitialLoad = lastSeqRef.current === null;
     if (lastSeqRef.current !== last.seq) {
       lastSeqRef.current = last.seq;
-      requestAnimationFrame(() => {
-        listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
-      });
+      if (last.user_id === userId || nearBottomRef.current) {
+        requestAnimationFrame(() => {
+          listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: isInitialLoad ? 'auto' : 'smooth' });
+        });
+      } else {
+        setShowScrollDown(true);
+      }
     }
-  }, [messages]);
+  }, [messages, userId]);
+
+  // Картинки/видео в ленте догружают реальные размеры позже первого рендера —
+  // разовый scrollTo выше целится в scrollHeight на момент вызова и промахивается
+  // мимо настоящего низа, если медиа раздвигает список уже после. Пока юзер и так
+  // внизу — держим его там же при любом росте контента ленты, а не только по
+  // приходу нового сообщения.
+  useEffect(() => {
+    const container = listRef.current;
+    const content = messagesContentRef.current;
+    if (!container || !content) return;
+    const ro = new ResizeObserver(() => {
+      if (nearBottomRef.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
 
 
   // Отпускаем камеру/микрофон при уходе со страницы
@@ -266,9 +301,18 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  const NEAR_BOTTOM_PX = 120;
+
   const handleScroll = useCallback(() => {
     const el = listRef.current;
-    if (!el || el.scrollTop > 80 || !hasMoreHistory || loadingHistory) return;
+    if (!el) return;
+
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const near = distanceFromBottom < NEAR_BOTTOM_PX;
+    nearBottomRef.current = near;
+    setShowScrollDown(!near);
+
+    if (el.scrollTop > 80 || !hasMoreHistory || loadingHistory) return;
     const prevHeight = el.scrollHeight;
     loadMoreHistory().then(() => {
       requestAnimationFrame(() => {
@@ -278,6 +322,12 @@ export const ChatPage: React.FC = () => {
       });
     });
   }, [hasMoreHistory, loadingHistory, loadMoreHistory]);
+
+  const scrollToBottom = () => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
+    nearBottomRef.current = true;
+    setShowScrollDown(false);
+  };
 
   const handleSendText = async () => {
     const text = inputText.trim();
@@ -544,6 +594,7 @@ export const ChatPage: React.FC = () => {
             muted
             playsInline
             preload="metadata"
+            poster={message.thumbnail_key ? apiClient.getChatMediaSrc(message.thumbnail_key) : undefined}
             className="chat-video-thumb-el"
             onError={() => setMediaErrors((prev) => new Set(prev).add(message.seq))}
           />
@@ -631,6 +682,7 @@ export const ChatPage: React.FC = () => {
           </div>
         )}
 
+        <div className="chat-messages-content" ref={messagesContentRef}>
         <AnimatePresence initial={false}>
           {messages.map((message, idx) => {
             const isMine = message.user_id === userId;
@@ -725,6 +777,13 @@ export const ChatPage: React.FC = () => {
             </motion.div>
           ))}
         </AnimatePresence>
+        </div>
+
+        {showScrollDown && (
+          <button className="chat-scroll-bottom-btn" onClick={scrollToBottom} title="К последним сообщениям">
+            <ChevronDown size={20} />
+          </button>
+        )}
       </div>
 
       <div className="chat-input-bar">

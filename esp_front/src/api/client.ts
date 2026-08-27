@@ -18,6 +18,7 @@ export interface ChatMessage {
   text: string;
   media_key: string;
   media_kind: string; // '' | 'circle'
+  thumbnail_key: string; // только у video, расшаренных из архива камеры
   ts: string;
 }
 

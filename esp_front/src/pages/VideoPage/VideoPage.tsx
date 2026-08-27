@@ -513,28 +513,30 @@ export const VideosPage = () => {
                                       <div className="video-card-subtitle">
                                         {formatDate(video.start_time || video.last_modified)}
                                       </div>
-                                      <button
-                                        className="download-btn small"
-                                        onClick={(e) => handleShare(video, e)}
-                                        title="Переслать в чат"
-                                        disabled={sharingId !== null}
-                                      >
-                                        {sharingId === (video.video_id || video.key.split('/').pop()?.replace('.mp4', ''))
-                                          ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ display: 'flex' }}><RefreshCw size={18} /></motion.div>
-                                          : <MessageCircle size={18} />
-                                        }
-                                      </button>
-                                      <button
-                                        className="download-btn small"
-                                        onClick={(e) => handleDownload(video, e)}
-                                        title="Скачать"
-                                        disabled={downloadingId !== null}
-                                      >
-                                        {downloadingId === (video.video_id || video.key.split('/').pop()?.replace('.mp4', ''))
-                                          ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ display: 'flex' }}><RefreshCw size={18} /></motion.div>
-                                          : <Download size={18} />
-                                        }
-                                      </button>
+                                      <div className="video-card-actions">
+                                        <button
+                                          className="download-btn small"
+                                          onClick={(e) => handleShare(video, e)}
+                                          title="Переслать в чат"
+                                          disabled={sharingId !== null}
+                                        >
+                                          {sharingId === (video.video_id || video.key.split('/').pop()?.replace('.mp4', ''))
+                                            ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ display: 'flex' }}><RefreshCw size={18} /></motion.div>
+                                            : <MessageCircle size={18} />
+                                          }
+                                        </button>
+                                        <button
+                                          className="download-btn small"
+                                          onClick={(e) => handleDownload(video, e)}
+                                          title="Скачать"
+                                          disabled={downloadingId !== null}
+                                        >
+                                          {downloadingId === (video.video_id || video.key.split('/').pop()?.replace('.mp4', ''))
+                                            ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ display: 'flex' }}><RefreshCw size={18} /></motion.div>
+                                            : <Download size={18} />
+                                          }
+                                        </button>
+                                      </div>
                                     </div>
                                   </div>
                                 </motion.div>

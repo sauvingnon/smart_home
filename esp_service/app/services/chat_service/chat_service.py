@@ -163,18 +163,20 @@ class ChatService:
         seq = await self.cache.chat_next_seq()
         return await self._finalize_message(seq, user_id, msg_type, text, media_key, media_kind)
 
-    async def share_video(self, user_id: int, video_key: str) -> dict:
+    async def share_video(self, user_id: int, video_key: str, thumbnail_key: str = "") -> dict:
         """Переслать уже существующее видео (из архива камеры) в чат — без
         повторной загрузки байт, просто ссылка на тот же объект в S3. Не
         копируем файл: если камера почистит его по своему retention раньше,
         чем чат — сообщение останется, но отдача медиа вернёт 404 (фронт
         показывает 'видео недоступно' вместо копирования на каждый шаринг)."""
         seq = await self.cache.chat_next_seq()
-        return await self._finalize_message(seq, user_id, "video", "", video_key, None, shared=True)
+        return await self._finalize_message(
+            seq, user_id, "video", "", video_key, None, shared=True, thumbnail_key=thumbnail_key,
+        )
 
     async def _finalize_message(
         self, seq: int, user_id: int, msg_type: str, text: str, media_key: str,
-        media_kind: Optional[str], shared: bool = False,
+        media_kind: Optional[str], shared: bool = False, thumbnail_key: str = "",
     ) -> dict:
         user = await self.cache.get_user(user_id)
         message = {
@@ -185,6 +187,7 @@ class ChatService:
             "text": text,
             "media_key": media_key,
             "media_kind": media_kind or "",
+            "thumbnail_key": thumbnail_key,
             # shared — сообщение ссылается на чужой объект в S3 (архив камеры), а не
             # на свою загрузку. Нужно, чтобы trim_old_messages не удалял по истечении
             # чатового retention файл, которым всё ещё владеет и распоряжается камера.

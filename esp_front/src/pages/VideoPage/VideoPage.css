@@ -542,6 +542,12 @@
   gap: 0.75rem;
 }
 
+.video-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .video-card-content .download-btn.small {
   min-width: 40px;
   min-height: 40px;
