@@ -301,7 +301,7 @@
   }
 }
 
-.chat-pin-sheet-backdrop {
+.chat-action-sheet-backdrop {
   position: fixed;
   inset: 0;
   z-index: 300;
@@ -312,7 +312,7 @@
   padding-bottom: calc(100px + env(safe-area-inset-bottom));
 }
 
-.chat-pin-sheet {
+.chat-action-sheet {
   width: calc(100% - 32px);
   max-width: 400px;
   border-radius: 16px;
@@ -324,7 +324,7 @@
   box-shadow: var(--glass-shadow);
 }
 
-.chat-pin-sheet button {
+.chat-action-sheet button {
   width: 100%;
   display: flex;
   align-items: center;
@@ -335,6 +335,21 @@
   color: var(--text-primary);
   font-size: 15px;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Разделители между пунктами — как в iOS-шите. :not(:first-child), а не
+   border-bottom у всех: у последнего пункта линия висела бы над краем. */
+.chat-action-sheet button:not(:first-child) {
+  border-top: 1px solid var(--glass-border);
+}
+
+.chat-action-sheet button:active {
+  background: rgba(127, 127, 127, 0.15);
+}
+
+.chat-action-sheet button.danger {
+  color: var(--accent-red, #ef4444);
 }
 
 .chat-notif-banner {
@@ -464,15 +479,12 @@
   font-size: 12px;
 }
 
-/* Строка сообщения теперь row-flex — булавка сидит рядом с пузырём в
-   свободном гуттере (см. JSX: у "mine" она первым ребёнком и слева,
-   у чужих — последним и справа), а не только в контекстном меню по
-   долгому тапу. max-width переехал сюда с .chat-bubble-col, чтобы 78%
-   считались от списка сообщений, а не от самого себя. */
+/* Булавки рядом с пузырём больше нет — все действия над сообщением живут в
+   меню по долгому тапу (копировать/закрепить/удалить). Обёртка осталась
+   отдельной от .chat-bubble-col, потому что max-width считается тут: 86% от
+   ширины списка сообщений, а не от самой колонки. */
 .chat-bubble-outer {
   display: flex;
-  align-items: center;
-  gap: 2px;
   max-width: 86%;
 }
 
@@ -489,35 +501,6 @@
 
 .chat-bubble-outer.mine .chat-bubble-col {
   align-items: flex-end;
-}
-
-.chat-pin-toggle {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-tertiary);
-  opacity: 0.45;
-  cursor: pointer;
-  padding: 0;
-  transition: opacity 0.15s ease, color 0.15s ease;
-}
-
-@media (hover: hover) {
-  .chat-pin-toggle:hover {
-    opacity: 1;
-    background: rgba(0, 0, 0, 0.06);
-  }
-}
-
-.chat-pin-toggle.pinned {
-  opacity: 1;
-  color: var(--accent-blue);
 }
 
 .chat-bubble {

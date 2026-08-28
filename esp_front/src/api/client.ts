@@ -47,6 +47,7 @@ export type ChatWsEvent =
   | { type: 'read'; data: { user_id: number; seq: number; at: string } }
   | { type: 'pinned'; data: ChatMessage }
   | { type: 'unpinned'; data: Record<string, never> }
+  | { type: 'deleted'; data: { seq: number } }
   | { type: 'presence'; data: ChatPresenceEntry }
   | { type: 'presence_snapshot'; data: ChatPresenceEntry[] }
   | { type: 'typing'; data: { user_id: number; display_name: string } };
@@ -306,6 +307,10 @@ class ApiClient {
 
   async unpinChatMessage(): Promise<{ status: string }> {
     return this.fetch('/chat/unpin', { method: 'POST' });
+  }
+
+  async deleteChatMessage(seq: number): Promise<{ status: string }> {
+    return this.fetch(`/chat/messages/${seq}`, { method: 'DELETE' });
   }
 
   async getPinnedChatMessage(): Promise<{ message: ChatMessage | null }> {

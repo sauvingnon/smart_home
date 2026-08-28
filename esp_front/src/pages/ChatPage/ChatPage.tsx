@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, ChevronDown, Sun, Moon, Settings, MessageCircle } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, Sun, Moon, Settings, MessageCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -14,6 +14,10 @@ const MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024; // синхронно с CHAT_MEDI
 const MAX_RECORD_MS = 60_000;
 const MIN_RECORD_MS = 2_000; // короче — считаем случайным тапом, не отправляем
 const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "держит", отпустил — отправить сразу
+// Окно на удаление своего сообщения. Синхронно с CHAT_DELETE_WINDOW на бэке —
+// там же оно и проверяется по-настоящему, тут только чтобы не показывать
+// заведомо мёртвый пункт меню.
+const DELETE_WINDOW_MS = 60 * 60 * 1000;
 
 type NotifStatus = 'unsupported' | 'ios-not-installed' | 'default' | 'denied' | 'granted';
 
@@ -126,7 +130,7 @@ export const ChatPage: React.FC = () => {
   const { userId } = useAuth();
   const {
     messages, pendingUploads, reads, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
-    pinnedMessage, pinMessage, unpinMessage, presence, typingUsers, notifyTyping,
+    pinnedMessage, pinMessage, unpinMessage, deleteMessage, presence, typingUsers, notifyTyping,
   } = useChat();
 
   const [inputText, setInputText] = useState('');
@@ -139,7 +143,7 @@ export const ChatPage: React.FC = () => {
   // Клавиатура iOS открыта — убираем нав-бар с экрана (сам он живёт в App.tsx).
   useHideNavBar(inputFocused);
   const [mediaErrors, setMediaErrors] = useState<Set<number>>(new Set());
-  const [pinTarget, setPinTarget] = useState<ChatMessage | null>(null);
+  const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const nearBottomRef = useRef(true);
 
@@ -166,6 +170,7 @@ export const ChatPage: React.FC = () => {
   const lastSeqRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heldLongEnoughRef = useRef(false);
   const pressWasSecondTapRef = useRef(false);
@@ -709,17 +714,23 @@ export const ChatPage: React.FC = () => {
     return `${m}:${s}`;
   };
 
-  // Long-press (и правый клик на десктопе) по пузырю открывает мини-меню
-  // закрепить/открепить — тап-и-клик на медиа внутри пузыря при этом должен
-  // молчать один раз, иначе после долгого нажатия ещё и лайтбокс откроется.
+  // Long-press (и правый клик на десктопе) по пузырю открывает меню действий —
+  // копировать/закрепить/удалить. Тап-и-клик на медиа внутри пузыря при этом
+  // должен молчать один раз, иначе после долгого нажатия ещё и лайтбокс
+  // откроется.
   const LONG_PRESS_MS = 450;
+  // Палец почти всегда чуть ползёт даже при "неподвижном" удержании, так что
+  // порог, а не любое движение. Сдвинулся дальше — это скролл ленты, а не
+  // удержание: меню в таком случае открываться не должно.
+  const LONG_PRESS_SLOP_PX = 10;
 
-  const startLongPress = (message: ChatMessage) => {
+  const startLongPress = (message: ChatMessage, e: React.PointerEvent) => {
     longPressFiredRef.current = false;
+    longPressOriginRef.current = { x: e.clientX, y: e.clientY };
     longPressTimerRef.current = setTimeout(() => {
       longPressFiredRef.current = true;
       navigator.vibrate?.(10);
-      setPinTarget(message);
+      setActionTarget(message);
     }, LONG_PRESS_MS);
   };
 
@@ -727,6 +738,14 @@ export const ChatPage: React.FC = () => {
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
+    }
+  };
+
+  const cancelLongPressIfMoved = (e: React.PointerEvent) => {
+    const origin = longPressOriginRef.current;
+    if (!origin || !longPressTimerRef.current) return;
+    if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > LONG_PRESS_SLOP_PX) {
+      cancelLongPress();
     }
   };
 
@@ -738,6 +757,33 @@ export const ChatPage: React.FC = () => {
       return true;
     }
     return false;
+  };
+
+  // Своё и не старше часа. Ровно то же условие проверяет сервер — тут оно
+  // только чтобы не показывать заведомо мёртвый пункт меню.
+  const canDelete = (message: ChatMessage): boolean =>
+    message.user_id === userId && Date.now() - new Date(message.ts).getTime() < DELETE_WINDOW_MS;
+
+  const copyMessageText = async (message: ChatMessage) => {
+    setActionTarget(null);
+    try {
+      await navigator.clipboard.writeText(message.text);
+      navigator.vibrate?.(10);
+    } catch {
+      // clipboard недоступен (не-https, старый WebKit) — молча не притворяемся,
+      // что скопировали, иначе юзер вставит не то и не поймёт почему.
+      setSendError('Не удалось скопировать — буфер обмена недоступен');
+    }
+  };
+
+  const confirmDelete = async (message: ChatMessage) => {
+    setActionTarget(null);
+    if (!window.confirm('Удалить сообщение у всех? Это необратимо.')) return;
+    try {
+      await deleteMessage(message.seq);
+    } catch (e) {
+      setSendError(errorMessage(e));
+    }
   };
 
   const scrollToMessage = (seq: number) => {
@@ -937,20 +983,6 @@ export const ChatPage: React.FC = () => {
               ? reads.filter((r) => r.user_id !== message.user_id && r.last_read_seq >= message.seq)
               : [];
 
-            const isPinned = pinnedMessage?.seq === message.seq;
-            // Булавка сидит в "пустом" гуттере рядом с пузырём — у своих слева
-            // (пузырь прижат к правому краю), у чужих справа (пузырь у левого
-            // края), поэтому порядок в DOM буквально разный, не просто CSS order.
-            const pinButton = (
-              <button
-                className={`chat-pin-toggle ${isPinned ? 'pinned' : ''}`}
-                onClick={() => setPinTarget(message)}
-                title={isPinned ? 'Открепить' : 'Закрепить'}
-              >
-                <Pin size={18} />
-              </button>
-            );
-
             return (
               <motion.div
                 key={message.seq}
@@ -958,15 +990,16 @@ export const ChatPage: React.FC = () => {
                 className={`chat-bubble-outer ${isMine ? 'mine' : ''}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.92 }}
               >
-                {isMine && pinButton}
                 <div className="chat-bubble-col">
                   <div
                     className="chat-bubble"
-                    onPointerDown={() => startLongPress(message)}
+                    onPointerDown={(e) => startLongPress(message, e)}
+                    onPointerMove={cancelLongPressIfMoved}
                     onPointerUp={cancelLongPress}
                     onPointerCancel={cancelLongPress}
-                    onContextMenu={(e) => { e.preventDefault(); setPinTarget(message); }}
+                    onContextMenu={(e) => { e.preventDefault(); setActionTarget(message); }}
                   >
                     {!isMine && <div className="chat-bubble-author">{message.username}</div>}
                     {message.text && <div className="chat-bubble-text">{message.text}</div>}
@@ -979,7 +1012,6 @@ export const ChatPage: React.FC = () => {
                     </div>
                   )}
                 </div>
-                {!isMine && pinButton}
               </motion.div>
             );
           })}
@@ -1194,25 +1226,32 @@ export const ChatPage: React.FC = () => {
       </AnimatePresence>
 
       <AnimatePresence>
-        {pinTarget && (
+        {actionTarget && (
           <motion.div
-            className="chat-pin-sheet-backdrop"
+            className="chat-action-sheet-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setPinTarget(null)}
+            onClick={() => setActionTarget(null)}
           >
             <motion.div
-              className="chat-pin-sheet"
+              className="chat-action-sheet"
               initial={{ y: 40, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 40, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
             >
+              {actionTarget.text && (
+                <button onClick={() => copyMessageText(actionTarget)}>
+                  <Copy size={18} />
+                  Копировать текст
+                </button>
+              )}
+
               <button
                 onClick={async () => {
-                  const target = pinTarget;
-                  setPinTarget(null);
+                  const target = actionTarget;
+                  setActionTarget(null);
                   if (pinnedMessage?.seq === target.seq) {
                     await unpinMessage();
                   } else {
@@ -1220,9 +1259,16 @@ export const ChatPage: React.FC = () => {
                   }
                 }}
               >
-                {pinnedMessage?.seq === pinTarget.seq ? <PinOff size={18} /> : <Pin size={18} />}
-                {pinnedMessage?.seq === pinTarget.seq ? 'Открепить сообщение' : 'Закрепить сообщение'}
+                {pinnedMessage?.seq === actionTarget.seq ? <PinOff size={18} /> : <Pin size={18} />}
+                {pinnedMessage?.seq === actionTarget.seq ? 'Открепить сообщение' : 'Закрепить сообщение'}
               </button>
+
+              {canDelete(actionTarget) && (
+                <button className="danger" onClick={() => confirmDelete(actionTarget)}>
+                  <Trash2 size={18} />
+                  Удалить у всех
+                </button>
+              )}
             </motion.div>
           </motion.div>
         )}

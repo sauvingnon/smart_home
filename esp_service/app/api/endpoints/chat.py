@@ -151,6 +151,23 @@ async def unpin_message(user_id: int = Depends(get_current_user_id_dep)):
     return {"status": "ok"}
 
 
+@router.delete("/messages/{seq}")
+async def delete_message(
+    seq: int,
+    user_id: int = Depends(get_current_user_id_dep),
+):
+    """Удалить своё сообщение, если ему меньше часа. Автора и срок проверяет
+    сервис — 403, если чужое или просрочено."""
+    worker = BackgroundWorker.get_instance()
+    try:
+        await worker.chat_service.delete_message(user_id, seq)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "ok"}
+
+
 @router.get("/pinned", response_model=PinnedMessageResponse)
 async def get_pinned(user_id: int = Depends(get_current_user_id_dep)):
     """Текущее закреплённое сообщение (или null) — для начальной загрузки,

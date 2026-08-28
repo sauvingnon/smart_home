@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import uuid
+from datetime import datetime, timedelta
 from typing import Optional, Set
 
 from fastapi import WebSocket
@@ -18,6 +19,10 @@ from logger import logger
 # Жёсткие лимиты на аплоад — сервер не транскодирует, кодирование на клиенте,
 # поэтому единственная защита от раздутия Garage/трафика — потолок на размер.
 CHAT_MEDIA_MAX_BYTES = 50 * 1024 * 1024  # 50 МБ
+
+# Окно, в течение которого автор может удалить своё сообщение. Проверяется на
+# сервере, а не только в UI: клиент может соврать, а удаление необратимо.
+CHAT_DELETE_WINDOW = timedelta(hours=1)
 
 ALLOWED_MEDIA_TYPES = {
     "image/jpeg", "image/png", "image/webp",
@@ -378,6 +383,43 @@ class ChatService:
     async def unpin_message(self) -> None:
         await self.cache.clear_chat_pinned()
         await self.broadcast({"type": "unpinned", "data": {}})
+
+    async def delete_message(self, user_id: int, seq: int) -> None:
+        """Удаляет своё сообщение, если ему меньше часа (как в Telegram).
+
+        Оба условия проверяются здесь, а не только в UI: клиент волен прислать
+        любой seq, а удаление необратимо — и сообщения, и медиа в S3.
+        """
+        message = await self.cache.get_chat_message(seq)
+        if not message:
+            raise ValueError("Сообщение не найдено")
+        if message["user_id"] != user_id:
+            raise PermissionError("Можно удалять только свои сообщения")
+        try:
+            ts = datetime.fromisoformat(message["ts"])
+        except (KeyError, ValueError):
+            raise PermissionError("У сообщения некорректное время — удаление запрещено")
+        if _get_izhevsk_time() - ts > CHAT_DELETE_WINDOW:
+            raise PermissionError("Сообщение старше часа — удалить уже нельзя")
+
+        # Порядок тот же, что в trim_old_messages: сначала медиа в S3, потом
+        # запись в Redis, потом снять закрепление, если удалили закреплённое.
+        media_key = message.get("media_key")
+        # shared-сообщения ссылаются на объект архива камеры — он не наш, его
+        # удалением распоряжается retention камеры (см. trim_old_messages).
+        if media_key and not message.get("shared"):
+            try:
+                await self.s3.delete_video(media_key)
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось удалить медиа чата {media_key}: {e}")
+
+        await self.cache.delete_chat_messages([seq])
+
+        if await self.cache.get_chat_pinned_seq() == seq:
+            await self.unpin_message()
+
+        await self.broadcast({"type": "deleted", "data": {"seq": seq}})
+        logger.info(f"🗑 Чат: юзер {user_id} удалил своё сообщение {seq}")
 
     async def get_pinned_message(self) -> Optional[dict]:
         seq = await self.cache.get_chat_pinned_seq()

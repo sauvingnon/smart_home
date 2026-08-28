@@ -39,6 +39,7 @@ interface ChatContextType {
   pinnedMessage: ChatMessage | null;
   pinMessage: (seq: number) => Promise<void>;
   unpinMessage: () => Promise<void>;
+  deleteMessage: (seq: number) => Promise<void>;
   presence: ChatPresenceEntry[];
   typingUsers: TypingUser[];
   notifyTyping: () => void;
@@ -208,6 +209,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setPinnedMessage(event.data);
         } else if (event.type === 'unpinned') {
           setPinnedMessage(null);
+        } else if (event.type === 'deleted') {
+          // Сервер шлёт это всем, включая автора удаления: у него сообщение
+          // уже убрано оптимистично, повторное удаление из массива безвредно.
+          setMessages((prev) => prev.filter((m) => m.seq !== event.data.seq));
         } else if (event.type === 'presence_snapshot') {
           setPresence(event.data);
         } else if (event.type === 'presence') {
@@ -306,6 +311,26 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPinnedMessage(null);
   }, []);
 
+  // Оптимистично убираем пузырь сразу, не дожидаясь WS-события: иначе между
+  // тапом "Удалить" и ответом сервера сообщение продолжает висеть на экране.
+  // Если сервер откажет (чужое или старше часа) — возвращаем на место и даём
+  // ошибку наверх, чтобы UI показал причину.
+  const deleteMessage = useCallback(async (seq: number) => {
+    let removed: ChatMessage | undefined;
+    setMessages((prev) => {
+      removed = prev.find((m) => m.seq === seq);
+      return prev.filter((m) => m.seq !== seq);
+    });
+    try {
+      await apiClient.deleteChatMessage(seq);
+    } catch (e) {
+      if (removed) {
+        setMessages((prev) => [...prev, removed as ChatMessage].sort((a, b) => a.seq - b.seq));
+      }
+      throw e;
+    }
+  }, []);
+
   const sendMessage = useCallback(async (payload: Parameters<typeof apiClient.sendChatMessage>[0]) => {
     // Прогресс-пузырь только для медиа (текст улетает мгновенно, показывать
     // нечего) и только локально у отправителя — превью из локального Blob,
@@ -358,6 +383,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       pinnedMessage,
       pinMessage,
       unpinMessage,
+      deleteMessage,
       presence,
       typingUsers,
       notifyTyping,
