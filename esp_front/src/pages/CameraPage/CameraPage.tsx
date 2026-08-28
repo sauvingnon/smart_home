@@ -359,9 +359,7 @@ export const CameraPage: React.FC = () => {
         {loading ? (
           <div className="loading-container">
           <div className="loading-card glass-card">
-            <div className="progress-bar">
-              <div className="progress-bar-fill" />
-            </div>
+            <div className="spinner" />
             <p className="loading-text">Загрузка камеры...</p>
           </div>
         </div>
