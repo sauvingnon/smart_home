@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, ChevronDown, Sun, Moon, Settings } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, ChevronDown, Sun, Moon, Settings, MessageCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -130,6 +130,12 @@ export const ChatPage: React.FC = () => {
   const [notifStatus, setNotifStatus] = useState<NotifStatus>('default');
   const [pushBusy, setPushBusy] = useState(false);
 
+  // connectionState стартует как 'connecting' при каждом монтировании страницы
+  // (см. ChatContext) — без этой отметки заголовок дёргался бы "Подключение…"
+  // на любое первое открытие чата, а не только на реальный обрыв уже
+  // установленной связи.
+  const hasConnectedOnceRef = useRef(false);
+
   const listRef = useRef<HTMLDivElement>(null);
   const messagesContentRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -159,6 +165,10 @@ export const ChatPage: React.FC = () => {
   useEffect(() => {
     markRead();
   }, [messages.length, markRead]);
+
+  useEffect(() => {
+    if (connectionState === 'connected') hasConnectedOnceRef.current = true;
+  }, [connectionState]);
 
   useEffect(() => {
     if (!sendError) return;
@@ -786,13 +796,22 @@ export const ChatPage: React.FC = () => {
     if (mostRecent) headerSubtitle = `${mostRecent.display_name} был(а) в сети ${formatLastSeen(mostRecent.last_seen!)}`;
   }
 
+  // Реконнект в заголовке показываем только если связь уже была установлена
+  // и потом пропала — на самом первом mount'е connectionState тоже стартует
+  // как 'connecting', и без этой проверки "Чат" на долю секунды дёргался бы
+  // в "Подключение…" при любом обычном открытии страницы.
+  const showReconnectTitle = connectionState !== 'connected' && hasConnectedOnceRef.current;
+
   return (
     <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`} style={{ paddingTop: headerPadTop }}>
       <div className="chat-header" ref={headerRef}>
         <div className="chat-header-card">
           <div className="chat-title">
-            <h1>{connectionState !== 'connected' ? (connectionState === 'connecting' ? 'Подключение…' : 'Переподключение…') : 'Чат'}</h1>
-            {connectionState === 'connected' && headerSubtitle ? (
+            <div className="chat-title-row">
+              <MessageCircle size={24} className="title-icon" />
+              <h1>{showReconnectTitle ? (connectionState === 'connecting' ? 'Подключение…' : 'Переподключение…') : 'Чат'}</h1>
+            </div>
+            {!showReconnectTitle && headerSubtitle ? (
               <span className={`chat-connection-hint ${othersTyping.length > 0 ? 'chat-connection-hint--typing' : ''}`}>
                 {headerSubtitle}
               </span>

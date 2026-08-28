@@ -125,6 +125,20 @@
   min-width: 0;
 }
 
+/* Просто ряд иконка+текст, без своей плашки — та же история, что с шапкой
+   и пином выше: подложки тут не нужно, даже прозрачной обёртки. */
+.chat-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.chat-title-row .title-icon {
+  color: var(--accent-sky);
+  flex: 0 0 auto;
+}
+
 .chat-title h1 {
   font-size: 1.5rem;
   font-weight: 700;
