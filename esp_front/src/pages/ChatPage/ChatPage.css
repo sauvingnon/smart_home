@@ -829,7 +829,7 @@
   color: #1e293b;
 }
 
-.chat-input-row:focus-within .chat-text-input::placeholder {
+.chat-input-row:focus-within .chat-text-input:empty::before {
   color: #94a3b8;
 }
 
@@ -871,21 +871,30 @@
 .chat-text-input {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 20px;
   border: none;
   outline: none;
-  resize: none;
   background: transparent;
   color: var(--text-primary);
   font-family: inherit;
   font-size: 15px;
   line-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
   max-height: 120px;
   overflow-y: auto;
   padding: 6px 4px;
+  cursor: text;
 }
 
-.chat-text-input::placeholder {
+/* contenteditable-у нет ::placeholder — рисуем сами, пока поле реально
+   пустое (:empty ловит его только когда там вообще нет узлов, поэтому
+   .chat-text-input.textContent при отправке чистим через textContent = ''
+   в JS, а не через удаление символов — иначе иногда остаётся пустой <br>). */
+.chat-text-input:empty::before {
+  content: attr(data-placeholder);
   color: var(--text-tertiary);
+  pointer-events: none;
 }
 
 .chat-send-button {

@@ -13,7 +13,6 @@ import './ChatPage.css';
 const MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024; // синхронно с CHAT_MEDIA_MAX_BYTES на бэке
 const MAX_RECORD_MS = 60_000;
 const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "держит", отпустил — отправить сразу
-const MAX_TEXTAREA_HEIGHT = 120; // px, ~5 строк — дальше внутренний скролл
 
 type NotifStatus = 'unsupported' | 'ios-not-installed' | 'default' | 'denied' | 'granted';
 
@@ -141,7 +140,7 @@ export const ChatPage: React.FC = () => {
   const [headerPadTop, setHeaderPadTop] = useState(76);
   const [messagesPadBottom, setMessagesPadBottom] = useState(78);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textInputRef = useRef<HTMLTextAreaElement>(null);
+  const textInputRef = useRef<HTMLDivElement>(null);
   const lastSeqRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
@@ -166,15 +165,6 @@ export const ChatPage: React.FC = () => {
     const timer = setTimeout(() => setSendError(null), 6000);
     return () => clearTimeout(timer);
   }, [sendError]);
-
-  // Авто-рост textarea под содержимое (как в Telegram) — растягиваем до
-  // MAX_TEXTAREA_HEIGHT, дальше собственный скролл внутри поля.
-  useEffect(() => {
-    const el = textInputRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
-  }, [inputText]);
 
   // Автоскролл вниз только когда добавилось НОВОЕ сообщение в конец (не при
   // подгрузке истории вверх — там последний seq не меняется), и только если
@@ -414,6 +404,58 @@ export const ChatPage: React.FC = () => {
     setShowScrollDown(false);
   };
 
+  // Поле ввода — contenteditable div, а не textarea: на iOS textarea/input
+  // всегда тянет за собой системную панель над клавиатурой со стрелками
+  // "предыдущее/следующее поле" (WebKit строит её по фокусируемым элементам
+  // страницы), а до contenteditable эта панель не добирается — так же, как в
+  // Telegram Web. Раз это не textarea, содержимое не строка, а DOM (текст +
+  // <br> на переносах) — ниже читаем/пишем его руками вместо value/onChange.
+  const getComposerText = (el: HTMLElement): string => {
+    let text = '';
+    el.childNodes.forEach((node) => {
+      text += node.nodeName === 'BR' ? '\n' : node.textContent ?? '';
+    });
+    return text;
+  };
+
+  // Вставляем чистый текст в позицию курсора как текстовые узлы + <br> на
+  // переносах — без этого браузер на Enter/paste норовит навставлять <div>
+  // на каждую строку или притащить форматирование из буфера обмена.
+  const insertPlainTextAtCaret = (text: string) => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const fragment = document.createDocumentFragment();
+    let lastNode: ChildNode | null = null;
+    text.split('\n').forEach((line, i) => {
+      if (i > 0) lastNode = fragment.appendChild(document.createElement('br'));
+      if (line) lastNode = fragment.appendChild(document.createTextNode(line));
+    });
+    range.insertNode(fragment);
+    if (lastNode) {
+      const newRange = document.createRange();
+      newRange.setStartAfter(lastNode);
+      newRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(newRange);
+    }
+  };
+
+  const syncComposerState = () => {
+    const el = textInputRef.current;
+    if (!el) return;
+    const text = getComposerText(el);
+    setInputText(text);
+    if (text.trim()) notifyTyping();
+  };
+
+  const handleComposerPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    insertPlainTextAtCaret(e.clipboardData.getData('text/plain'));
+    syncComposerState();
+  };
+
   const handleSendText = async () => {
     const text = inputText.trim();
     if (!text || sending) return;
@@ -425,6 +467,7 @@ export const ChatPage: React.FC = () => {
     try {
       await sendMessage({ type: 'text', text });
       setInputText('');
+      if (textInputRef.current) textInputRef.current.textContent = '';
       setSendError(null);
     } catch (err) {
       console.error('Не удалось отправить сообщение', err);
@@ -434,6 +477,17 @@ export const ChatPage: React.FC = () => {
       // Поле не disabled во время отправки специально — но фокус браузер всё
       // равно может увести на кнопку отправки, возвращаем его в поле ввода.
       textInputRef.current?.focus();
+    }
+  };
+
+  const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (e.shiftKey) {
+      insertPlainTextAtCaret('\n');
+      syncComposerState();
+    } else {
+      handleSendText();
     }
   };
 
@@ -962,25 +1016,21 @@ export const ChatPage: React.FC = () => {
                 <Paperclip size={20} />
               </button>
 
-              <textarea
+              <div
                 ref={textInputRef}
                 className="chat-text-input"
-                rows={1}
-                value={inputText}
-                onChange={(e) => {
-                  setInputText(e.target.value);
-                  if (e.target.value.trim()) notifyTyping();
-                }}
+                contentEditable
+                suppressContentEditableWarning
+                role="textbox"
+                aria-multiline="true"
+                aria-label="Сообщение"
+                data-placeholder="Сообщение…"
+                onInput={syncComposerState}
                 onFocus={() => setInputFocused(true)}
                 onBlur={() => setInputFocused(false)}
+                onKeyDown={handleComposerKeyDown}
+                onPaste={handleComposerPaste}
                 enterKeyHint="send"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendText();
-                  }
-                }}
-                placeholder="Сообщение…"
               />
             </>
           )}
