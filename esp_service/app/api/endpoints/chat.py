@@ -12,6 +12,7 @@ from app.schemas.chat import (
     MarkReadResponse,
     PinMessageIn,
     PinnedMessageResponse,
+    PresenceResponse,
     PushStatusResponse,
     PushSubscriptionIn,
     ReadReceiptsResponse,
@@ -26,10 +27,19 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 @router.websocket("/ws")
 async def chat_websocket(websocket: WebSocket):
-    """Реалтайм-канал чата (message/read/ping события). Авторизация внутри
-    подключения — тот же паттерн, что у зрительского WS камеры."""
+    """Реалтайм-канал чата (message/read/pinned/presence/typing/ping события).
+    Авторизация внутри подключения — тот же паттерн, что у зрительского WS камеры."""
     worker = BackgroundWorker.get_instance()
     await worker.chat_service.handle_ws(websocket)
+
+
+@router.get("/presence", response_model=PresenceResponse)
+async def get_presence(user_id: int = Depends(get_current_user_id_dep)):
+    """Онлайн/офлайн + last_seen каждого юзера — для начальной отрисовки шапки
+    чата, до того как WS доставит первый presence_snapshot."""
+    worker = BackgroundWorker.get_instance()
+    entries = await worker.chat_service.get_presence_snapshot()
+    return {"entries": entries}
 
 
 @router.post("/messages", response_model=ChatMessageOut)

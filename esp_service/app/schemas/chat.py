@@ -77,3 +77,14 @@ class PushStatusEntry(BaseModel):
 
 class PushStatusResponse(BaseModel):
     statuses: List[PushStatusEntry]
+
+
+class PresenceEntry(BaseModel):
+    user_id: int
+    display_name: str
+    online: bool
+    last_seen: Optional[str] = None
+
+
+class PresenceResponse(BaseModel):
+    entries: List[PresenceEntry]

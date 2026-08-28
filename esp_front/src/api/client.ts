@@ -35,11 +35,21 @@ export interface PushStatusEntry {
   subscribed: boolean;
 }
 
+export interface ChatPresenceEntry {
+  user_id: number;
+  display_name: string;
+  online: boolean;
+  last_seen: string | null;
+}
+
 export type ChatWsEvent =
   | { type: 'message'; data: ChatMessage }
   | { type: 'read'; data: { user_id: number; seq: number; at: string } }
   | { type: 'pinned'; data: ChatMessage }
-  | { type: 'unpinned'; data: Record<string, never> };
+  | { type: 'unpinned'; data: Record<string, never> }
+  | { type: 'presence'; data: ChatPresenceEntry }
+  | { type: 'presence_snapshot'; data: ChatPresenceEntry[] }
+  | { type: 'typing'; data: { user_id: number; display_name: string } };
 
 class ApiClient {
   private wsConnections: Map<string, WebSocket> = new Map();
@@ -306,6 +316,10 @@ class ApiClient {
     return this.fetch('/chat/push/status');
   }
 
+  async getChatPresence(): Promise<{ entries: ChatPresenceEntry[] }> {
+    return this.fetch('/chat/presence');
+  }
+
   // Бэкенд стримит байты сам (как /esp_service/videos/stream) — Garage/S3
   // никогда не выставляется наружу, поэтому это просто URL, а не отдельный
   // запрос за presigned-ссылкой. Cookie-сессия уходит с запросом автоматически
@@ -393,6 +407,15 @@ class ApiClient {
 
     this.wsConnections.set(wsKey, ws);
     return ws;
+  }
+
+  // Индикатор "печатает…" — тем же сырым текстовым фреймом, что и ping/pong,
+  // без обёртки в JSON. Best-effort: если сокет сейчас не открыт, просто молчим.
+  sendChatTyping() {
+    const ws = this.wsConnections.get('chat');
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send('typing');
+    }
   }
 
   closeChatWebSocket() {

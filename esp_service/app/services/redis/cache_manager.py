@@ -742,6 +742,21 @@ class CacheManager:
         last_read_seq = read["last_read_seq"] if read else 0
         return max(0, current - last_read_seq)
 
+    CHAT_LAST_SEEN_PREFIX = "chat:last_seen:"
+
+    async def set_chat_last_seen(self, user_id: int, at: str) -> bool:
+        """Момент, когда юзер последним ушёл из чата (переход онлайн->офлайн,
+        не каждый heartbeat) — для 'был(а) в сети' в шапке."""
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.set(f"{self.CHAT_LAST_SEEN_PREFIX}{user_id}", at)
+        return True
+
+    async def get_chat_last_seen(self, user_id: int) -> Optional[str]:
+        if not await self._ensure_connection():
+            return None
+        return await self.redis_client.get(f"{self.CHAT_LAST_SEEN_PREFIX}{user_id}")
+
     # ───────────────────── WEB PUSH ─────────────────────
     # Одна подписка на юзера (последняя выигрывает) — как и с video_token,
     # усложнять до "подписка на устройство" незачем при 4 юзерах.

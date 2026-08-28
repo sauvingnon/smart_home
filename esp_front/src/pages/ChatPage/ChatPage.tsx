@@ -27,6 +27,15 @@ const isIosNotStandalone = (): boolean => {
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
+const formatLastSeen = (iso: string): string => {
+  const diffMin = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (diffMin < 1) return 'только что';
+  if (diffMin < 60) return `${diffMin} мин назад`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours} ч назад`;
+  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+};
+
 // Пережимаем фото на клиенте перед аплоадом — сервер не транскодирует ничего,
 // вся тяжесть кодирования лежит на клиенте (см. обсуждение с пользователем).
 async function resizeImage(file: File, maxDim = 1600): Promise<Blob> {
@@ -103,7 +112,7 @@ export const ChatPage: React.FC = () => {
   const { userId } = useAuth();
   const {
     messages, pendingUploads, reads, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
-    pinnedMessage, pinMessage, unpinMessage,
+    pinnedMessage, pinMessage, unpinMessage, presence, typingUsers, notifyTyping,
   } = useChat();
 
   const [inputText, setInputText] = useState('');
@@ -693,16 +702,37 @@ export const ChatPage: React.FC = () => {
     return null;
   };
 
+  // Одна строка под заголовком "Чат": печатает > кто в сети > когда был(а) в
+  // сети последний раз — приоритет тот же, что в WhatsApp/Telegram-группах.
+  const othersTyping = typingUsers.filter((t) => t.user_id !== userId);
+  const othersPresence = presence.filter((p) => p.user_id !== userId);
+  const onlineOthers = othersPresence.filter((p) => p.online);
+  let headerSubtitle: string | null = null;
+  if (othersTyping.length > 0) {
+    headerSubtitle = `${othersTyping.map((t) => t.display_name).join(', ')} печатает…`;
+  } else if (onlineOthers.length > 0) {
+    headerSubtitle = `${onlineOthers.map((p) => p.display_name).join(', ')} в сети`;
+  } else {
+    const mostRecent = othersPresence
+      .filter((p) => p.last_seen)
+      .sort((a, b) => new Date(b.last_seen!).getTime() - new Date(a.last_seen!).getTime())[0];
+    if (mostRecent) headerSubtitle = `${mostRecent.display_name} был(а) в сети ${formatLastSeen(mostRecent.last_seen!)}`;
+  }
+
   return (
     <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`} style={{ paddingTop: headerPadTop }}>
       <div className="chat-header" ref={headerRef}>
         <div className="chat-header-top">
           <h1>Чат</h1>
-          {connectionState !== 'connected' && (
+          {connectionState !== 'connected' ? (
             <span className="chat-connection-hint">
               {connectionState === 'connecting' ? 'Подключение…' : 'Переподключение…'}
             </span>
-          )}
+          ) : headerSubtitle ? (
+            <span className={`chat-connection-hint ${othersTyping.length > 0 ? 'chat-connection-hint--typing' : ''}`}>
+              {headerSubtitle}
+            </span>
+          ) : null}
           {/* Пока просто заглушка в шапке — действия нет, экран настроек ещё не сделан. */}
           <button className="chat-header-icon-button chat-settings-button" title="Настройки">
             <Settings size={18} />
@@ -929,7 +959,10 @@ export const ChatPage: React.FC = () => {
                 className="chat-text-input"
                 rows={1}
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={(e) => {
+                  setInputText(e.target.value);
+                  if (e.target.value.trim()) notifyTyping();
+                }}
                 onFocus={() => setInputFocused(true)}
                 onBlur={() => setInputFocused(false)}
                 enterKeyHint="send"

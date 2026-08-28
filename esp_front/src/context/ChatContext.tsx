@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { apiClient } from '../api/client';
-import type { ChatMessage, ChatReadState, ChatWsEvent } from '../api/client';
+import type { ChatMessage, ChatPresenceEntry, ChatReadState, ChatWsEvent } from '../api/client';
 import { useAuth } from './AuthContext';
 import { useTheme } from './ThemeContext';
 import './ChatContext.css';
@@ -17,6 +17,11 @@ export interface PendingUpload {
   type: 'image' | 'audio' | 'video';
   previewUrl: string | null;
   progress: number;
+}
+
+export interface TypingUser {
+  user_id: number;
+  display_name: string;
 }
 
 interface ChatContextType {
@@ -34,6 +39,9 @@ interface ChatContextType {
   pinnedMessage: ChatMessage | null;
   pinMessage: (seq: number) => Promise<void>;
   unpinMessage: () => Promise<void>;
+  presence: ChatPresenceEntry[];
+  typingUsers: TypingUser[];
+  notifyTyping: () => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -46,6 +54,12 @@ const TOAST_DURATION_MS = 4000;
 // залп новых соединений в первую секунду.
 const HISTORY_FETCH_DELAY_MS = 500;
 const WS_CONNECT_DELAY_MS = 700;
+// Сколько держим "печатает…" после последнего typing-события от юзера, если
+// не пришло следующее (сам факт остановки набора сервер не транслирует).
+const TYPING_EXPIRY_MS = 4000;
+// Не чаще, чем раз в столько шлём typing-фрейм при непрерывном наборе —
+// иначе каждое нажатие клавиши было бы отдельным сообщением по WS.
+const TYPING_THROTTLE_MS = 2500;
 
 export const previewForMessage = (message: ChatMessage): string => {
   if (message.text) return message.text;
@@ -81,11 +95,25 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [toast, setToast] = useState<ChatMessage | null>(null);
   const [pinnedMessage, setPinnedMessage] = useState<ChatMessage | null>(null);
+  const [presence, setPresence] = useState<ChatPresenceEntry[]>([]);
+  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
 
   const isOnChatPageRef = useRef(isOnChatPage);
   useEffect(() => {
     isOnChatPageRef.current = isOnChatPage;
   }, [isOnChatPage]);
+
+  // Авто-скрытие "печатает…" — сервер шлёт только сам факт набора, не его
+  // окончание, поэтому таймер сброса живёт на клиенте, по одному на юзера.
+  const typingTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const lastTypingSentRef = useRef(0);
+
+  const notifyTyping = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < TYPING_THROTTLE_MS) return;
+    lastTypingSentRef.current = now;
+    apiClient.sendChatTyping();
+  }, []);
 
   const markRead = useCallback(async () => {
     try {
@@ -123,6 +151,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const pinnedRes = await apiClient.getPinnedChatMessage();
         if (cancelled) return;
         setPinnedMessage(pinnedRes.message);
+
+        const presenceRes = await apiClient.getChatPresence();
+        if (cancelled) return;
+        setPresence(presenceRes.entries);
       } catch {
         // WS всё равно досинхронизирует новые события
       } finally {
@@ -176,6 +208,30 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setPinnedMessage(event.data);
         } else if (event.type === 'unpinned') {
           setPinnedMessage(null);
+        } else if (event.type === 'presence_snapshot') {
+          setPresence(event.data);
+        } else if (event.type === 'presence') {
+          setPresence((prev) => [...prev.filter((p) => p.user_id !== event.data.user_id), event.data]);
+          // Юзер явно объявился онлайн/офлайн — "печатает…" для него больше не актуально.
+          const timers = typingTimersRef.current;
+          const pending = timers.get(event.data.user_id);
+          if (pending) {
+            clearTimeout(pending);
+            timers.delete(event.data.user_id);
+          }
+          setTypingUsers((prev) => prev.filter((t) => t.user_id !== event.data.user_id));
+        } else if (event.type === 'typing') {
+          const { user_id: typingUserId, display_name } = event.data;
+          setTypingUsers((prev) =>
+            prev.some((t) => t.user_id === typingUserId) ? prev : [...prev, { user_id: typingUserId, display_name }]
+          );
+          const timers = typingTimersRef.current;
+          const existing = timers.get(typingUserId);
+          if (existing) clearTimeout(existing);
+          timers.set(typingUserId, setTimeout(() => {
+            setTypingUsers((prev) => prev.filter((t) => t.user_id !== typingUserId));
+            timers.delete(typingUserId);
+          }, TYPING_EXPIRY_MS));
         }
       },
       onError: () => setConnectionState('error'),
@@ -209,10 +265,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
+    const typingTimers = typingTimersRef.current;
     return () => {
       clearTimeout(connectTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       apiClient.closeChatWebSocket();
+      typingTimers.forEach((timer) => clearTimeout(timer));
+      typingTimers.clear();
     };
   }, [userId]);
 
@@ -299,6 +358,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       pinnedMessage,
       pinMessage,
       unpinMessage,
+      presence,
+      typingUsers,
+      notifyTyping,
     }}>
       {children}
       <AnimatePresence>

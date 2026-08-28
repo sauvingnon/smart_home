@@ -57,10 +57,13 @@ class ChatService:
         return {ws.state.user_id for ws in self.viewers if hasattr(ws.state, "user_id")}
 
     async def handle_ws(self, websocket: WebSocket):
-        """Реалтайм-канал чата. Только server→client (message/read/ping) — отправка
-        сообщений и read-отметки идут через REST, WS тут как у зрителя камеры."""
+        """Реалтайм-канал чата. Client→server: 'ping' (health-check) и 'typing'
+        (индикатор набора, ретранслируется остальным). Server→client: message/
+        read/pinned/unpinned/presence/presence_snapshot/typing/ping. Отправка
+        сообщений и read-отметки по-прежнему идут через REST."""
         await websocket.accept()
         added = False
+        user_id: Optional[int] = None
 
         try:
             access_key = websocket.cookies.get(COOKIE_NAME)
@@ -82,15 +85,27 @@ class ChatService:
             websocket.state.user_id = user_id
             await websocket.send_text("AUTH_OK")
 
+            # Юзер может держать несколько сокетов разом (второй таб, телефон +
+            # десктоп, реконнект поверх ещё не закрывшегося старого) — presence
+            # шлём только на настоящий переход офлайн→онлайн, а не на каждый
+            # новый сокет того же юзера.
+            was_online = user_id in self.connected_user_ids()
             self.viewers.add(websocket)
             added = True
             logger.info(f"💬 Юзер {user_id} подключился к чату, всего онлайн: {len(self.viewers)}")
+
+            snapshot = await self.get_presence_snapshot()
+            await websocket.send_text(json.dumps({"type": "presence_snapshot", "data": snapshot}, ensure_ascii=False))
+            if not was_online:
+                await self._broadcast_presence(user_id, online=True)
 
             while True:
                 try:
                     msg = await asyncio.wait_for(websocket.receive_text(), timeout=25.0)
                     if msg == "ping":
                         await websocket.send_text("pong")
+                    elif msg == "typing":
+                        await self._broadcast_typing(user_id, websocket)
                 except asyncio.TimeoutError:
                     try:
                         await websocket.send_text("ping")
@@ -104,13 +119,19 @@ class ChatService:
             if added:
                 self.viewers.discard(websocket)
                 logger.info(f"💬 Юзер отключился от чата, осталось онлайн: {len(self.viewers)}")
+                # Тот же юзер может остаться онлайн через другой сокет — офлайн
+                # транслируем только когда реально не осталось ни одного его соединения.
+                if user_id not in self.connected_user_ids():
+                    last_seen = _get_izhevsk_time().isoformat()
+                    await self.cache.set_chat_last_seen(user_id, last_seen)
+                    await self._broadcast_presence(user_id, online=False, last_seen=last_seen)
             try:
                 await websocket.close()
             except Exception:
                 pass
 
-    async def broadcast(self, payload: dict):
-        """Рассылка JSON-события всем подключённым к чату."""
+    async def broadcast(self, payload: dict, exclude: Optional[WebSocket] = None):
+        """Рассылка JSON-события всем подключённым к чату (кроме exclude, если задан)."""
         if not self.viewers:
             return
         data = json.dumps(payload, ensure_ascii=False)
@@ -119,12 +140,52 @@ class ChatService:
         # соединения), а await ws.send_text ниже отдаёт управление event loop'у;
         # итерация напрямую по мутирующемуся множеству роняла бы RuntimeError.
         for ws in list(self.viewers):
+            if ws is exclude:
+                continue
             try:
                 await ws.send_text(data)
             except Exception:
                 dead.append(ws)
         for ws in dead:
             self.viewers.discard(ws)
+
+    async def get_presence_snapshot(self) -> list:
+        """Онлайн/офлайн + last_seen по каждому юзеру — уходит новому сокету сразу
+        после подключения, до того как первое presence-событие могло бы что-то
+        поменять, и отдельно по REST для начальной отрисовки шапки чата."""
+        users = await self.cache.list_users()
+        online_ids = self.connected_user_ids()
+        snapshot = []
+        for u in users:
+            uid = u["user_id"]
+            online = uid in online_ids
+            last_seen = None if online else await self.cache.get_chat_last_seen(uid)
+            snapshot.append({
+                "user_id": uid,
+                "display_name": u["display_name"],
+                "online": online,
+                "last_seen": last_seen,
+            })
+        return snapshot
+
+    async def _broadcast_presence(self, user_id: int, online: bool, last_seen: Optional[str] = None):
+        user = await self.cache.get_user(user_id)
+        await self.broadcast({
+            "type": "presence",
+            "data": {
+                "user_id": user_id,
+                "display_name": user["display_name"] if user else str(user_id),
+                "online": online,
+                "last_seen": last_seen,
+            },
+        })
+
+    async def _broadcast_typing(self, user_id: int, sender_ws: WebSocket):
+        user = await self.cache.get_user(user_id)
+        await self.broadcast(
+            {"type": "typing", "data": {"user_id": user_id, "display_name": user["display_name"] if user else str(user_id)}},
+            exclude=sender_ws,
+        )
 
     async def send_message(
         self,
