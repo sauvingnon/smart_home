@@ -155,7 +155,18 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
       // правда отработал.
       await audio.play();
       setIsPlaying(true);
-      activePlayer = { audio, stop: () => audio.pause() };
+      activePlayer = {
+        audio,
+        // currentTime = 0 (не только pause) — как в Telegram/WhatsApp: если
+        // переключились на другое голосовое, недослушанное сбрасывается в
+        // начало, а не просто замирает на середине. 'timeupdate' от смены
+        // currentTime сам докатит progress/currentTime state вниз до 0 через
+        // уже существующий onTime-обработчик.
+        stop: () => {
+          audio.pause();
+          audio.currentTime = 0;
+        },
+      };
     } catch (err) {
       console.error('Не удалось воспроизвести голосовое', err);
       setIsPlaying(false);
