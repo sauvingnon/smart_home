@@ -209,7 +209,7 @@ class VideoService:
             # Держим соединение
             while True:
                 try:
-                    msg = await asyncio.wait_for(websocket.receive_text(), timeout=8.0)
+                    msg = await asyncio.wait_for(websocket.receive_text(), timeout=25.0)
                     if msg == "ping":
                         await websocket.send_text("pong")
                 except asyncio.TimeoutError:

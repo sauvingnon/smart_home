@@ -98,17 +98,27 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (async () => {
       setLoadingHistory(true);
       try {
-        const [historyRes, unreadRes, readsRes, pinnedRes] = await Promise.all([
-          apiClient.getChatMessages(),
-          apiClient.getChatUnreadCount(),
-          apiClient.getChatReadStates(),
-          apiClient.getPinnedChatMessage(),
-        ]);
+        // Раньше все 4 запроса улетали через Promise.all одновременно — вместе
+        // с остальными фетчами на старте приложения (погода, статистика,
+        // даунтайм) это давало залп из ~7 параллельных соединений в первую
+        // же секунду, что на слабом сервере выглядит как флуд для anti-DDoS
+        // хостера. Последовательные await растягивают это по времени почти
+        // без потери в ощущаемой скорости загрузки.
+        const historyRes = await apiClient.getChatMessages();
         if (cancelled) return;
         setMessages(historyRes.messages);
         setHasMoreHistory(historyRes.messages.length >= HISTORY_PAGE_SIZE);
+
+        const unreadRes = await apiClient.getChatUnreadCount();
+        if (cancelled) return;
         setUnreadCount(unreadRes.unread_count);
+
+        const readsRes = await apiClient.getChatReadStates();
+        if (cancelled) return;
         setReads(readsRes.reads);
+
+        const pinnedRes = await apiClient.getPinnedChatMessage();
+        if (cancelled) return;
         setPinnedMessage(pinnedRes.message);
       } catch {
         // WS всё равно досинхронизирует новые события
@@ -171,9 +181,18 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     apiClient.createChatWebSocket(wsOptions);
 
     // Телефон разблокировали — не ждём, пока браузер сам заметит мёртвый
-    // сокет (может тянуться долго), а сразу форсируем реконнект.
+    // сокет (может тянуться долго), а сразу форсируем реконнект. Дебаунс —
+    // чтобы серия visibilitychange (быстрое переключение между табами/аппами)
+    // не долбила сервер новыми соединениями поверх уже идущего реконнекта.
+    let lastForceReconnect = 0;
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && connectionStateRef.current !== 'connected') {
+      const now = Date.now();
+      if (
+        document.visibilityState === 'visible' &&
+        connectionStateRef.current !== 'connected' &&
+        now - lastForceReconnect > 5000
+      ) {
+        lastForceReconnect = now;
         apiClient.closeChatWebSocket();
         setConnectionState('connecting');
         apiClient.createChatWebSocket(wsOptions);

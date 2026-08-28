@@ -200,10 +200,16 @@ export default function HomePage() {
   };
   
   useEffect(() => {
-    fetchData();
-    fetchWeather();
-    if (isAdmin) fetchLoginStats();
-    fetchDowntime();
+    // Раньше все запросы улетали одним залпом в маунт — вместе с чатом это
+    // давало ~7 параллельных соединений в первую секунду холодного старта,
+    // что похоже на флуд для anti-DDoS слабого сервера. Разносим по времени.
+    const timers = [
+      setTimeout(fetchData, 0),
+      setTimeout(fetchWeather, 150),
+      setTimeout(fetchDowntime, 300),
+    ];
+    if (isAdmin) timers.push(setTimeout(fetchLoginStats, 450));
+    return () => timers.forEach(clearTimeout);
   }, [isAdmin])
 
   return (

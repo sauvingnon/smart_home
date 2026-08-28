@@ -126,7 +126,9 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
   };
 
   // Телефон разблокировали — не ждём, пока браузер сам заметит мёртвый
-  // сокет (может тянуться долго), а сразу форсируем реконнект.
+  // сокет (может тянуться долго), а сразу форсируем реконнект. Дебаунс —
+  // чтобы серия visibilitychange (быстрое переключение между табами/аппами)
+  // не долбила сервер новыми соединениями поверх уже идущего реконнекта.
   const connectionStateRef = useRef(connectionState);
   useEffect(() => {
     connectionStateRef.current = connectionState;
@@ -134,8 +136,15 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
 
   useEffect(() => {
     if (disabled) return;
+    let lastForceReconnect = 0;
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && connectionStateRef.current !== 'connected') {
+      const now = Date.now();
+      if (
+        document.visibilityState === 'visible' &&
+        connectionStateRef.current !== 'connected' &&
+        now - lastForceReconnect > 5000
+      ) {
+        lastForceReconnect = now;
         reconnect();
       }
     };
