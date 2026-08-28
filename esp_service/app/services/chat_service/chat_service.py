@@ -1,6 +1,8 @@
 # app/services/chat_service/chat_service.py
 import asyncio
 import json
+import os
+import tempfile
 import uuid
 from typing import Optional, Set
 
@@ -15,7 +17,7 @@ from logger import logger
 
 # Жёсткие лимиты на аплоад — сервер не транскодирует, кодирование на клиенте,
 # поэтому единственная защита от раздутия Garage/трафика — потолок на размер.
-CHAT_MEDIA_MAX_BYTES = 25 * 1024 * 1024  # 25 МБ
+CHAT_MEDIA_MAX_BYTES = 50 * 1024 * 1024  # 50 МБ
 
 ALLOWED_MEDIA_TYPES = {
     "image/jpeg", "image/png", "image/webp",
@@ -214,15 +216,68 @@ class ChatService:
         # впустую (ключ файла не зависит от seq, поэтому порядок можно
         # поменять местами без побочных эффектов).
         media_key = ""
+        thumbnail_key = ""
         if media_bytes:
             ext = _EXT_BY_CONTENT_TYPE.get(content_type, "bin")
             media_key = f"chat/{uuid.uuid4().hex}.{ext}"
             ok = await self.s3.save_chat_media(media_key, media_bytes, content_type)
             if not ok:
                 raise RuntimeError("Не удалось сохранить медиафайл")
+            if msg_type == "video":
+                thumbnail_key = await self._generate_video_thumbnail(media_bytes, ext)
 
         seq = await self.cache.chat_next_seq()
-        return await self._finalize_message(seq, user_id, msg_type, text, media_key, media_kind)
+        return await self._finalize_message(
+            seq, user_id, msg_type, text, media_key, media_kind, thumbnail_key=thumbnail_key,
+        )
+
+    async def _generate_video_thumbnail(self, video_bytes: bytes, ext: str) -> str:
+        """Первый кадр видео, загруженного юзером с телефона — тот же ffmpeg-подход,
+        что и для записей с камер (video_service.py), но без -ss: кадр нужен
+        с самого начала ролика, а не из середины. Ошибка тут не должна ронять
+        отправку сообщения — просто останется без превью."""
+        temp_video_path = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}").name
+        temp_thumb_path = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
+        try:
+            with open(temp_video_path, "wb") as f:
+                f.write(video_bytes)
+
+            cmd = [
+                "ffmpeg",
+                "-i", temp_video_path,
+                "-vframes", "1",
+                "-q:v", "2",
+                "-y",
+                temp_thumb_path,
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await process.communicate()
+            if process.returncode != 0:
+                logger.warning(f"⚠️ Не удалось сгенерировать превью видео чата: {stderr.decode()}")
+                return ""
+            if not os.path.exists(temp_thumb_path) or os.path.getsize(temp_thumb_path) == 0:
+                return ""
+
+            with open(temp_thumb_path, "rb") as thumb_file:
+                thumb_data = thumb_file.read()
+
+            thumb_key = f"chat/{uuid.uuid4().hex}_thumb.jpg"
+            ok = await self.s3.save_chat_media(thumb_key, thumb_data, "image/jpeg")
+            return thumb_key if ok else ""
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка создания превью видео чата: {e}")
+            return ""
+        finally:
+            for path in (temp_video_path, temp_thumb_path):
+                if path and os.path.exists(path):
+                    try:
+                        os.unlink(path)
+                    except Exception:
+                        pass
 
     async def share_video(self, user_id: int, video_key: str, thumbnail_key: str = "") -> dict:
         """Переслать уже существующее видео (из архива камеры) в чат — без

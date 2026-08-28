@@ -12,7 +12,7 @@ class ChatMessageOut(BaseModel):
     text: str
     media_key: str
     media_kind: str  # "" | "circle" (видео-кружок)
-    thumbnail_key: str = ""  # только у video-сообщений, расшаренных из архива камеры
+    thumbnail_key: str = ""  # только у video-сообщений — первый кадр, свой аплоад или шаринг с камеры
     ts: str
 
 

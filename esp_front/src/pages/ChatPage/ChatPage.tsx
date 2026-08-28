@@ -10,6 +10,7 @@ import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 import { VoiceMessage } from './VoiceMessage';
 import './ChatPage.css';
 
+const MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024; // синхронно с CHAT_MEDIA_MAX_BYTES на бэке
 const MAX_RECORD_MS = 60_000;
 const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "держит", отпустил — отправить сразу
 const MAX_TEXTAREA_HEIGHT = 120; // px, ~5 строк — дальше внутренний скролл
@@ -434,6 +435,10 @@ export const ChatPage: React.FC = () => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || sending) return;
+    if (file.size > MAX_CHAT_FILE_BYTES) {
+      alert(`Файл слишком большой (${(file.size / (1024 * 1024)).toFixed(1)} МБ). Максимум — 50 МБ.`);
+      return;
+    }
     if (connectionState !== 'connected') {
       setSendError('Нет соединения — дождись переподключения и отправь ещё раз');
       return;

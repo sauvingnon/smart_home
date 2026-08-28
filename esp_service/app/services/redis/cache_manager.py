@@ -675,6 +675,7 @@ class CacheManager:
         ("/esp_service/history", "Главная"),
         ("/esp_service/stats", "Главная"),
         ("/esp_service/downtime", "Главная"),
+        ("/chat", "Чат"),
     ]
 
     VISIT_COOLDOWN_SECONDS = 3600  # один "визит" в час, как и раньше — просто теперь у визита есть свои разделы
