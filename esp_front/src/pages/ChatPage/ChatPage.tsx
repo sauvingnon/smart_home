@@ -5,7 +5,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
 import { apiClient } from '../../api/client';
-import type { ChatMessage, PushStatusEntry } from '../../api/client';
+import type { ChatMessage } from '../../api/client';
 import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 import { VoiceMessage } from './VoiceMessage';
 import './ChatPage.css';
@@ -125,7 +125,6 @@ export const ChatPage: React.FC = () => {
   const [inputFocused, setInputFocused] = useState(false);
   const [mediaErrors, setMediaErrors] = useState<Set<number>>(new Set());
   const [pinTarget, setPinTarget] = useState<ChatMessage | null>(null);
-  const [pushStatuses, setPushStatuses] = useState<PushStatusEntry[]>([]);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const nearBottomRef = useRef(true);
 
@@ -237,12 +236,12 @@ export const ChatPage: React.FC = () => {
     };
   }, [inputFocused]);
 
-  // Размер кнопки — 0.8 от реальной высоты пилюли поля ввода (а не хардкод),
+  // Размер кнопки — 1.2 от реальной высоты пилюли поля ввода (а не хардкод),
   // чтобы она всегда была соразмерна инпуту, а не своей произвольной величиной.
   useEffect(() => {
     const row = inputRowRef.current;
     if (!row) return;
-    const recalc = () => setScrollBtnSize(row.getBoundingClientRect().height * 0.8);
+    const recalc = () => setScrollBtnSize(row.getBoundingClientRect().height * 1.2);
     recalc();
     const ro = new ResizeObserver(recalc);
     ro.observe(row);
@@ -330,12 +329,6 @@ export const ChatPage: React.FC = () => {
     }
     setNotifStatus('default');
   }, []);
-
-  // Кто из юзеров сейчас подписан на пуш — рефетчим и при собственной смене
-  // статуса (например, только что включил уведомления сам).
-  useEffect(() => {
-    apiClient.getChatPushStatus().then((res) => setPushStatuses(res.statuses)).catch(() => {});
-  }, [notifStatus]);
 
   // Разрешение уже есть (выдано раньше) — просто синхронизируем подписку с
   // сервером молча, без всякого UI и без повторного системного диалога.
@@ -751,17 +744,6 @@ export const ChatPage: React.FC = () => {
           </button>
         </div>
 
-        {pushStatuses.length > 0 && (
-          <div className="chat-push-status">
-            <Bell size={12} />
-            <span>
-              {(() => {
-                const names = pushStatuses.filter((s) => s.subscribed).map((s) => s.display_name);
-                return names.length > 0 ? `Уведомления получат: ${names.join(', ')}` : 'Никто не включил уведомления';
-              })()}
-            </span>
-          </div>
-        )}
       </div>
 
       {pinnedMessage && (
@@ -918,16 +900,22 @@ export const ChatPage: React.FC = () => {
 
       </div>
 
-      {showScrollDown && (
-        <button
-          className="chat-scroll-bottom-btn"
-          style={{ bottom: scrollBtnBottom, width: scrollBtnSize, height: scrollBtnSize }}
-          onClick={scrollToBottom}
-          title="К последним сообщениям"
-        >
-          <ChevronDown size={Math.round(scrollBtnSize * 0.5)} />
-        </button>
-      )}
+      <AnimatePresence>
+        {showScrollDown && (
+          <motion.button
+            className="chat-scroll-bottom-btn"
+            style={{ bottom: scrollBtnBottom, width: scrollBtnSize, height: scrollBtnSize }}
+            initial={{ x: -48, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -48, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            onClick={scrollToBottom}
+            title="К последним сообщениям"
+          >
+            <ChevronDown size={Math.round(scrollBtnSize * 0.5)} />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <div className="chat-input-bar" ref={inputBarRef}>
         {sendError && (

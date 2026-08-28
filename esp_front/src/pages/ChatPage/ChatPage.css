@@ -8,9 +8,14 @@
   --text-secondary: #334155;
   --text-tertiary: #64748b;
   --accent-blue: #3b82f6;
+  --accent-sky: #0ea5e9;
+  --accent-orange: #f97316;
   --bg-gradient-from: #e0f2fe;
   --bg-gradient-to: #f0f9ff;
-  --bubble-mine-bg: #007aff;
+  /* Раньше плоский iOS-Messages blue (#007aff), никак не связанный с
+     акцентами приложения — теперь тот же sky→blue градиент, что и на
+     кнопках/прогрессе в Settings, чтобы пузырь не торчал чужеродным цветом. */
+  --bubble-mine-bg: linear-gradient(135deg, var(--accent-sky), var(--accent-blue));
   --bubble-mine-text: #ffffff;
   --bubble-other-bg: rgba(255, 255, 255, 0.7);
   --bubble-other-text: #1e293b;
@@ -24,9 +29,11 @@
   --text-secondary: rgba(255, 255, 255, 0.6);
   --text-tertiary: rgba(255, 255, 255, 0.3);
   --accent-blue: #3b82f6;
+  --accent-sky: #0ea5e9;
+  --accent-orange: #fbbf24;
   --bg-gradient-from: #0f172a;
   --bg-gradient-to: #1e1b4b;
-  --bubble-mine-bg: #0a84ff;
+  --bubble-mine-bg: linear-gradient(135deg, var(--accent-sky), var(--accent-blue));
   --bubble-mine-text: #ffffff;
   --bubble-other-bg: rgba(255, 255, 255, 0.08);
   --bubble-other-text: #ffffff;
@@ -118,6 +125,13 @@
   font-weight: 700;
   margin: 0;
   flex: 0 0 auto;
+  /* Тот же градиентный титул, что на Home/Settings (.header-title /
+     .page-title) — раньше был плоским чёрным/белым текстом и выбивался
+     из общего вида приложения. */
+  background: linear-gradient(to right, var(--accent-sky), var(--accent-orange));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* Без min-width:0 и явного сжатия текстовый span в flex-строке не мог
@@ -160,20 +174,14 @@
   margin-left: auto;
 }
 
-.chat-push-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
 .chat-pinned-banner {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 16px 8px;
+  /* margin-top: сама первая под фикс-шапкой — без него прижата к ней
+     впритык, без единого пикселя воздуха. */
+  margin: 10px 16px 8px;
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 14px;
@@ -262,7 +270,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 16px 8px;
+  /* та же прижатая-к-шапке беда, что у .chat-pinned-banner — тут проявляется,
+     когда именно этот баннер первый (пина нет). */
+  margin: 10px 16px 8px;
   padding: 10px 12px;
   border-radius: 14px;
   font-size: 13px;

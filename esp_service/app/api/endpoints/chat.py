@@ -162,7 +162,9 @@ async def get_pinned(user_id: int = Depends(get_current_user_id_dep)):
 
 @router.get("/push/status", response_model=PushStatusResponse)
 async def push_status(user_id: int = Depends(get_current_user_id_dep)):
-    """Кто из юзеров сейчас подписан на Web Push."""
+    """Кто из юзеров сейчас подписан на Web Push.
+    НАДО ПЕРЕИСПОЛЬЗОВАТЬ — баннер "Уведомления получат" убрали из ChatPage,
+    но эндпоинт не мёртвый: понадобится в другом месте, не удалять."""
     worker = BackgroundWorker.get_instance()
     statuses = await worker.chat_service.get_push_status()
     return {"statuses": statuses}
