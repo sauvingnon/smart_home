@@ -238,6 +238,14 @@
   font-size: 14px;
   color: var(--text-primary);
   cursor: pointer;
+  /* Та же стеклянная карточка, что вернули шапке — без своего фона голая
+     полоска текста прямо под сплошной шапкой смотрелась как обломок, будто
+     недоделанный/битый элемент. */
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--glass-shadow);
 }
 
 .chat-pinned-banner svg {
