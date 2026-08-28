@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, Loader2 } from 'lucide-react';
 import './VoiceMessage.css';
 
-const BAR_COUNT = 40;
+const BAR_COUNT = 20;
 
 const formatDuration = (seconds: number) => {
   const total = Math.max(0, Math.floor(seconds));
@@ -132,21 +132,33 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
     };
   }, [objectUrl]);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const audio = audioRef.current;
     if (!audio || !objectUrl) return;
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
-    } else {
-      // Останавливаем то, что играло до этого — иначе можно было запустить
-      // сколько угодно голосовых сразу.
-      if (activePlayer && activePlayer.audio !== audio) {
-        activePlayer.stop();
-      }
-      audio.play();
+      return;
+    }
+    // Останавливаем то, что играло до этого — иначе можно было запустить
+    // сколько угодно голосовых сразу.
+    if (activePlayer && activePlayer.audio !== audio) {
+      activePlayer.stop();
+    }
+    try {
+      // play() — промис. Раньше его не ждали и не ловили: если браузер (чаще
+      // всего на первом тапе, пока WebKit ещё не догрузил/задекодировал
+      // blob) отклонял или откладывал реальный старт звука, кнопка всё
+      // равно тут же переключалась на "играет" — тишина с виду выглядела
+      // как воспроизведение, и только второй тап реально запускал звук.
+      // Теперь isPlaying выставляется только после того, как play() и
+      // правда отработал.
+      await audio.play();
       setIsPlaying(true);
       activePlayer = { audio, stop: () => audio.pause() };
+    } catch (err) {
+      console.error('Не удалось воспроизвести голосовое', err);
+      setIsPlaying(false);
     }
   };
 
@@ -163,8 +175,12 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
   const activeBars = Math.round(progress * bars.length);
 
   return (
-    <div className={`voice-message ${mine ? 'mine' : ''}`}>
-      {objectUrl && <audio ref={audioRef} src={objectUrl} preload="metadata" />}
+    <div className={`voice-message ${mine ? 'mine' : ''} ${!objectUrl ? 'voice-message--loading' : ''}`}>
+      {/* auto, не metadata — байты уже полностью в памяти (тот же fetch, что
+          строил waveform выше), так что "auto" ничего лишнего не качает, а
+          просто даёт WebKit задекодировать их сразу, не откладывая на первый
+          play(). */}
+      {objectUrl && <audio ref={audioRef} src={objectUrl} preload="auto" />}
       <button
         className="voice-play-button"
         onClick={togglePlay}

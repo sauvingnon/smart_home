@@ -41,10 +41,30 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   height: 36px;
   cursor: pointer;
   overflow: hidden;
+}
+
+/* Байты голосового ещё грузятся/декодируются (см. VoiceMessage.tsx) — тихо
+   пульсируем волну, а не просто крутим маленький спиннер на кнопке play,
+   иначе фаза "получаем с сервера" почти незаметна. */
+.voice-message--loading .voice-bar {
+  animation: voice-bar-pulse 1.1s ease-in-out infinite;
+}
+
+.voice-message--loading .voice-bar:nth-child(2n) {
+  animation-delay: 0.15s;
+}
+
+.voice-message--loading .voice-bar:nth-child(3n) {
+  animation-delay: 0.3s;
+}
+
+@keyframes voice-bar-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
 }
 
 .voice-bar {
@@ -55,8 +75,8 @@
      overflow:hidden на .voice-waveform выше — подстраховка, если бары
      всё равно не влезут (просто обрежутся, а не раздуют ленту вбок). */
   min-width: 1px;
-  max-width: 4px;
-  border-radius: 2px;
+  max-width: 7px;
+  border-radius: 3px;
   background: var(--text-tertiary);
   opacity: 0.5;
   transition: background-color 0.15s ease, opacity 0.15s ease;
