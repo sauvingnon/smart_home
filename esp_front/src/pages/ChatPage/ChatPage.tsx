@@ -12,6 +12,7 @@ import './ChatPage.css';
 
 const MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024; // синхронно с CHAT_MEDIA_MAX_BYTES на бэке
 const MAX_RECORD_MS = 60_000;
+const MIN_RECORD_MS = 2_000; // короче — считаем случайным тапом, не отправляем
 const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "держит", отпустил — отправить сразу
 
 type NotifStatus = 'unsupported' | 'ios-not-installed' | 'default' | 'denied' | 'granted';
@@ -22,6 +23,19 @@ const isIosNotStandalone = (): boolean => {
     window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as unknown as { standalone?: boolean }).standalone === true;
   return isIos && !isStandalone;
+};
+
+// Notification.permission читается синхронно — незачем определять статус
+// асинхронно в useEffect после первого рендера: баннер "включить уведомления"
+// на мгновение мелькал бы даже там, где разрешение давно выдано (или
+// платформа вообще не поддерживает пуши), пока эффект не отработает.
+const getInitialNotifStatus = (): NotifStatus => {
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return isIosNotStandalone() ? 'ios-not-installed' : 'unsupported';
+  }
+  if (Notification.permission === 'denied') return 'denied';
+  if (Notification.permission === 'granted') return 'granted';
+  return 'default';
 };
 
 const formatTime = (iso: string) =>
@@ -127,7 +141,7 @@ export const ChatPage: React.FC = () => {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const nearBottomRef = useRef(true);
 
-  const [notifStatus, setNotifStatus] = useState<NotifStatus>('default');
+  const [notifStatus, setNotifStatus] = useState<NotifStatus>(getInitialNotifStatus);
   const [pushBusy, setPushBusy] = useState(false);
 
   // connectionState стартует как 'connecting' при каждом монтировании страницы
@@ -159,6 +173,7 @@ export const ChatPage: React.FC = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const recordStartRef = useRef(0);
   const recordTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -220,11 +235,14 @@ export const ChatPage: React.FC = () => {
       const rect = bar.getBoundingClientRect();
       const clearance = Math.max(0, window.innerHeight - rect.top);
       setScrollBtnBottom(clearance + 12);
-      // .chat-input-bar сам теперь position: fixed (иначе на iOS его вместе
-      // с шапкой утаскивало скроллом body при фокусе поля — см. комментарий
-      // у .chat-header ниже), поэтому лента больше не получает это место
-      // бесплатно через flex-раскладку — резервируем его явно отступом.
-      setMessagesPadBottom(clearance + 8);
+      // Тут НЕ clearance (полное расстояние от бара до низа экрана) — та часть
+      // (84px/safe-area под BottomNavBar) уже вычтена из высоты .chat-messages
+      // самим .chat-page.padding-bottom (см. ChatPage.css), лента получает её
+      // бесплатно через flex-раскладку. Плюс clearance сюда сложило бы этот
+      // отступ ДВАЖДЫ — отсюда и лишняя дыра под последним сообщением. Тут
+      // нужна только собственная высота бара (он оверлеит верхнюю кромку
+      // ленты, а не весь зазор до низа экрана).
+      setMessagesPadBottom(rect.height + 8);
     };
     recalc();
     const ro = new ResizeObserver(recalc);
@@ -318,25 +336,14 @@ export const ChatPage: React.FC = () => {
     };
   }, [lightbox]);
 
-  // Определяем статус один раз при заходе на экран чата. Настоящий системный
-  // диалог (requestNotificationAccess) НЕ дёргаем автоматически — он выдаётся
-  // браузером только один раз, и случайный отказ обратно не открыть через JS.
-  // Баннер — наш собственный UI, ничего не жжёт, можно показывать смело.
+  // Статус баннера уже посчитан синхронно в useState-инициализаторе выше —
+  // тут только досинкать push-подписку с сервером, если разрешение уже было
+  // выдано раньше. Настоящий системный диалог (requestNotificationAccess) НЕ
+  // дёргаем автоматически — он выдаётся браузером только один раз, и
+  // случайный отказ обратно не открыть через JS.
   useEffect(() => {
-    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-      setNotifStatus(isIosNotStandalone() ? 'ios-not-installed' : 'unsupported');
-      return;
-    }
-    if (Notification.permission === 'denied') {
-      setNotifStatus('denied');
-      return;
-    }
-    if (Notification.permission === 'granted') {
-      setNotifStatus('granted');
-      ensureSubscribed();
-      return;
-    }
-    setNotifStatus('default');
+    if (notifStatus === 'granted') ensureSubscribed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Разрешение уже есть (выдано раньше) — просто синхронизируем подписку с
@@ -549,6 +556,7 @@ export const ChatPage: React.FC = () => {
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
+      recordStartRef.current = Date.now();
       setRecording(true);
       setRecordingSeconds(0);
       recordingIntervalRef.current = setInterval(() => {
@@ -595,6 +603,10 @@ export const ChatPage: React.FC = () => {
     const blob = new Blob(recordedChunksRef.current, { type: actualMimeType });
     recordedChunksRef.current = [];
     if (blob.size === 0) return;
+    if (Date.now() - recordStartRef.current < MIN_RECORD_MS) {
+      alert('Голосовое слишком короткое — минимум 2 секунды');
+      return;
+    }
     if (connectionState !== 'connected') {
       setSendError('Нет соединения — запись потеряна, дождись переподключения и попробуй снова');
       return;
