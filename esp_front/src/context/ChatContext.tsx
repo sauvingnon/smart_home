@@ -40,6 +40,12 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 const HISTORY_PAGE_SIZE = 50;
 const TOAST_DURATION_MS = 4000;
+// Разводим холодный старт чата по времени с HomePage (её запросы уже
+// разнесены на 0/150/300/450мс) — иначе история чата и WS-хендшейк всё
+// равно стартуют в тот же тик, что и телеметрия HomePage, и вместе дают
+// залп новых соединений в первую секунду.
+const HISTORY_FETCH_DELAY_MS = 500;
+const WS_CONNECT_DELAY_MS = 700;
 
 export const previewForMessage = (message: ChatMessage): string => {
   if (message.text) return message.text;
@@ -95,15 +101,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!userId) return;
     let cancelled = false;
 
-    (async () => {
+    // Сам по себе этот эффект уже растянут по времени последовательными await,
+    // но он всё равно стартует в тот же тик, что и телеметрия HomePage (t=0) —
+    // задержка перед стартом разводит его с остальным холодным залпом на входе.
+    const startTimer = setTimeout(async () => {
       setLoadingHistory(true);
       try {
-        // Раньше все 4 запроса улетали через Promise.all одновременно — вместе
-        // с остальными фетчами на старте приложения (погода, статистика,
-        // даунтайм) это давало залп из ~7 параллельных соединений в первую
-        // же секунду, что на слабом сервере выглядит как флуд для anti-DDoS
-        // хостера. Последовательные await растягивают это по времени почти
-        // без потери в ощущаемой скорости загрузки.
         const historyRes = await apiClient.getChatMessages();
         if (cancelled) return;
         setMessages(historyRes.messages);
@@ -128,10 +131,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setHistoryReady(true);
         }
       }
-    })();
+    }, HISTORY_FETCH_DELAY_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(startTimer);
     };
   }, [userId]);
 
@@ -178,7 +182,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       onClose: () => setConnectionState('disconnected'),
     };
 
-    apiClient.createChatWebSocket(wsOptions);
+    // Задержка перед первым коннектом — иначе WS-хендшейк стартует в тот же
+    // тик, что и история чата и телеметрия HomePage, и это снова залп новых
+    // соединений на холодном старте.
+    const connectTimer = setTimeout(() => {
+      apiClient.createChatWebSocket(wsOptions);
+    }, WS_CONNECT_DELAY_MS);
 
     // Телефон разблокировали — не ждём, пока браузер сам заметит мёртвый
     // сокет (может тянуться долго), а сразу форсируем реконнект. Дебаунс —
@@ -201,6 +210,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      clearTimeout(connectTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       apiClient.closeChatWebSocket();
     };
