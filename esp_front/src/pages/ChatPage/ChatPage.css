@@ -113,6 +113,14 @@
   justify-content: space-between;
   gap: 12px;
   padding: 1rem 1.5rem;
+  /* Один в один .glass-card на Camera/Video (там это отдельный переиспользуемый
+     класс, тут — то же самое напрямую в карточке шапки). */
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 2rem;
+  box-shadow: var(--glass-shadow);
   /* Подстраховка от горизонтального скролла: если что-то внутри всё же не
      впишется в ширину, обрежется тут, а не раздует вьюпорт всей страницы. */
   overflow: hidden;
