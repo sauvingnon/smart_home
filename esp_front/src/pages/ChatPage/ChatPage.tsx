@@ -909,9 +909,9 @@ export const ChatPage: React.FC = () => {
           <motion.button
             className="chat-scroll-bottom-btn"
             style={{ bottom: scrollBtnBottom, width: scrollBtnSize, height: scrollBtnSize }}
-            initial={{ x: -48, opacity: 0 }}
+            initial={{ x: 48, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -48, opacity: 0 }}
+            exit={{ x: 48, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             onClick={scrollToBottom}
             title="К последним сообщениям"
