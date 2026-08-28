@@ -11,9 +11,11 @@ import { VideosPage } from './pages/VideoPage/VideoPage';
 import { ChatPage } from './pages/ChatPage/ChatPage';
 import { ThemeProvider } from './context/ThemeContext';
 import { ChatProvider } from './context/ChatContext';
+import { NavBarProvider } from './context/NavBarContext';
+import { BottomNavBar } from './components/BottomNavBar/BottomNavBar';
 
 function App() {
-  const { accessKey, isLoading: authLoading, clearAccessKey } = useAuth();
+  const { accessKey, isLoading: authLoading, clearAccessKey, isAdmin } = useAuth();
   const [appReady, setAppReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -80,14 +82,22 @@ function App() {
     <ThemeProvider>
       <Router>
         <ChatProvider>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/camera/:cameraId?" element={<CameraPage />} />
-            <Route path="/videos" element={<VideosPage />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <NavBarProvider>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/camera/:cameraId?" element={<CameraPage />} />
+              <Route path="/videos" element={<VideosPage />} />
+              <Route path="/chat" element={isAdmin ? <ChatPage /> : <Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            {/* Один экземпляр на всё приложение, а не по копии внутри каждой
+                страницы. Раньше при переходе между вкладками весь нав-бар
+                размонтировался и монтировался заново: layoutId-таблетка не
+                имела с чем анимироваться и просто телепортировалась, а слой
+                с backdrop-filter пересоздавался на каждой навигации. */}
+            <BottomNavBar />
+          </NavBarProvider>
         </ChatProvider>
       </Router>
     </ThemeProvider>

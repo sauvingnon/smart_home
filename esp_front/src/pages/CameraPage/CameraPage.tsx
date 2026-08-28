@@ -22,7 +22,6 @@ import { useParams } from 'react-router-dom'
 import type { Resolution } from '../../api/camera';
 import './CameraPage.css'
 import { useTheme } from '../../context/ThemeContext'
-import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 const containerVar = {
   hidden: { opacity: 0 },
@@ -610,7 +609,6 @@ export const CameraPage: React.FC = () => {
         </>
         )}
       </div>
-      <BottomNavBar />
     </div>
     {/* Имитация fullscreen для iOS PWA */}
       {simulatedFullscreen && (

@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
 import { apiClient } from '../../api/client';
 import type { ChatMessage } from '../../api/client';
-import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
+import { useHideNavBar } from '../../context/NavBarContext';
 import { VoiceMessage } from './VoiceMessage';
 import './ChatPage.css';
 
@@ -136,6 +136,8 @@ export const ChatPage: React.FC = () => {
   const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video'; seq?: number } | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
+  // Клавиатура iOS открыта — убираем нав-бар с экрана (сам он живёт в App.tsx).
+  useHideNavBar(inputFocused);
   const [mediaErrors, setMediaErrors] = useState<Set<number>>(new Set());
   const [pinTarget, setPinTarget] = useState<ChatMessage | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -1104,8 +1106,6 @@ export const ChatPage: React.FC = () => {
           )}
         </div>
       </div>
-
-      {!inputFocused && <BottomNavBar />}
 
       <AnimatePresence>
         {lightbox && (

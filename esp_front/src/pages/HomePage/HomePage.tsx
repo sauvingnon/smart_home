@@ -10,7 +10,6 @@ import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import { useTheme } from '../../context/ThemeContext'
 import { useAuth } from '../../context/AuthContext'
-import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 // --- Типы и Хелперы ---
 type WeatherData = {
@@ -789,8 +788,6 @@ export default function HomePage() {
           )
         })()}
       </AnimatePresence>
-
-      <BottomNavBar />
     </div>
   )
 }

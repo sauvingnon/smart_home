@@ -20,7 +20,6 @@ import {
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
-import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar'
 
 interface VideoItem {
     key: string
@@ -627,8 +626,6 @@ export const VideosPage = () => {
           </motion.div>
         )}
       </AnimatePresence>
-
-      <BottomNavBar />
 
       {/* Модальное окно для просмотра видео */}
       {selectedVideo && (

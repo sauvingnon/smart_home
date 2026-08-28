@@ -235,42 +235,6 @@
   overflow: hidden;
 }
 
-.tabs-header {
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.1);
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.tab-button {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border: none;
-  border-radius: 1rem;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-weight: 500;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.tab-button:hover {
-  color: var(--text-secondary);
-  background: var(--glass-bg);
-}
-
-.tab-button.active {
-  background: var(--glass-bg);
-  color: var(--accent-sky);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
 .tabs-content {
   padding: 1.5rem;
   min-height: 400px;
@@ -768,23 +732,6 @@
     gap: 0.5rem;
   }
 
-  .tabs-header {
-    flex-wrap: wrap;
-  }
-
-  .tab-button {
-    flex: 1 0 calc(50% - 0.25rem);
-  }
-
-  .tab-button span {
-    display: none;
-  }
-
-  .tab-button svg {
-    width: 1.25rem;
-    height: 1.25rem;
-  }
-
   .schedule-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -880,7 +827,9 @@
 
 .tab-button-tile {
   padding: 1rem 0.5rem;
-  background: var(--glass-bg);
+  /* background-color, а не шорткат background: иначе градиент активной плитки
+     ниже сбрасывал бы цвет в transparent, и анимировать было бы нечего. */
+  background-color: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: 1.5rem;
   backdrop-filter: blur(8px);
@@ -892,22 +841,42 @@
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Свойства перечислены явно, не all. Под all в переход попадал box-shadow
+     (внешняя тень активной плитки) — он не композитится на GPU, то есть плитка
+     со своим backdrop-filter перерисовывается каждый кадр перехода. Тень теперь
+     переключается мгновенно, а плавность несут цвет, рамка и пружина масштаба.
+     transform тут НЕ трогаем: им управляет framer-motion инлайном (см. TSX). */
+  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: var(--glass-shadow);
   cursor: pointer;
   width: 100%;
+  /* Грид-элементы по умолчанию min-width:auto и отказываются сжиматься уже
+     своего содержимого: длинное «ВЕНТИЛЯТОР» раздувало колонку шире 1fr и
+     ломало всю строку плиток вбок. С min-width:0 колонка держит 1fr, а с
+     текстом разбирается overflow-wrap ниже. */
+  min-width: 0;
+  /* Убираем синюю вспышку подсветки при тапе в iOS WebKit — своя анимация
+     нажатия уже есть (whileTap). */
+  -webkit-tap-highlight-color: transparent;
 }
 
-.tab-button-tile:hover {
-  background: var(--glass-bg);
-  border-color: var(--accent-sky);
-  transform: translateY(-2px);
+/* Только для мыши. Без этого на iOS :hover залипает после тапа и держится до
+   касания в другом месте — только что нажатая плитка остаётся подсвеченной и
+   читается как вторая «активная». */
+@media (hover: hover) {
+  .tab-button-tile:hover {
+    border-color: var(--accent-sky);
+  }
 }
 
 .tab-button-tile.active {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(249, 115, 22, 0.15));
+  /* background-image поверх background-color: градиенты в transition не
+     интерполируются в принципе, поэтому он появляется сразу, а плавность даёт
+     подложка-цвет и рамка. */
+  background-image: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(249, 115, 22, 0.15));
   border-color: var(--accent-sky);
-  transform: scale(1.02);
   box-shadow: 0 8px 24px rgba(14, 165, 233, 0.2);
   color: var(--accent-sky);
 }
@@ -928,6 +897,11 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  text-align: center;
+  /* Подстраховка: «Вентилятор» — одно слово без пробелов, а перенос по
+     умолчанию бывает только по пробелу, поэтому без этого оно не переносилось,
+     а вылезало за пределы плитки поверх соседних. */
+  overflow-wrap: anywhere;
 }
 
 /* Адаптивность для мобильных */
@@ -947,8 +921,15 @@
     height: 1.25rem;
   }
 
+  /* На 375px под подпись остаётся ~62px. «ВЕНТИЛЯТОР» капсом с трекингом — это
+     ~70px, то есть гарантированный вылет или перенос в две строки, от которого
+     тянется вся строка плиток. Строчными без трекинга — ~57px, помещается.
+     Ради одного слова ломать раскладку в два ряда на всех айфонах не хочется:
+     четыре вкладки в ряд — это и есть нужный паттерн для телефона. */
   .tab-button-tile span {
     font-size: 0.6875rem;
+    text-transform: none;
+    letter-spacing: 0;
   }
 }
 

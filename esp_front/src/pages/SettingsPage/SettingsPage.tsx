@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
@@ -8,7 +8,6 @@ import { apiClient } from '../../api/client'
 import './SettingsPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { useAuth } from '../../context/AuthContext'
-import { BottomNavBar } from '../../components/BottomNavBar/BottomNavBar';
 
 type Settings = {
   displayMode: number
@@ -211,16 +210,6 @@ const ToggleSwitch = ({ checked, onChange, color = 'blue' }: any) => {
   )
 }
 
-const containerVar = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
-}
-
-const itemVar = {
-  hidden: { y: 20, opacity: 0 },
-  visible: { y: 0, opacity: 1 }
-}
-
 export default function SettingsPage() {
   const { theme } = useTheme()
   const { clearAccessKey } = useAuth()
@@ -232,6 +221,18 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<{ greenhouse: string; toilet: string } | null>(null)
+  const tilesRef = useRef<HTMLDivElement>(null)
+
+  // Панели вкладок сильно разной высоты («Расписание» — пять секций, «Вентилятор»
+  // — две). Прокрутившись вниз по длинной и переключившись на короткую, юзер
+  // оказывался за пределами нового контента: браузер прижимал скролл, и экран
+  // выглядел полупустым. Возвращаем к плиткам — но только если их уже не видно,
+  // иначе дёргали бы страницу на ровном месте (в том числе на первом рендере).
+  useEffect(() => {
+    const tiles = tilesRef.current
+    if (!tiles || tiles.getBoundingClientRect().top >= 0) return
+    tiles.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [activeTab])
 
   useEffect(() => {
     let mounted = true
@@ -336,7 +337,6 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-        <BottomNavBar />
       </div>
     )
   }
@@ -364,7 +364,6 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-        <BottomNavBar />
       </div>
     )
   }
@@ -407,16 +406,6 @@ export default function SettingsPage() {
           </motion.button>
         </motion.div>
 
-        
-        {loading ? (
-          <div className="loading-container">
-            <div className="loading-card glass-card">
-              <div className="spinner" />
-              <p className="loading-text">Загрузка настроек...</p>
-            </div>
-          </div>
-        ) : (
-          <>
         {/* Уведомление об успехе */}
         <AnimatePresence>
           {showSuccess && (
@@ -433,15 +422,27 @@ export default function SettingsPage() {
         </AnimatePresence>
 
         {/* Табы - Карточки-плитки */}
-        <div className="tabs-header-tiles">
+        <div className="tabs-header-tiles" ref={tilesRef} role="tablist">
           {tabs.map(tab => {
             const Icon = tab.icon
+            const isActive = activeTab === tab.id
             return (
               <motion.button
                 key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`tabpanel-${tab.id}`}
+                id={`tab-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
-                className={`tab-button-tile ${activeTab === tab.id ? 'active' : ''}`}
-                whileHover={{ scale: 1.02 }}
+                className={`tab-button-tile ${isActive ? 'active' : ''}`}
+                // Масштаб активной плитки задаётся здесь, а не в CSS. framer-motion
+                // пишет transform инлайном, а инлайн всегда перебивает таблицу
+                // стилей: правило .active { transform: scale(1.02) } работало
+                // ровно до первого касания, после чего motion выставлял свой
+                // scale(1) и увеличение активной плитки пропадало навсегда.
+                animate={{ scale: isActive ? 1.02 : 1 }}
+                whileHover={{ y: -2 }}
                 whileTap={{ scale: 0.98 }}
                 transition={{ type: "spring", stiffness: 400, damping: 17 }}
               >
@@ -452,13 +453,26 @@ export default function SettingsPage() {
           })}
         </div>
 
-          {/* Контент табов */}
-          <motion.div 
+          {/* Контент табов.
+              AnimatePresence обязателен: key={activeTab} пересоздаёт панель на
+              каждой смене вкладки, и без него старая пропадала в том же кадре,
+              где новая ещё на opacity:0 — виден пустой кадр, а контент потом
+              выпрыгивает. mode="wait" даёт старой доиграть исчезновение.
+              initial={false} — на первом рендере страницы контент показывается
+              сразу, без лишнего проявления поверх анимации шапки.
+              Длительности короткие (0.12 + 0.18): переключение вкладки должно
+              ощущаться мгновенным, а не «анимированным». */}
+          <AnimatePresence mode="wait" initial={false}>
+          <motion.div
             className="tabs-content"
-            variants={containerVar}
-            initial="hidden"
-            animate="visible"
             key={activeTab}
+            role="tabpanel"
+            id={`tabpanel-${activeTab}`}
+            aria-labelledby={`tab-${activeTab}`}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, transition: { duration: 0.12 } }}
+            transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
           >
 
             {/* Расписание */}
@@ -930,10 +944,8 @@ export default function SettingsPage() {
             )}
 
           </motion.div>
-          </>
-        )}
+          </AnimatePresence>
         </div>
-        <BottomNavBar />
       </div>
 
   )

@@ -7,17 +7,27 @@
   display: flex;
   justify-content: space-around;
   align-items: center;
-  padding: 10px 16px 28px;
   z-index: 100;
-  
+
+  /* Две строки подряд — это не опечатка, а фолбэк: браузер без env() не
+     распарсит вторую и оставит первую. Раньше отступ под жестовую полосу
+     доклеивался блоком @supports полутора сотнями строк ниже и выигрывал
+     только за счёт порядка в файле при равной специфичности — то есть стоило
+     подвинуть блоки, и отступ на айфонах молча поменялся бы. Значение то же,
+     что и было: 20px + вырез. */
+  padding: 10px 16px 28px;
+  padding: 10px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+
   /* Liquid Glass эффект */
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  
+
   /* Тень как у iOS */
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
 
+  /* Плавный переход при смене темы */
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 /* Светлая тема - iOS Light */
@@ -39,7 +49,11 @@
   align-items: center;
   gap: 4px;
   text-decoration: none;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Перечисляем свойства явно, не all: под all сюда попадали padding и
+     background, а их анимация — перерасчёт раскладки/перерисовка каждый кадр
+     поверх backdrop-filter нав-бара. */
+  transition: color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   padding: 8px 12px;
   border-radius: 24px;
   position: relative;
@@ -88,7 +102,7 @@
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.3px;
-  transition: all 0.2s ease;
+  transition: color 0.2s ease;
 }
 
 /* Светлая тема - цвета */
@@ -142,8 +156,9 @@
 @media (max-width: 480px) {
   .bottom-nav {
     padding: 8px 12px 24px;
+    padding: 8px 12px calc(20px + env(safe-area-inset-bottom, 0px));
   }
-  
+
   .nav-icon {
     font-size: 20px;
   }
@@ -157,18 +172,11 @@
   }
 }
 
-/* Для iPhone с notch (дополнительный отступ) */
-@supports (padding-bottom: env(safe-area-inset-bottom)) {
-  .bottom-nav {
-    padding-bottom: calc(20px + env(safe-area-inset-bottom));
-  }
-}
-
-/* Эффект "прилипания" при скролле */
-.bottom-nav {
-  will-change: transform;
-  transform: translateZ(0);
-  backface-visibility: hidden;
+/* Скрыт (фокус поля ввода в чате — клавиатура iOS). display:none, а не
+   размонтирование в React: компонент один на всё приложение, и его пересоздание
+   ломало бы layoutId-анимацию таблетки. */
+.bottom-nav.hidden {
+  display: none;
 }
 
 /* Плавающая таблетка под активным табом */
@@ -191,9 +199,4 @@
 
 .bottom-nav.dark .nav-pill {
   background: rgba(10, 132, 255, 0.12);
-}
-
-/* Плавный переход при смене темы */
-.bottom-nav {
-  transition: background 0.3s ease, border-color 0.3s ease;
 }
