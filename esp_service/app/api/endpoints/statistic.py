@@ -1,4 +1,5 @@
 # api/routes/esp_service.py
+import asyncio
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 from app.core.worker import BackgroundWorker
@@ -67,6 +68,54 @@ async def get_stats_endpoint(
     worker = BackgroundWorker.get_instance()
     stats = await worker.storage.get_stats(hours, worker.device_id)
     return stats
+
+
+async def _none():
+    return None
+
+
+@router.get("/home_bootstrap")
+async def get_home_bootstrap_endpoint(
+    user_id: int = Depends(get_current_user_id_dep)
+):
+    """
+    Telemetry + погода + даунтайм + (для админа) статистика входов — одним
+    запросом вместо четырёх. HomePage раньше стреляла ими по отдельности на
+    каждом маунте, и вместе с чатом это давало залп новых соединений на
+    холодном старте PWA, что хостер с его anti-DDoS воспринимал как флуд.
+    """
+    worker = BackgroundWorker.get_instance()
+    auth = get_auth_manager()
+    is_admin = await auth.is_admin(user_id)
+
+    device_ids = [
+        worker.device_id,
+        worker.sensor_id,
+        worker.toilet_id,
+        CAMERA_ID,
+        "server",
+    ]
+
+    results = await asyncio.gather(
+        worker.get_current_general_status(),
+        worker.get_weather(),
+        worker.cache.get_downtime_stats(device_ids, 7),
+        worker.cache.get_visit_stats(exclude_user_id=user_id, days=7) if is_admin else _none(),
+        return_exceptions=True,
+    )
+    status, weather, downtime, login_stats = (
+        None if isinstance(r, Exception) else r for r in results
+    )
+
+    if downtime and CAMERA_ID in downtime:
+        downtime[CAMERA_ID]["name"] = "Камера"
+
+    return {
+        "status": status,
+        "weather": weather,
+        "downtime": downtime,
+        "login_stats": login_stats,
+    }
 
 
 @router.get("/downtime")

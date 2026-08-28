@@ -147,22 +147,6 @@ export default function HomePage() {
     } catch {}
   }
 
-  const fetchLoginStats = async () => {
-    try {
-      const res = await apiClient.fetchRaw('/esp_service/login_stats')
-      if (res.status === 200) {
-        setVisitStats(await res.json())
-      }
-    } catch {}
-  }
-
-  const fetchDowntime = async () => {
-    try {
-      const res = await apiClient.fetch('/esp_service/downtime')
-      setDowntimeStats(res)
-    } catch {}
-  }
-
   const activateSilentMode = async () => {
     if (silentLoading) return
     setSilentLoading(true)
@@ -199,17 +183,25 @@ export default function HomePage() {
     return 'Есть проблемы';
   };
   
+  const fetchBootstrap = async () => {
+    try {
+      setLoading(true)
+      const res = await apiClient.fetch('/esp_service/home_bootstrap')
+      if (res.status) setData(res.status)
+      if (res.weather) setWeather(res.weather)
+      if (res.downtime) setDowntimeStats(res.downtime)
+      if (isAdmin && res.login_stats) setVisitStats(res.login_stats)
+    } catch { } finally { setLoading(false) }
+  }
+
   useEffect(() => {
-    // Раньше все запросы улетали одним залпом в маунт — вместе с чатом это
-    // давало ~7 параллельных соединений в первую секунду холодного старта,
-    // что похоже на флуд для anti-DDoS слабого сервера. Разносим по времени.
-    const timers = [
-      setTimeout(fetchData, 0),
-      setTimeout(fetchWeather, 150),
-      setTimeout(fetchDowntime, 300),
-    ];
-    if (isAdmin) timers.push(setTimeout(fetchLoginStats, 450));
-    return () => timers.forEach(clearTimeout);
+    // Раньше 4 отдельных запроса (telemetry, weather, downtime, login_stats)
+    // улетали в маунт одним залпом — вместе с чатом это давало ~7 новых
+    // соединений в первую секунду холодного старта, что для anti-DDoS
+    // слабого сервера выглядело флудом. Теперь это один запрос — бэкенд сам
+    // собирает всё параллельно на своей стороне, без открытия новых TCP-
+    // соединений на клиенте.
+    fetchBootstrap()
   }, [isAdmin])
 
   return (
