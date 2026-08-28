@@ -827,7 +827,7 @@ export const ChatPage: React.FC = () => {
   const showReconnectTitle = connectionState !== 'connected' && hasConnectedOnceRef.current;
 
   return (
-    <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`} style={{ paddingTop: headerPadTop }}>
+    <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`}>
       <div className="chat-header" ref={headerRef}>
         <div className="chat-header-card">
           <div className="chat-title">
@@ -856,49 +856,53 @@ export const ChatPage: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Пин и баннер уведомлений живут внутри фиксированной шапки, а не в
+            потоке страницы: в потоке они отодвигали ленту вниз, и за ними —
+            как и за самой шапкой — оставалась глухая полоса фона. Теперь это
+            плавающие таблетки поверх ленты, а лента идёт под ними. */}
+        {pinnedMessage && (
+          <div className="chat-pinned-banner" onClick={() => scrollToMessage(pinnedMessage.seq)}>
+            <Pin size={18} />
+            <span className="chat-pinned-text">{previewForMessage(pinnedMessage)}</span>
+            <button onClick={(e) => { e.stopPropagation(); unpinMessage(); }} title="Открепить">
+              <X size={20} />
+            </button>
+          </div>
+        )}
+
+        {notifStatus !== 'granted' && (
+          <div className={`chat-notif-banner chat-notif-banner--${notifStatus}`}>
+            {notifStatus === 'default' && (
+              <>
+                <Bell size={16} />
+                <span>Получать уведомления о новых сообщениях, когда чат закрыт?</span>
+                <button className="chat-notif-banner-action" onClick={requestNotificationAccess} disabled={pushBusy}>
+                  {pushBusy ? <Loader2 size={14} className="spin" /> : 'Включить'}
+                </button>
+              </>
+            )}
+            {notifStatus === 'denied' && (
+              <>
+                <BellOff size={16} />
+                <span>Уведомления заблокированы браузером — включить можно только вручную, в настройках сайта.</span>
+              </>
+            )}
+            {notifStatus === 'ios-not-installed' && (
+              <>
+                <BellOff size={16} />
+                <span>Чтобы получать уведомления, добавь приложение на экран «Домой» (Поделиться → На экран «Домой»).</span>
+              </>
+            )}
+            {notifStatus === 'unsupported' && (
+              <>
+                <BellOff size={16} />
+                <span>Этот браузер не поддерживает уведомления.</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
-
-      {pinnedMessage && (
-        <div className="chat-pinned-banner" onClick={() => scrollToMessage(pinnedMessage.seq)}>
-          <Pin size={18} />
-          <span className="chat-pinned-text">{previewForMessage(pinnedMessage)}</span>
-          <button onClick={(e) => { e.stopPropagation(); unpinMessage(); }} title="Открепить">
-            <X size={20} />
-          </button>
-        </div>
-      )}
-
-      {notifStatus !== 'granted' && (
-        <div className={`chat-notif-banner chat-notif-banner--${notifStatus}`}>
-          {notifStatus === 'default' && (
-            <>
-              <Bell size={16} />
-              <span>Получать уведомления о новых сообщениях, когда чат закрыт?</span>
-              <button className="chat-notif-banner-action" onClick={requestNotificationAccess} disabled={pushBusy}>
-                {pushBusy ? <Loader2 size={14} className="spin" /> : 'Включить'}
-              </button>
-            </>
-          )}
-          {notifStatus === 'denied' && (
-            <>
-              <BellOff size={16} />
-              <span>Уведомления заблокированы браузером — включить можно только вручную, в настройках сайта.</span>
-            </>
-          )}
-          {notifStatus === 'ios-not-installed' && (
-            <>
-              <BellOff size={16} />
-              <span>Чтобы получать уведомления, добавь приложение на экран «Домой» (Поделиться → На экран «Домой»).</span>
-            </>
-          )}
-          {notifStatus === 'unsupported' && (
-            <>
-              <BellOff size={16} />
-              <span>Этот браузер не поддерживает уведомления.</span>
-            </>
-          )}
-        </div>
-      )}
 
       <div
         className="chat-messages"
@@ -906,7 +910,11 @@ export const ChatPage: React.FC = () => {
         onScroll={handleScroll}
         onTouchMove={dismissKeyboardOnUserScroll}
         onWheel={dismissKeyboardOnUserScroll}
-        style={{ paddingBottom: messagesPadBottom }}
+        // paddingTop, а не padding-top у страницы: лента занимает экран целиком
+        // и проходит под шапкой, поэтому сообщения видно прямо за таблетками.
+        // Отступ нужен только чтобы самое первое сообщение истории не залипало
+        // под шапкой, когда лента домотана до самого верха.
+        style={{ paddingTop: headerPadTop + 8, paddingBottom: messagesPadBottom }}
       >
         {loadingHistory && messages.length === 0 && (
           <div className="chat-loading"><Loader2 size={20} className="spin" /></div>

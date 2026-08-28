@@ -47,9 +47,10 @@
      index.html/index.css) — не дублируем его тут. */
   color: var(--text-primary);
   font-family: system-ui, -apple-system, sans-serif;
-  /* padding-top реальной высотой .chat-header (см. ChatPage.tsx) — она
-     теперь position: fixed, значение тут только запасное на первый кадр. */
-  padding-top: 76px;
+  /* padding-top тут больше нет: он отодвигал вниз всю страницу, и за шапкой
+     оставалась глухая полоса фона. Отступ переехал внутрь .chat-messages
+     (реальной высотой шапки, см. ChatPage.tsx), так что лента занимает экран
+     целиком и проходит под таблетками шапки. */
   /* 84px было подобрано, когда env(safe-area-inset-bottom) на iOS всегда
      резолвился в 0 (без viewport-fit=cover в index.html недавно). Теперь,
      когда его включили ради фона под Dynamic Island, инсет стал реальным —
@@ -101,8 +102,22 @@
   right: 0;
   z-index: 100;
   display: flex;
-  justify-content: center;
+  /* Колонка: шапка, пин и баннер уведомлений — стопка плавающих таблеток над
+     лентой. Раньше пин и баннер лежали в потоке страницы и отодвигали ленту
+     вниз, из-за чего за ними была глухая полоса фона вместо сообщений. */
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   padding: 1rem 1rem 0;
+  /* Сама обёртка — пустое место между таблетками и по краям. Без этого она
+     фиксированным прямоугольником накрывала верх ленты и съедала там касания:
+     сообщения видно, а проскроллить их за таблетками нельзя. Касания ловят
+     только сами таблетки (pointer-events: auto ниже). */
+  pointer-events: none;
+}
+
+.chat-header > * {
+  pointer-events: auto;
 }
 
 .chat-header-card {
@@ -230,9 +245,11 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  /* margin-top: сама первая под фикс-шапкой — без него прижата к ней
-     впритык, без единого пикселя воздуха. */
-  margin: 10px 16px 8px;
+  /* Ширина и отступ от шапки — от колонки .chat-header (gap), свои margin
+     больше не нужны. max-width — как у .chat-header-card, чтобы таблетки
+     стояли в одну колонку по ширине. */
+  width: 100%;
+  max-width: 64rem;
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 14px;
@@ -325,9 +342,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  /* та же прижатая-к-шапке беда, что у .chat-pinned-banner — тут проявляется,
-     когда именно этот баннер первый (пина нет). */
-  margin: 10px 16px 8px;
+  /* Как и у .chat-pinned-banner: ширину и отступы задаёт колонка .chat-header. */
+  width: 100%;
+  max-width: 64rem;
   padding: 10px 12px;
   border-radius: 14px;
   font-size: 13px;
