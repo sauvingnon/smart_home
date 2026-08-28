@@ -110,7 +110,7 @@ export const ChatPage: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [micPressed, setMicPressed] = useState(false);
-  const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video'; seq?: number } | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const [mediaErrors, setMediaErrors] = useState<Set<number>>(new Set());
@@ -663,20 +663,27 @@ export const ChatPage: React.FC = () => {
           </div>
         );
       }
+      // Раньше тут был <video preload="metadata"> на каждое сообщение — при
+      // рендере ленты с несколькими видео это давало залп параллельных
+      // range-запросов (до 14 в секунду на проде), похожий на флуд для
+      // anti-DDoS хостера. Теперь в ленте только статичная картинка (если
+      // есть thumbnail_key — только у видео, расшаренных из архива камеры)
+      // либо просто плейсхолдер; настоящий <video> грузится только в
+      // лайтбоксе по клику.
       return (
         <div
           className={`chat-video-thumb ${message.media_kind === 'circle' ? 'circle' : ''}`}
-          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'video' }); }}
+          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'video', seq: message.seq }); }}
         >
-          <video
-            src={url}
-            muted
-            playsInline
-            preload="metadata"
-            poster={message.thumbnail_key ? apiClient.getChatMediaSrc(message.thumbnail_key) : undefined}
-            className="chat-video-thumb-el"
-            onError={() => setMediaErrors((prev) => new Set(prev).add(message.seq))}
-          />
+          {message.thumbnail_key && (
+            <img
+              src={apiClient.getChatMediaSrc(message.thumbnail_key)}
+              alt=""
+              loading="lazy"
+              className="chat-video-thumb-el"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
+          )}
           <span className="chat-video-play-overlay">
             <Play size={22} fill="currentColor" />
           </span>
@@ -1028,6 +1035,10 @@ export const ChatPage: React.FC = () => {
                   controls
                   autoPlay
                   className="chat-lightbox-video"
+                  onError={() => {
+                    if (lightbox.seq !== undefined) setMediaErrors((prev) => new Set(prev).add(lightbox.seq!));
+                    setLightbox(null);
+                  }}
                 />
               </motion.div>
             )}
