@@ -230,9 +230,18 @@ export const ChatPage: React.FC = () => {
     const ro = new ResizeObserver(recalc);
     ro.observe(bar);
     window.addEventListener('resize', recalc);
+    // .chat-input-bar анимирует свой bottom при фокусе/расфокусе (см. .chat-page--composing) —
+    // ResizeObserver на это не реагирует (размер бара не меняется, только позиция), поэтому
+    // recalc() выше застревал на значении из самого начала transition. Досчитываем ещё раз,
+    // когда анимация bottom реально закончится.
+    const onTransitionEnd = (e: TransitionEvent) => {
+      if (e.propertyName === 'bottom') recalc();
+    };
+    bar.addEventListener('transitionend', onTransitionEnd);
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', recalc);
+      bar.removeEventListener('transitionend', onTransitionEnd);
     };
   }, [inputFocused]);
 
@@ -376,6 +385,12 @@ export const ChatPage: React.FC = () => {
   const handleScroll = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
+
+    // Как в Telegram/WhatsApp — начали скроллить ленту, значит уже не печатают:
+    // убираем фокус с поля, чтобы клавиатура не торчала поверх сообщений.
+    if (document.activeElement === textInputRef.current) {
+      textInputRef.current?.blur();
+    }
 
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const near = distanceFromBottom < NEAR_BOTTOM_PX;
@@ -722,12 +737,8 @@ export const ChatPage: React.FC = () => {
       <div className="chat-header" ref={headerRef}>
         <div className="chat-header-card">
           <div className="chat-title">
-            <h1>Чат</h1>
-            {connectionState !== 'connected' ? (
-              <span className="chat-connection-hint">
-                {connectionState === 'connecting' ? 'Подключение…' : 'Переподключение…'}
-              </span>
-            ) : headerSubtitle ? (
+            <h1>{connectionState !== 'connected' ? (connectionState === 'connecting' ? 'Подключение…' : 'Переподключение…') : 'Чат'}</h1>
+            {connectionState === 'connected' && headerSubtitle ? (
               <span className={`chat-connection-hint ${othersTyping.length > 0 ? 'chat-connection-hint--typing' : ''}`}>
                 {headerSubtitle}
               </span>
