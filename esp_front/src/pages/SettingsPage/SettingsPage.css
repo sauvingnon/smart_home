@@ -161,6 +161,16 @@
   box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
 }
 
+.settings-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.settings-title-row .title-icon {
+  color: var(--accent-sky);
+}
+
 .settings-title {
   font-size: 1.5rem;
   font-weight: 700;

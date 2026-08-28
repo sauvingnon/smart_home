@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
-  Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw, LogOut
+  Settings, Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw, LogOut
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './SettingsPage.css'
@@ -318,7 +318,10 @@ export default function SettingsPage() {
         </div>
         <div className="settings-container">
           <div className="settings-header glass-card">
-            <h1 className="settings-title">Настройки</h1>
+            <div className="settings-title-row">
+              <Settings size={24} className="title-icon" />
+              <h1 className="settings-title">Настройки</h1>
+            </div>
           </div>
           <div className="error-container">
             <div className="error-card glass-card">
@@ -349,7 +352,10 @@ export default function SettingsPage() {
         </div>
         <div className="settings-container">
           <div className="settings-header glass-card">
-            <h1 className="settings-title">Настройки</h1>
+            <div className="settings-title-row">
+              <Settings size={24} className="title-icon" />
+              <h1 className="settings-title">Настройки</h1>
+            </div>
           </div>
           <div className="loading-container">
             <div className="loading-card glass-card">
@@ -382,10 +388,13 @@ export default function SettingsPage() {
           animate={{ y: 0, opacity: 1 }}
         >
           
-          <h1 className="settings-title">
-            Настройки
-          </h1>
-          
+          <div className="settings-title-row">
+            <Settings size={24} className="title-icon" />
+            <h1 className="settings-title">
+              Настройки
+            </h1>
+          </div>
+
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
