@@ -586,10 +586,16 @@ class CacheManager:
         return removed
 
     async def set_chat_read(self, user_id: int, seq: int) -> bool:
-        """Отмечает, что юзер прочитал чат по последнее сообщение seq."""
+        """Отмечает, что юзер прочитал чат по последнее сообщение seq.
+        read_at фиксируется только при первом достижении этого seq — повторный
+        вызов с тем же (или меньшим) seq, например просто открыл чат заново
+        без новых сообщений, не должен сдвигать "прочитано" на текущее время."""
         if not await self._ensure_connection():
             return False
         key = f"{self.CHAT_READ_PREFIX}{user_id}"
+        existing = await self.redis_client.hgetall(key)
+        if existing and int(existing.get("last_read_seq", 0)) >= seq:
+            return True
         now_iso = datetime.now(tz=self.IZHEVSK_TZ).isoformat()
         await self.redis_client.hset(key, mapping={"last_read_seq": seq, "read_at": now_iso})
         return True
