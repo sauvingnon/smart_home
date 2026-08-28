@@ -32,7 +32,11 @@ body {
   margin: 0;
   padding: 0;
   padding-top: env(safe-area-inset-top);
-  background-color: white;
+  /* Не белый флэт, а тот же градиент, что у #app-background — иначе на iOS
+     резиновый скролл/баунс документа (там, где страница не изолирует его
+     сама, как чат через overflow:hidden) на мгновение показывает фон body,
+     и полоса под Dynamic Island красится в чужой белый цвет вместо темы. */
+  background: linear-gradient(135deg, var(--bg-gradient-from), var(--bg-gradient-to));
   color: #0f172a;
 }
 
