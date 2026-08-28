@@ -391,15 +391,25 @@ export const ChatPage: React.FC = () => {
 
   const NEAR_BOTTOM_PX = 120;
 
-  const handleScroll = useCallback(() => {
-    const el = listRef.current;
-    if (!el) return;
-
-    // Как в Telegram/WhatsApp — начали скроллить ленту, значит уже не печатают:
-    // убираем фокус с поля, чтобы клавиатура не торчала поверх сообщений.
+  // Как в Telegram/WhatsApp — начали скроллить ленту, значит уже не печатают:
+  // убираем фокус с поля, чтобы клавиатура не торчала поверх сообщений.
+  //
+  // Вешаем на реальный жест (touchmove/wheel), а НЕ на событие scroll. Раньше
+  // блюр стоял в handleScroll, и получалась петля: тап по полю → фокус →
+  // .chat-page--composing и скрытие нав-бара меняют раскладку → .chat-messages
+  // меняет высоту → браузер сам выдаёт scroll → handleScroll видит фокус на
+  // поле и снимает его. Клавиатура закрывалась ровно в момент открытия, и с
+  // первого тапа поле не открывалось вообще. Жест пользователя такой петли не
+  // создаёт: раскладка сама по себе touchmove не генерирует.
+  const dismissKeyboardOnUserScroll = useCallback(() => {
     if (document.activeElement === textInputRef.current) {
       textInputRef.current?.blur();
     }
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
 
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const near = distanceFromBottom < NEAR_BOTTOM_PX;
@@ -890,7 +900,14 @@ export const ChatPage: React.FC = () => {
         </div>
       )}
 
-      <div className="chat-messages" ref={listRef} onScroll={handleScroll} style={{ paddingBottom: messagesPadBottom }}>
+      <div
+        className="chat-messages"
+        ref={listRef}
+        onScroll={handleScroll}
+        onTouchMove={dismissKeyboardOnUserScroll}
+        onWheel={dismissKeyboardOnUserScroll}
+        style={{ paddingBottom: messagesPadBottom }}
+      >
         {loadingHistory && messages.length === 0 && (
           <div className="chat-loading"><Loader2 size={20} className="spin" /></div>
         )}
