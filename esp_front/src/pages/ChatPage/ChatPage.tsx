@@ -720,30 +720,34 @@ export const ChatPage: React.FC = () => {
   return (
     <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`} style={{ paddingTop: headerPadTop }}>
       <div className="chat-header" ref={headerRef}>
-        <div className="chat-header-top">
-          <h1>Чат</h1>
-          {connectionState !== 'connected' ? (
-            <span className="chat-connection-hint">
-              {connectionState === 'connecting' ? 'Подключение…' : 'Переподключение…'}
-            </span>
-          ) : headerSubtitle ? (
-            <span className={`chat-connection-hint ${othersTyping.length > 0 ? 'chat-connection-hint--typing' : ''}`}>
-              {headerSubtitle}
-            </span>
-          ) : null}
-          {/* Пока просто заглушка в шапке — действия нет, экран настроек ещё не сделан. */}
-          <button className="chat-header-icon-button chat-settings-button" title="Настройки">
-            <Settings size={18} />
-          </button>
-          <button
-            className="chat-header-icon-button"
-            onClick={toggleTheme}
-            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-          >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
+        <div className="chat-header-card">
+          <div className="chat-title">
+            <h1>Чат</h1>
+            {connectionState !== 'connected' ? (
+              <span className="chat-connection-hint">
+                {connectionState === 'connecting' ? 'Подключение…' : 'Переподключение…'}
+              </span>
+            ) : headerSubtitle ? (
+              <span className={`chat-connection-hint ${othersTyping.length > 0 ? 'chat-connection-hint--typing' : ''}`}>
+                {headerSubtitle}
+              </span>
+            ) : null}
+          </div>
 
+          <div className="header-actions">
+            {/* Пока просто заглушка в шапке — действия нет, экран настроек ещё не сделан. */}
+            <button className="header-action-btn" title="Настройки">
+              <Settings size={20} />
+            </button>
+            <button
+              className="header-action-btn"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            >
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+          </div>
+        </div>
       </div>
 
       {pinnedMessage && (

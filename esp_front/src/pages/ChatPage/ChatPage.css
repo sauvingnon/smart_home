@@ -89,60 +89,70 @@
    одинаково. Реальная высота (с safe-area) меряется в ChatPage.tsx и
    подкладывается как padding-top всей странице, чтобы контент не залезал
    под шапку. */
+/* Обёртка на всю ширину viewport — только центрирование карточки и
+   safe-area отступ сверху. Сама видимая "шапка" — .chat-header-card ниже,
+   один в один по паддингу/радиусу/тени с .camera-header/.videos-header,
+   чтобы хедер чата выглядел как на Камере/Видео, а не отдельным инородным
+   full-bleed баром. */
 .chat-header {
   position: fixed;
   top: env(safe-area-inset-top);
   left: 0;
   right: 0;
   z-index: 100;
-  padding: 16px 20px 8px;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  justify-content: center;
+  padding: 1rem 1rem 0;
+}
+
+.chat-header-card {
+  width: 100%;
+  max-width: 64rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 1rem 1.5rem;
   background: var(--glass-bg);
-  border-bottom: 1px solid var(--glass-border);
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--glass-shadow);
   /* Подстраховка от горизонтального скролла: если что-то внутри всё же не
-     впишется в ширину (см. .chat-header-top ниже), обрежется тут, а не
-     раздует вьюпорт всей страницы. */
+     впишется в ширину, обрежется тут, а не раздует вьюпорт всей страницы. */
   overflow: hidden;
 }
 
-.chat-page.light .chat-header {
+.chat-page.light .chat-header-card {
   background: rgba(255, 255, 255, 0.55);
 }
 
-.chat-header-top {
+.chat-title {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
-.chat-header h1 {
-  font-size: 22px;
+.chat-title h1 {
+  font-size: 1.5rem;
   font-weight: 700;
   margin: 0;
-  flex: 0 0 auto;
-  /* Тот же градиентный титул, что на Home/Settings (.header-title /
-     .page-title) — раньше был плоским чёрным/белым текстом и выбивался
-     из общего вида приложения. */
+  /* Тот же градиентный титул, что на Camera/Video/Settings. */
   background: linear-gradient(to right, var(--accent-sky), var(--accent-orange));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Без min-width:0 и явного сжатия текстовый span в flex-строке не мог
-   ужаться уже своего содержимого и раздвигал .chat-header-top шире экрана —
-   это и было причиной горизонтального скролла на всей странице (см.
-   overflow-x:hidden в index.css — та же беда, подстраховка на уровне
-   страницы, а это — сама причина). */
+/* Без min-width:0 и явного сжатия текстовый span не мог ужаться уже своего
+   содержимого и раздвигал .chat-title шире карточки — та же беда, что
+   раньше ловилась на всей шапке (см. overflow:hidden на .chat-header-card
+   выше — подстраховка на уровне карточки, а это — сама причина). */
 .chat-connection-hint {
   font-size: 12px;
   color: var(--text-tertiary);
-  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -154,24 +164,53 @@
   font-style: italic;
 }
 
-.chat-header-icon-button {
+/* .header-actions/.header-action-btn — те же классы и правила, что в
+   CameraPage.css/VideoPage.css (см. .header-action-btn там): 3rem круглая
+   кнопка со стеклом и sky-глоу на ховере, вместо мелких 32px кружков. */
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
   flex: 0 0 auto;
+}
+
+.header-action-btn {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--glass-border);
-  border-radius: 50%;
-  background: var(--glass-bg);
-  color: var(--text-primary);
   cursor: pointer;
+  transition: all 0.2s;
 }
 
-/* Первая из иконок справа в шапке толкает всю группу (settings + тема) к
-   правому краю — так же, как раньше делал один тоггл темы. */
-.chat-header-icon-button.chat-settings-button {
-  margin-left: auto;
+.header-action-btn:hover {
+  transform: scale(1.1);
+  border-color: var(--accent-sky);
+  color: var(--accent-sky);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+}
+
+@media (max-width: 640px) {
+  .chat-header {
+    padding: 0.75rem 1rem 0;
+  }
+
+  .chat-header-card {
+    padding: 0.75rem 1rem;
+  }
+
+  .chat-title h1 {
+    font-size: 1.25rem;
+  }
+
+  .header-action-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
 }
 
 .chat-pinned-banner {
