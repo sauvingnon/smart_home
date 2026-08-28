@@ -358,6 +358,12 @@
   position: relative;
   flex: 1 1 auto;
   overflow-y: auto;
+  /* Явный overflow-x:hidden — без него браузер сам подставляет overflow-x:
+     auto (раз overflow-y уже не visible), и .chat-messages становится
+     собственным горизонтальным скролл-контейнером при любом переполнении
+     содержимого (как было с волной голосовых). Подстраховка на будущее:
+     что угодно, что не впишется по ширине, теперь просто обрежется. */
+  overflow-x: hidden;
   padding: 8px 16px;
   display: flex;
   flex-direction: column;

@@ -2,11 +2,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  /* min(…, 100%) вместо голого 220px — на узких экранах (~360px и уже)
-     220px не влезает в 86%-й бюджет пузыря (см. .chat-bubble-outer) и
-     плеер вылезал за пузырь, раздувая всю ленту горизонтальным скроллом.
-     Так волна просто сжимается сама вместо того чтобы вылезать наружу. */
-  min-width: min(220px, 100%);
+  /* Прошлый фикс (min-width: min(220px, 100%)) не работал: реальный пол
+     ширины задавали не тут, а 40 полосок волны ниже — у каждой был свой
+     min-width:3px, и flex-ряд физически не мог сжаться меньше их суммы
+     (~237px) вне зависимости от min-width самого .voice-message. Плюс
+     100% в min() резолвится некорректно, т.к. .chat-bubble сам auto-width.
+     Настоящий фикс — .voice-bar и .voice-waveform ниже. */
+  min-width: 0;
   padding: 4px 0;
 }
 
@@ -36,16 +38,23 @@
 
 .voice-waveform {
   flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   height: 36px;
   cursor: pointer;
+  overflow: hidden;
 }
 
 .voice-bar {
   flex: 1 1 auto;
-  min-width: 3px;
+  /* Раньше min-width:3px на 40 полосках — жёсткий пол ~237px, из-за
+     которого .voice-message не мог сжаться на узких экранах, что бы ни
+     стояло у него самого в min-width. 1px пропускает реальное сжатие,
+     overflow:hidden на .voice-waveform выше — подстраховка, если бары
+     всё равно не влезут (просто обрежутся, а не раздуют ленту вбок). */
+  min-width: 1px;
   max-width: 4px;
   border-radius: 2px;
   background: var(--text-tertiary);
