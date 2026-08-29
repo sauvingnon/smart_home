@@ -1,4 +1,12 @@
 {
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/settings", "destination": "/index.html" },
+    { "source": "/videos", "destination": "/index.html" },
+    { "source": "/chat", "destination": "/index.html" },
+    { "source": "/camera", "destination": "/index.html" },
+    { "source": "/camera/:cameraId", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "assets/**",
