@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { API_BASE_URL } from '../api/client';
+import { apiClient, API_BASE_URL } from '../api/client';
 
 interface AuthContextType {
   accessKey: string | null;
@@ -9,7 +9,8 @@ interface AuthContextType {
   username: string | null;
   displayName: string | null;
   setAccessKey: (key: string) => Promise<void>;
-  clearAccessKey: () => void;
+  logout: () => Promise<void>;
+  resetSession: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -84,16 +85,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await fetchMe();
   };
 
-  const clearAccessKey = () => {
-    fetch(`${API_BASE_URL}/auth/logout`, {
-      method: 'POST',
-      credentials: 'include',
-    }).catch(() => {});
+  const clearLocalState = () => {
+    apiClient.closeAllWebSockets();
     setAccessKeyState(null);
     setIsAdmin(false);
     setUserId(null);
     setUsername(null);
     setDisplayName(null);
+  };
+
+  // Сессия уже мертва на сервере (пришёл 401/403) — дёргать /auth/logout незачем,
+  // чистим только локальное состояние.
+  const resetSession = () => {
+    clearLocalState();
+  };
+
+  const logout = async () => {
+    // Пуш-подписку снимаем ДО логаута: /chat/push/unsubscribe требует валидную
+    // cookie. После удаления сессии он вернёт 401, подписка останется на сервере,
+    // и разлогиненное устройство продолжит получать уведомления чата с текстом
+    // сообщений — уже на экране логина.
+    try {
+      if ('serviceWorker' in navigator) {
+        // Именно getRegistration, а не ready: ready никогда не резолвится, если
+        // service worker не зарегистрирован, и кнопка "Выйти" висла бы вечно.
+        const registration = await navigator.serviceWorker.getRegistration();
+        const subscription = await registration?.pushManager.getSubscription();
+        if (subscription) {
+          await apiClient.unsubscribeChatPush();
+          await subscription.unsubscribe();
+        }
+      }
+    } catch (err) {
+      // Не блокируем выход: подписка перезапишется при следующем входе
+      // (она одна на юзера), а держать человека в аккаунте из-за пуша — хуже.
+      console.error('Не удалось снять push-подписку', err);
+    }
+
+    // Ошибку тут уже не глушим. Если запрос не дошёл, cookie осталась на месте,
+    // и молча показать экран логина значит соврать: перезагрузка вернёт сессию.
+    const res = await fetch(`${API_BASE_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      throw new Error(`Logout failed: ${res.status}`);
+    }
+
+    clearLocalState();
   };
 
   return (
@@ -105,7 +144,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       username,
       displayName,
       setAccessKey: handleSetKey,
-      clearAccessKey,
+      logout,
+      resetSession,
     }}>
       {children}
     </AuthContext.Provider>

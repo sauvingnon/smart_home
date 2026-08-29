@@ -15,7 +15,7 @@ import { NavBarProvider } from './context/NavBarContext';
 import { BottomNavBar } from './components/BottomNavBar/BottomNavBar';
 
 function App() {
-  const { accessKey, isLoading: authLoading, clearAccessKey, isAdmin } = useAuth();
+  const { accessKey, isLoading: authLoading, resetSession, isAdmin } = useAuth();
   const [appReady, setAppReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -36,7 +36,7 @@ function App() {
       return true;
     } catch (error) {
       if (error instanceof AuthError) {
-        clearAccessKey();
+        resetSession();
         setAuthError('Сессия истекла. Введите ключ заново.');
         return false;
       }

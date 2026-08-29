@@ -45,7 +45,10 @@ async def login(request: Request, response: Response):
 @router.post("/logout")
 async def logout(response: Response):
     """Сбросить сессию."""
-    response.delete_cookie(key=COOKIE_NAME, httponly=True, secure=True, samesite="strict")
+    # secure обязан совпадать с тем, что выставил /login: под http (dev) браузер
+    # отклоняет Set-Cookie с флагом Secure, и удаление молча не доезжает —
+    # cookie переживает "выход", а перезагрузка страницы возвращает сессию.
+    response.delete_cookie(key=COOKIE_NAME, httponly=True, secure=COOKIE_SECURE, samesite="strict")
     return {"status": "ok"}
 
 

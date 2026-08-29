@@ -12,7 +12,7 @@ export const Login: React.FC<LoginProps> = ({ error, onLoginSuccess }) => {
   const [key, setKey] = useState('');
   const [localError, setLocalError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { setAccessKey, clearAccessKey } = useAuth();
+  const { setAccessKey } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,10 +26,10 @@ export const Login: React.FC<LoginProps> = ({ error, onLoginSuccess }) => {
     setLocalError('');
     
     try {
-      // Сначала очищаем старый ключ, если есть
-      clearAccessKey();
-      
-      // Устанавливаем новый ключ
+      // Старый ключ специально НЕ сбрасываем: /auth/login перезаписывает cookie
+      // безусловно. Прежний вызов clearAccessKey() уходил параллельно, без await,
+      // и его Set-Cookie с Max-Age=0 мог прийти уже ПОСЛЕ ответа логина — стирая
+      // только что выданную сессию и роняя вход с "Сессия истекла".
       await setAccessKey(key.trim());
       
       // Если есть колбэк успешного входа, вызываем его

@@ -212,7 +212,7 @@ const ToggleSwitch = ({ checked, onChange, color = 'blue' }: any) => {
 
 export default function SettingsPage() {
   const { theme } = useTheme()
-  const { clearAccessKey } = useAuth()
+  const { logout } = useAuth()
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -221,6 +221,8 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<{ greenhouse: string; toilet: string } | null>(null)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
   const tilesRef = useRef<HTMLDivElement>(null)
 
   // Панели вкладок сильно разной высоты («Расписание» — пять секций, «Вентилятор»
@@ -277,9 +279,19 @@ export default function SettingsPage() {
     }
   }
 
-  const handleLogout = () => {
-    if (window.confirm('Выйти из аккаунта?')) {
-      clearAccessKey()
+  // Выход ждём ответа сервера: если запрос не дошёл, cookie осталась, и показать
+  // экран логина было бы обманом — перезагрузка вернула бы юзера в аккаунт.
+  const handleLogout = async () => {
+    if (!window.confirm('Выйти из аккаунта?')) return
+    setLoggingOut(true)
+    setLogoutError(null)
+    try {
+      await logout()
+    } catch (e) {
+      console.error('Logout failed:', e)
+      setLogoutError('Не удалось выйти — нет связи с сервером.')
+    } finally {
+      setLoggingOut(false)
     }
   }
 
@@ -594,12 +606,22 @@ export default function SettingsPage() {
                   <motion.button
                     className="silent-button danger"
                     onClick={handleLogout}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                    disabled={loggingOut}
+                    whileHover={{ scale: loggingOut ? 1 : 1.02 }}
+                    whileTap={{ scale: loggingOut ? 1 : 0.98 }}
                   >
                     <LogOut size={18} />
-                    Выйти из аккаунта
+                    {loggingOut ? 'Выходим…' : 'Выйти из аккаунта'}
                   </motion.button>
+                  {logoutError && (
+                    <motion.p
+                      className="mode-description error"
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                    >
+                      {logoutError}
+                    </motion.p>
+                  )}
                 </div>
 
               </div>

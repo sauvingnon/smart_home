@@ -418,6 +418,11 @@
   line-height: 1.5;
 }
 
+.mode-description.error {
+  color: var(--accent-red);
+  margin-top: 0.75rem;
+}
+
 /* Ручное управление */
 .manual-controls {
   display: flex;
@@ -665,6 +670,11 @@
 .silent-button.danger:hover {
   border-color: var(--accent-red);
   color: var(--accent-red);
+}
+
+.silent-button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* Загрузка */
