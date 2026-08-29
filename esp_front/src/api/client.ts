@@ -221,10 +221,20 @@ class ApiClient {
     }
   }
 
+  // Используется при логауте. В отличие от close*WebSocket() выше, раньше не
+  // выставлял isManualClose и не снимал обработчики перед close() — onclose
+  // соединения (chat/camera) считал разрыв случайным и продолжал бэкоффом
+  // переоткрывать сокет уже без валидной cookie, вечно, даже стоя на экране
+  // логина.
   closeAllWebSockets() {
     this.reconnectTimers.forEach((timer) => clearTimeout(timer));
     this.reconnectTimers.clear();
     this.wsConnections.forEach((ws) => {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      (ws as any).isManualClose = true;
       ws.close(1000, 'Closing all connections');
     });
     this.wsConnections.clear();

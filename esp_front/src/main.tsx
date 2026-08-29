@@ -4,6 +4,7 @@ import { MotionConfig } from 'framer-motion'
 import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './context/AuthContext'
+import { ErrorBoundary } from './components/ErrorBoundary/ErrorBoundary'
 
 // Service worker только для Web Push уведомлений чата — без прекэша/офлайна.
 if ('serviceWorker' in navigator) {
@@ -17,9 +18,11 @@ if ('serviceWorker' in navigator) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <MotionConfig reducedMotion="user">
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ErrorBoundary>
     </MotionConfig>
   </StrictMode>,
 )
