@@ -1,6 +1,8 @@
 {
   "name": "Умный дом",
   "short_name": "Умный дом",
+  "start_url": "/",
+  "scope": "/",
   "icons": [
     {
       "src": "manifest-icon-192.maskable.png",

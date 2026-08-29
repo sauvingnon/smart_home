@@ -12,6 +12,148 @@
     <link rel="manifest" href="/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Умный дом</title>
+
+    <!-- Страховка от «белого экрана»: живёт прямо здесь, а не в бандле, потому
+         что ловит ровно тот случай, когда бандл не загрузился вовсе и никакой
+         ErrorBoundary внутри него уже не поможет.
+
+         Реальный сценарий: промежуточный прокси отдаёт устаревший index.html,
+         тот ссылается на /assets/index-<старыйхеш>.js, которого после
+         пересборки уже нет, а SPA-фолбэк (serve -s) возвращает на него
+         index.html со статусом 200 и Content-Type: text/html. Браузер
+         отказывается исполнять HTML как модуль, #root остаётся пустым — и
+         пользователь видит только градиент body, то есть белый экран без
+         единой подсказки. Чистка кэша и переустановка PWA не помогают:
+         устаревший ответ приходит с сервера. -->
+    <script>
+      (function () {
+        var RETRY_FLAG = 'boot-retry';
+        var firstError = null;
+
+        // Чистим служебную метку из адреса, чтобы она не оседала в URL
+        // установленного PWA после успешного восстановления.
+        try {
+          if (location.search.indexOf('__reload=') !== -1) {
+            history.replaceState({}, '', location.pathname + location.hash);
+          }
+        } catch (e) {}
+
+        // capture: true — нужен, чтобы поймать и ошибки загрузки ресурсов
+        // (script/link), которые не всплывают.
+        window.addEventListener('error', function (event) {
+          if (firstError) return;
+          var el = event && event.target;
+          if (el && (el.tagName === 'SCRIPT' || el.tagName === 'LINK')) {
+            firstError = 'не загрузился ' + (el.src || el.href || el.tagName);
+          } else if (event && event.message) {
+            firstError = event.message;
+          }
+        }, true);
+
+        function booted() {
+          var root = document.getElementById('root');
+          return !!root && root.childElementCount > 0;
+        }
+
+        function showDiagnostics() {
+          var root = document.getElementById('root');
+          if (!root) return;
+          var box = document.createElement('div');
+          box.setAttribute('style', [
+            'position:fixed', 'inset:0', 'z-index:2147483647',
+            'display:flex', 'align-items:center', 'justify-content:center',
+            'padding:1rem',
+            'font:400 15px/1.5 system-ui,-apple-system,Helvetica,Arial,sans-serif',
+            '-webkit-font-smoothing:antialiased'
+          ].join(';'));
+          var card = document.createElement('div');
+          card.setAttribute('style', [
+            'max-width:28rem', 'width:100%', 'background:#fff',
+            'border-radius:1.5rem', 'padding:1.5rem', 'text-align:center',
+            'color:#0f172a',
+            'box-shadow:0 20px 25px -5px rgba(0,0,0,.1),0 10px 10px -5px rgba(0,0,0,.04)'
+          ].join(';'));
+
+          var title = document.createElement('h1');
+          title.textContent = 'Приложение не загрузилось';
+          title.setAttribute('style', 'margin:0 0 .5rem;font-size:1.25rem;font-weight:700');
+
+          var text = document.createElement('p');
+          text.textContent = 'Не удалось загрузить код приложения с сервера. '
+            + 'Обычно это устаревшая версия страницы в кэше на стороне сервера.';
+          text.setAttribute('style', 'margin:0;font-size:.875rem;color:#64748b');
+
+          var details = document.createElement('p');
+          details.textContent = firstError || 'подробности недоступны';
+          details.setAttribute('style', [
+            'margin:.75rem 0 0', 'font-size:.75rem', 'color:#94a3b8',
+            'word-break:break-all', 'font-family:ui-monospace,SFMono-Regular,Menlo,monospace'
+          ].join(';'));
+
+          var button = document.createElement('button');
+          button.textContent = 'Попробовать снова';
+          button.setAttribute('style', [
+            'margin-top:1rem', 'width:100%', 'padding:.75rem', 'border:none',
+            'border-radius:.5rem', 'font-size:1rem', 'font-weight:500',
+            'color:#fff', 'cursor:pointer',
+            'background:linear-gradient(90deg,#2563eb,#3b82f6)'
+          ].join(';'));
+          button.onclick = function () {
+            try { sessionStorage.removeItem(RETRY_FLAG); } catch (e) {}
+            location.replace(location.pathname + '?__reload=' + Date.now());
+          };
+
+          card.appendChild(title);
+          card.appendChild(text);
+          card.appendChild(details);
+          card.appendChild(button);
+          box.appendChild(card);
+          document.body.appendChild(box);
+        }
+
+        function onBootFailure() {
+          if (booted()) return;
+
+          var retried = null;
+          try { retried = sessionStorage.getItem(RETRY_FLAG); } catch (e) {}
+
+          // Одна автоматическая попытка обойти устаревший кэш: query-параметр
+          // меняет URL, поэтому промежуточный прокси не может ответить старой
+          // копией. Повторяем ровно один раз за сессию, иначе при реальной
+          // поломке получился бы цикл перезагрузок.
+          if (!retried) {
+            try { sessionStorage.setItem(RETRY_FLAG, '1'); } catch (e) {}
+            location.replace(location.pathname + '?__reload=' + Date.now());
+            return;
+          }
+          showDiagnostics();
+        }
+
+        // Ресурс упал — ждать нечего, реагируем почти сразу. Иначе даём щедрый
+        // запас на медленную сеть: бандл большой, и ложная перезагрузка на
+        // плохом канале хуже, чем лишние секунды ожидания.
+        window.addEventListener('error', function (event) {
+          var el = event && event.target;
+          if (el && (el.tagName === 'SCRIPT' || el.tagName === 'LINK')) {
+            setTimeout(onBootFailure, 500);
+          }
+        }, true);
+
+        window.addEventListener('load', function () {
+          setTimeout(onBootFailure, 15000);
+        });
+
+        // Приложение поднялось — метку сбрасываем, чтобы следующий сбой снова
+        // имел право на автоматическую попытку восстановления.
+        window.addEventListener('load', function () {
+          setTimeout(function () {
+            if (booted()) {
+              try { sessionStorage.removeItem(RETRY_FLAG); } catch (e) {}
+            }
+          }, 3000);
+        });
+      })();
+    </script>
     <link rel="apple-touch-icon" href="apple-icon-180.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">

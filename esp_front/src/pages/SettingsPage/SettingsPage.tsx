@@ -39,13 +39,20 @@ type Settings = {
 }
 
 const TimeInput = ({ hour, minute, onHourChange, onMinuteChange }: any) => {
+  // Подстраховка от неполного ответа сервера: раньше .toString() на undefined
+  // бросал прямо в рендере, а необработанное исключение в рендере сносит всё
+  // дерево React — экран становился белым целиком, без намёка на причину.
+  // Отсутствующее поле — это 0 (полночь), а не повод обрушить страницу.
+  const safeHour = Number.isFinite(hour) ? hour : 0
+  const safeMinute = Number.isFinite(minute) ? minute : 0
+
   // Форматирование с ведущим нулём для отображения в поле
-  const displayHour = hour.toString().padStart(2, '0')
-  const displayMinute = minute.toString().padStart(2, '0')
-  
+  const displayHour = safeHour.toString().padStart(2, '0')
+  const displayMinute = safeMinute.toString().padStart(2, '0')
+
   // Добавление минут с учётом перехода через час
   const addMinutes = (mins: number) => {
-    let totalMinutes = hour * 60 + minute + mins
+    let totalMinutes = safeHour * 60 + safeMinute + mins
     if (totalMinutes < 0) totalMinutes = 23 * 60 + 30
     if (totalMinutes > 23 * 60 + 59) totalMinutes = 0
     
