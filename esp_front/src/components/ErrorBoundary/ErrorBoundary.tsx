@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, LogOut } from 'lucide-react';
 import { API_BASE_URL } from '../../api/client';
-import './ErrorBoundary.css';
+import styles from './ErrorBoundary.module.css';
 
 interface Props {
   children: ReactNode;
@@ -44,18 +44,18 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children;
 
     return (
-      <div className="error-boundary-container">
-        <div className="error-boundary-card">
-          <AlertTriangle className="error-boundary-icon" />
-          <h1 className="error-boundary-title">Приложение упало с ошибкой</h1>
-          <p className="error-boundary-message">{error.message || 'Неизвестная ошибка'}</p>
-          <div className="error-boundary-actions">
-            <button className="error-boundary-button primary" onClick={() => window.location.reload()}>
-              <RefreshCw className="button-icon" />
+      <div className={styles.container}>
+        <div className={styles.card}>
+          <AlertTriangle className={styles.icon} />
+          <h1 className={styles.title}>Приложение упало с ошибкой</h1>
+          <p className={styles.message}>{error.message || 'Неизвестная ошибка'}</p>
+          <div className={styles.actions}>
+            <button className={`${styles.button} ${styles.primary}`} onClick={() => window.location.reload()}>
+              <RefreshCw className={styles.buttonIcon} />
               Перезагрузить
             </button>
-            <button className="error-boundary-button secondary" onClick={this.handleResetSession}>
-              <LogOut className="button-icon" />
+            <button className={`${styles.button} ${styles.secondary}`} onClick={this.handleResetSession}>
+              <LogOut className={styles.buttonIcon} />
               Сбросить сессию и перезагрузить
             </button>
           </div>

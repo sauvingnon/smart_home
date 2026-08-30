@@ -1,0 +1,181 @@
+/* CSS Module, а не глобальный файл, нарочно.
+   Прежний Login.css объявлял классы с предельно общими именами —
+   .form-input, .submit-button, .form-group, .error-message, .error-icon,
+   .button-icon — в глобальной области. Ровно те же имена объявлены в
+   SettingsPage.css и HomePage.css, и в собранном бандле они складываются в
+   один каскад независимо от того, какая страница сейчас смонтирована:
+   .error-message из SettingsPage.css перекрашивал текст в
+   var(--text-secondary), а эта переменная определена только внутри
+   .light/.dark на самой странице настроек — на экране логина её нет вовсе.
+   Хеширование имён модулем убирает весь этот класс наложений разом. */
+
+/* position/z-index — обязательны, а не косметика.
+   #app-background (index.css) — position:fixed; inset:0 с градиентом на весь
+   вьюпорт. Позиционированный элемент со z-index:auto рисуется ПОВЕРХ
+   непозиционированных потомков соседних блоков, поэтому статический
+   .login-container оказывался под сплошной заливкой фона: форма была в DOM,
+   занимала место, принимала фокус — но её не было видно, и пользователь
+   получал ровно тот синеватый экран, что и красит #app-background.
+   Все остальные страницы получили position:relative ещё в 61f9949, где
+   вводился #app-background; Login (и позже ErrorBoundary) в тот проход
+   не попали. */
+.loginContainer {
+  min-height: 100vh;
+  /* Фон теперь #app-background (position:fixed, вне React-дерева, см.
+     index.html/index.css) — не дублируем его тут, чтобы не перекрывать
+     собой и чтобы он не "ехал" вместе со страницей. */
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.loginCard {
+  max-width: 28rem;
+  width: 100%;
+  background: white;
+  border-radius: 1.5rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.loginHeader {
+  padding: 1.5rem 1.5rem 0.5rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.loginIcon {
+  width: 2rem;
+  height: 2rem;
+  color: #3b82f6;
+}
+
+.loginTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  color: #0f172a;
+}
+
+.loginContent {
+  padding: 1rem 1.5rem 1.5rem 1.5rem;
+}
+
+.errorMessage {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background-color: #fef2f2;
+  border: 1px solid #fee2e2;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.errorIcon {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: #ef4444;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.errorText {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #dc2626;
+}
+
+.loginForm {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.formLabel {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.formInput {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  /* Явный цвет текста и фона: поле ввода не наследует их от темы страницы,
+     а дефолты браузера в тёмной теме iOS давали тёмный текст на тёмном. */
+  background: white;
+  color: #0f172a;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.formInput:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.formError {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.875rem;
+  color: #ef4444;
+}
+
+.submitButton {
+  width: 100%;
+  padding: 0.75rem;
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.submitButton:hover {
+  opacity: 0.9;
+}
+
+.submitButton:active {
+  transform: translateY(1px);
+}
+
+.submitButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.buttonIcon {
+  width: 1rem;
+  height: 1rem;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}

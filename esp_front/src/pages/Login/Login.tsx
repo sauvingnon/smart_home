@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Key, LogIn, AlertCircle, Loader } from 'lucide-react';
-import './Login.css';
+import styles from './Login.module.css';
 
 interface LoginProps {
   error?: string | null;
@@ -16,22 +16,22 @@ export const Login: React.FC<LoginProps> = ({ error, onLoginSuccess }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!key.trim()) {
       setLocalError('Введите ключ доступа');
       return;
     }
-    
+
     setIsLoading(true);
     setLocalError('');
-    
+
     try {
       // Старый ключ специально НЕ сбрасываем: /auth/login перезаписывает cookie
       // безусловно. Прежний вызов clearAccessKey() уходил параллельно, без await,
       // и его Set-Cookie с Max-Age=0 мог прийти уже ПОСЛЕ ответа логина — стирая
       // только что выданную сессию и роняя вход с "Сессия истекла".
       await setAccessKey(key.trim());
-      
+
       // Если есть колбэк успешного входа, вызываем его
       if (onLoginSuccess) {
         onLoginSuccess();
@@ -45,24 +45,24 @@ export const Login: React.FC<LoginProps> = ({ error, onLoginSuccess }) => {
   };
 
   return (
-    <div className="login-container">
-      <div className="login-card">
-        <div className="login-header">
-          <Key className="login-icon" />
-          <h1 className="login-title">Доступ к управлению</h1>
+    <div className={styles.loginContainer}>
+      <div className={styles.loginCard}>
+        <div className={styles.loginHeader}>
+          <Key className={styles.loginIcon} />
+          <h1 className={styles.loginTitle}>Доступ к управлению</h1>
         </div>
-        
-        <div className="login-content">
+
+        <div className={styles.loginContent}>
           {error && (
-            <div className="error-message">
-              <AlertCircle className="error-icon" />
-              <p className="error-text">{error}</p>
+            <div className={styles.errorMessage}>
+              <AlertCircle className={styles.errorIcon} />
+              <p className={styles.errorText}>{error}</p>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="login-form">
-            <div className="form-group">
-              <label className="form-label">
+          <form onSubmit={handleSubmit} className={styles.loginForm}>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>
                 Введите ключ доступа
               </label>
               <input
@@ -73,28 +73,28 @@ export const Login: React.FC<LoginProps> = ({ error, onLoginSuccess }) => {
                   setLocalError('');
                 }}
                 placeholder="например: abc123..."
-                className="form-input"
+                className={styles.formInput}
                 autoFocus
                 disabled={isLoading}
               />
               {localError && (
-                <p className="form-error">{localError}</p>
+                <p className={styles.formError}>{localError}</p>
               )}
             </div>
-            
-            <button 
-              type="submit" 
-              className="submit-button"
+
+            <button
+              type="submit"
+              className={styles.submitButton}
               disabled={isLoading}
             >
               {isLoading ? (
                 <>
-                  <Loader className="button-icon spinning" />
+                  <Loader className={`${styles.buttonIcon} ${styles.spinning}`} />
                   Проверка ключа...
                 </>
               ) : (
                 <>
-                  <LogIn className="button-icon" />
+                  <LogIn className={styles.buttonIcon} />
                   Войти
                 </>
               )}
