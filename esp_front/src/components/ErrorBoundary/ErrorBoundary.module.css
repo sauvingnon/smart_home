@@ -1,0 +1,101 @@
+/* CSS Module по той же причине, что и у Login: прежний глобальный файл
+   объявлял .button-icon — имя, занятое ещё и HomePage.css (там на него
+   висит transition/rotate у кнопки обновления). */
+
+/* position/z-index — то же, что и в Login.module.css: без них карточка
+   ошибки оказывалась под #app-background (position:fixed; inset:0) и была
+   не видна. Это отдельно неприятно тем, что ErrorBoundary — сама страховка
+   от белого экрана: она честно отрабатывала и рисовала разметку, но её
+   заливал собой фон, и наружу всё равно выходил пустой синеватый экран. */
+.container {
+  min-height: 100vh;
+  /* Фон теперь #app-background (position:fixed, вне React-дерева, см.
+     index.html/index.css) — не дублируем его тут. */
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.card {
+  max-width: 28rem;
+  width: 100%;
+  background: white;
+  border-radius: 1.5rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5rem;
+}
+
+.icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  color: #ef4444;
+  margin-bottom: 0.5rem;
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+  color: #0f172a;
+}
+
+.message {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #64748b;
+  word-break: break-word;
+}
+
+.actions {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.button {
+  width: 100%;
+  padding: 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.button:hover {
+  opacity: 0.9;
+}
+
+.button:active {
+  transform: translateY(1px);
+}
+
+.primary {
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+  color: white;
+}
+
+.secondary {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.buttonIcon {
+  width: 1rem;
+  height: 1rem;
+}
