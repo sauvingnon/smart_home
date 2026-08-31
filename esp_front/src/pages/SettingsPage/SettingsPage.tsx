@@ -329,66 +329,6 @@ export default function SettingsPage() {
     { id: 'fan', label: 'Вентилятор', icon: Fan },
   ]
 
-  // Рендер ошибки
-  if (error) {
-    return (
-      <div className={`settings-page ${theme}`}>
-        <div className="background-spot">
-          <div className="spot-1"></div>
-          <div className="spot-2"></div>
-          <div className="spot-3"></div>
-        </div>
-        <div className="settings-container">
-          <div className="settings-header glass-card">
-            <div className="settings-title-row">
-              <Settings size={24} className="title-icon" />
-              <h1 className="settings-title">Настройки</h1>
-            </div>
-          </div>
-          <div className="error-container">
-            <div className="error-card glass-card">
-              <AlertCircle size={48} className="error-icon" />
-              <h2 className="error-title">Ошибка подключения</h2>
-              <button 
-                onClick={() => window.location.reload()} 
-                className="retry-button"
-              >
-                Попробовать снова
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Рендер загрузки
-  if (loading || !settings) {
-    return (
-      <div className={`settings-page ${theme}`}>
-        <div className="background-spot">
-          <div className="spot-1"></div>
-          <div className="spot-2"></div>
-          <div className="spot-3"></div>
-        </div>
-        <div className="settings-container">
-          <div className="settings-header glass-card">
-            <div className="settings-title-row">
-              <Settings size={24} className="title-icon" />
-              <h1 className="settings-title">Настройки</h1>
-            </div>
-          </div>
-          <div className="loading-container">
-            <div className="loading-card glass-card">
-              <div className="spinner" />
-              <p className="loading-text">Загрузка настроек...</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className={`settings-page ${theme}`}>
       
@@ -415,18 +355,42 @@ export default function SettingsPage() {
             </h1>
           </div>
 
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={saveSettings}
-            disabled={saving}
-            className="save-button"
-          >
-            <Save size={18} />
-            <span>{saving ? 'Сохранение...' : 'Сохранить'}</span>
-          </motion.button>
+          {!error && !loading && settings && (
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={saveSettings}
+              disabled={saving}
+              className="save-button"
+            >
+              <Save size={18} />
+              <span>{saving ? 'Сохранение...' : 'Сохранить'}</span>
+            </motion.button>
+          )}
         </motion.div>
 
+        {error ? (
+          <div className="error-container">
+            <div className="error-card glass-card">
+              <AlertCircle size={48} className="error-icon" />
+              <h2 className="error-title">Ошибка подключения</h2>
+              <button
+                onClick={() => window.location.reload()}
+                className="retry-button"
+              >
+                Попробовать снова
+              </button>
+            </div>
+          </div>
+        ) : loading || !settings ? (
+          <div className="loading-container">
+            <div className="loading-card glass-card">
+              <div className="spinner" />
+              <p className="loading-text">Загрузка настроек...</p>
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Уведомление об успехе */}
         <AnimatePresence>
           {showSuccess && (
@@ -976,8 +940,10 @@ export default function SettingsPage() {
 
           </motion.div>
           </AnimatePresence>
-        </div>
+        </>
+        )}
       </div>
+    </div>
 
   )
 
