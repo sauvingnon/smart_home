@@ -298,15 +298,17 @@ class ChatService:
                     except Exception:
                         pass
 
-    async def share_video(self, user_id: int, video_key: str, thumbnail_key: str = "") -> dict:
+    async def share_video(self, user_id: int, video_key: str, thumbnail_key: str = "", text: str = "") -> dict:
         """Переслать уже существующее видео (из архива камеры) в чат — без
         повторной загрузки байт, просто ссылка на тот же объект в S3. Не
         копируем файл: если камера почистит его по своему retention раньше,
         чем чат — сообщение останется, но отдача медиа вернёт 404 (фронт
-        показывает 'видео недоступно' вместо копирования на каждый шаринг)."""
+        показывает 'видео недоступно' вместо копирования на каждый шаринг).
+        text — подпись с именами распознанных на видео людей (пусто, если
+        распознавание ещё не готово или никого не нашли)."""
         seq = await self.cache.chat_next_seq()
         return await self._finalize_message(
-            seq, user_id, "video", "", video_key, None, shared=True, thumbnail_key=thumbnail_key,
+            seq, user_id, "video", text, video_key, None, shared=True, thumbnail_key=thumbnail_key,
         )
 
     async def _reply_snapshot(self, reply_to: Optional[int]) -> dict:

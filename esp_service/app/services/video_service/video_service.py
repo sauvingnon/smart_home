@@ -945,6 +945,13 @@ class VideoService:
         видео реально существует, и получить его S3-ключ."""
         return await self._get_video_key(camera_id, video_id)
 
+    async def get_recognized_names(self, camera_id: str, video_id: str) -> Optional[List[str]]:
+        """Публичная обёртка над _get_recognition_names — отдаёт только сырые
+        имена классов (andrey/liliya/kamelia/grisha), без direction. Для
+        пересылки видео в чат: None, если распознавание ещё не готово."""
+        result = await self._get_recognition_names(camera_id, video_id)
+        return result["names"]
+
     async def _get_video_key(self, camera_id: str, video_id: str) -> Optional[str]:
         """Получить S3-ключ видео: сначала из кэша Redis, потом полный скан S3."""
         key = await self.cache_manager.get_cached_video_key(camera_id, video_id)

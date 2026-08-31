@@ -93,8 +93,16 @@ async def share_video(
         raise HTTPException(status_code=404, detail="Видео не найдено")
 
     thumbnail_key = f"thumbnails/{payload.camera_id}/{payload.video_id}.jpg"
+
+    names = await worker.video_service.get_recognized_names(payload.camera_id, payload.video_id)
+    text = ""
+    if names:
+        users = await worker.cache.list_users()
+        display_by_username = {u["username"]: u["display_name"] for u in users}
+        text = ", ".join(display_by_username.get(name, name) for name in names)
+
     message = await worker.chat_service.share_video(
-        user_id=user_id, video_key=video_key, thumbnail_key=thumbnail_key,
+        user_id=user_id, video_key=video_key, thumbnail_key=thumbnail_key, text=text,
     )
     return message
 
