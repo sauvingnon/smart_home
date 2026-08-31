@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, MemoryStick, RefreshCw, User, Users, ChevronDown, Search, Fan, Check, X,
+  Sunrise, Sunset, Moon, Wind, Bath, Eye, Activity, HardDrive, MemoryStick, RefreshCw, User, Users, ChevronDown, Search, Fan, Check, X,
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
@@ -113,6 +113,9 @@ const getStatusStyle = (status: string) => {
   }
 };
 
+const getUptimeColor = (pct: number) =>
+  pct >= 99 ? '#34d399' : pct >= 95 ? '#fbbf24' : '#f87171'
+
 // Плитки телеметрии красятся по метрике, а не по нагрузке: раньше цвет
 // зависел от процента и в норме все три были одинаково зелёные — то есть
 // неразличимы с одного взгляда. Диск отдельно: там цвет всё ещё умеет
@@ -163,6 +166,7 @@ export default function HomePage() {
   const [visitStats, setVisitStats] = useState<VisitStats | null>(null)
   const [downtimeStats, setDowntimeStats] = useState<DowntimeStats | null>(null)
   const [selectedDowntimeDevice, setSelectedDowntimeDevice] = useState<string | null>(null)
+  const [selectedDowntimeDate, setSelectedDowntimeDate] = useState<string | null>(null)
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set())
   const [silentLoading, setSilentLoading] = useState(false)
   const [silentFeedback, setSilentFeedback] = useState<'ok' | 'error' | null>(null)
@@ -175,6 +179,15 @@ export default function HomePage() {
     }
     return () => { document.body.style.overflow = '' }
   }, [selectedDowntimeDevice])
+
+  useEffect(() => {
+    if (!selectedDowntimeDevice || !selectedDowntimeDate) return
+    const id = requestAnimationFrame(() => {
+      document.querySelector(`[data-downtime-date="${selectedDowntimeDate}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [selectedDowntimeDevice, selectedDowntimeDate])
 
   const fetchData = async () => {
     try {
@@ -247,6 +260,19 @@ export default function HomePage() {
     // соединений на клиенте.
     fetchBootstrap()
   }, [isAdmin])
+
+  const overallUptime = downtimeStats
+    ? (() => {
+        const devices = Object.values(downtimeStats)
+        if (!devices.length) return 100
+        const avg = devices.reduce((sum, device) => {
+          const days = Object.values(device.days)
+          const dayAvg = days.length ? days.reduce((s, d) => s + d.uptime_pct, 0) / days.length : 100
+          return sum + dayAvg
+        }, 0) / devices.length
+        return Math.round(avg * 10) / 10
+      })()
+    : 100
 
   return (
     <div className={`home-container ${theme}`}>
@@ -563,11 +589,13 @@ export default function HomePage() {
               <div className="card-content">
                 <div className="stat-item" style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                   <div className="stat-icon" style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399' }}>
-                    <Eye size={18} />
+                    <Activity size={18} />
                   </div>
                   <div className="stat-info">
                     <span className="stat-label">Доступность · 7 дней</span>
-                    <span className="stat-value">Мониторинг устройств</span>
+                    <span className="stat-value" style={{ color: getUptimeColor(overallUptime), fontWeight: 700 }}>
+                      {overallUptime}% в среднем
+                    </span>
                   </div>
                 </div>
 
@@ -603,62 +631,74 @@ export default function HomePage() {
                           </div>
                           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                             {totalMin > 0 && (
-                              <span style={{ fontSize: '12px', color: '#f87171' }}>
+                              <span style={{ fontSize: '12px', color: avgUptime < 99 ? '#f87171' : 'var(--text-secondary)' }}>
                                 ↓ {totalMin >= 60 ? `${Math.floor(totalMin / 60)}ч ${totalMin % 60}м` : `${totalMin}м`}
                               </span>
                             )}
-                            <span style={{
-                              fontSize: '14px', fontWeight: 700,
-                              color: avgUptime >= 99 ? '#34d399' : avgUptime >= 95 ? '#fbbf24' : '#f87171'
-                            }}>
+                            <span style={{ fontSize: '14px', fontWeight: 700, color: getUptimeColor(avgUptime) }}>
                               {avgUptime}%
                             </span>
                           </div>
                         </div>
 
                         {/* Тайм-лайн: разворачивается по клику на заголовок */}
-                        {isExpanded && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            {sortedDays.map(([dateStr, dayData]) => {
-                              const label = dateStr.slice(5)
-                              const dayStart = new Date(dateStr + 'T00:00:00+04:00').getTime()
-                              const dayEnd = dayStart + 86400000
+                        <AnimatePresence initial={false}>
+                          {isExpanded && (
+                            <motion.div
+                              key="days"
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2, ease: 'easeInOut' }}
+                              style={{ overflow: 'hidden' }}
+                            >
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {sortedDays.map(([dateStr, dayData]) => {
+                                  const label = dateStr.slice(5)
+                                  const dayStart = new Date(dateStr + 'T00:00:00+04:00').getTime()
+                                  const dayEnd = dayStart + 86400000
 
-                              return (
-                                <div
-                                  key={dateStr}
-                                  onClick={() => setSelectedDowntimeDevice(deviceId)}
-                                  style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', borderRadius: '6px', padding: '3px 4px' }}
-                                >
-                                  <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '36px', flexShrink: 0 }}>{label}</span>
-                                  <div style={{ flex: 1, height: '8px', borderRadius: '4px', background: 'rgba(52,211,153,0.25)', position: 'relative', overflow: 'hidden' }}>
-                                    {dayData.intervals.filter(iv => {
-                                      const startMs = new Date(iv.start).getTime()
-                                      const endMs = iv.end ? new Date(iv.end).getTime() : Date.now()
-                                      return Math.round((endMs - startMs) / 60000) > 0
-                                    }).map((iv, i) => {
-                                      const s = Math.max(new Date(iv.start).getTime(), dayStart)
-                                      const e = Math.min(iv.end ? new Date(iv.end).getTime() : Date.now(), dayEnd)
-                                      const left = ((s - dayStart) / 86400000) * 100
-                                      const width = Math.max(((e - s) / 86400000) * 100, 0.5)
-                                      return (
-                                        <div key={i} style={{
-                                          position: 'absolute', top: 0, bottom: 0,
-                                          left: `${left}%`, width: `${width}%`,
-                                          background: 'rgba(248,113,113,0.85)', borderRadius: '2px'
-                                        }} />
-                                      )
-                                    })}
-                                  </div>
-                                  <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '28px', textAlign: 'right', flexShrink: 0 }}>
-                                    {dayData.uptime_pct}%
-                                  </span>
-                                  <Search size={11} style={{ color: 'var(--text-secondary)', opacity: 0.5, flexShrink: 0 }} />
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
+                                  return (
+                                    <div
+                                      key={dateStr}
+                                      className="downtime-day-row"
+                                      onClick={() => {
+                                        setSelectedDowntimeDevice(deviceId)
+                                        setSelectedDowntimeDate(dateStr)
+                                      }}
+                                      style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', borderRadius: '6px', padding: '4px 6px' }}
+                                    >
+                                      <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '36px', flexShrink: 0 }}>{label}</span>
+                                      <div style={{ flex: 1, height: '8px', borderRadius: '4px', background: 'rgba(52,211,153,0.25)', position: 'relative', overflow: 'hidden' }}>
+                                        {dayData.intervals.filter(iv => {
+                                          const startMs = new Date(iv.start).getTime()
+                                          const endMs = iv.end ? new Date(iv.end).getTime() : Date.now()
+                                          return Math.round((endMs - startMs) / 60000) > 0
+                                        }).map((iv, i) => {
+                                          const s = Math.max(new Date(iv.start).getTime(), dayStart)
+                                          const e = Math.min(iv.end ? new Date(iv.end).getTime() : Date.now(), dayEnd)
+                                          const left = ((s - dayStart) / 86400000) * 100
+                                          const width = Math.max(((e - s) / 86400000) * 100, 0.5)
+                                          return (
+                                            <div key={i} style={{
+                                              position: 'absolute', top: 0, bottom: 0,
+                                              left: `${left}%`, width: `${width}%`,
+                                              background: 'rgba(248,113,113,0.85)', borderRadius: '2px'
+                                            }} />
+                                          )
+                                        })}
+                                      </div>
+                                      <span style={{ fontSize: '10px', color: getUptimeColor(dayData.uptime_pct), width: '28px', textAlign: 'right', flexShrink: 0 }}>
+                                        {dayData.uptime_pct}%
+                                      </span>
+                                      <Search size={13} style={{ color: 'var(--text-secondary)', opacity: 0.8, flexShrink: 0 }} />
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     )
                   })}
@@ -778,7 +818,7 @@ export default function HomePage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setSelectedDowntimeDevice(null)}
+              onClick={() => { setSelectedDowntimeDevice(null); setSelectedDowntimeDate(null) }}
               style={{
                 position: 'fixed', inset: 0, zIndex: 1000,
                 background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
@@ -813,7 +853,7 @@ export default function HomePage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => setSelectedDowntimeDevice(null)}
+                    onClick={() => { setSelectedDowntimeDevice(null); setSelectedDowntimeDate(null) }}
                     style={{
                       background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '50%',
                       width: '32px', height: '32px', cursor: 'pointer',
@@ -824,14 +864,27 @@ export default function HomePage() {
 
                 {/* Разбивка по дням */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {sortedDays.map(([dateStr, dayData]) => (
-                    <div key={dateStr}>
+                  {sortedDays.map(([dateStr, dayData]) => {
+                    const isHighlighted = dateStr === selectedDowntimeDate
+                    return (
+                    <div
+                      key={dateStr}
+                      data-downtime-date={dateStr}
+                      style={{
+                        borderRadius: '10px',
+                        padding: isHighlighted ? '10px' : 0,
+                        margin: isHighlighted ? '-10px' : 0,
+                        background: isHighlighted ? 'rgba(129,140,248,0.1)' : 'transparent',
+                        border: isHighlighted ? '1px solid rgba(129,140,248,0.3)' : '1px solid transparent',
+                        transition: 'background 0.3s ease, border-color 0.3s ease',
+                      }}
+                    >
                       <div style={{
                         fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)',
                         marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em'
                       }}>
                         {fmtDate(dateStr)}
-                        <span style={{ marginLeft: '8px', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                        <span style={{ marginLeft: '8px', fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: getUptimeColor(dayData.uptime_pct) }}>
                           · {dayData.uptime_pct}% онлайн
                         </span>
                       </div>
@@ -869,7 +922,7 @@ export default function HomePage() {
                         )
                       })()}
                     </div>
-                  ))}
+                  )})}
                 </div>
               </motion.div>
             </motion.div>
