@@ -1015,6 +1015,18 @@ export const ChatPage: React.FC = () => {
     return bySeq;
   }, [messages, reads, userId]);
 
+  // Кто прочитал именно это сообщение — для карточки над меню. Себя и автора
+  // не показываем: своё прочтение неинтересно, авторское тривиально. Время
+  // здесь — момент, когда человек дочитал до этого места, ровно то же, что
+  // стоит за кружком в ленте.
+  const actionReaders = actionTarget
+    ? reads.filter((r) => (
+      r.user_id !== actionTarget.user_id
+      && r.user_id !== userId
+      && r.last_read_seq >= actionTarget.seq
+    ))
+    : [];
+
   // Одна строка под заголовком "Чат": печатает > кто в сети > когда был(а) в
   // сети последний раз — приоритет тот же, что в WhatsApp/Telegram-группах.
   const othersTyping = typingUsers.filter((t) => t.user_id !== userId);
@@ -1477,7 +1489,7 @@ export const ChatPage: React.FC = () => {
             <motion.div
               key="action-menu"
               ref={actionMenuRef}
-              className="chat-action-menu"
+              className="chat-action-stack"
               style={{
                 left: menuPos?.left ?? 0,
                 top: menuPos?.top ?? 0,
@@ -1492,46 +1504,63 @@ export const ChatPage: React.FC = () => {
               transition={{ type: 'spring', stiffness: 520, damping: 30 }}
               onClick={(e) => e.stopPropagation()}
             >
-              <button onClick={() => startReply(actionTarget)}>
-                <CornerUpLeft size={17} />
-                Ответить
-              </button>
+              <div className="chat-action-readers">
+                <span className="chat-action-readers-title">Прочитали</span>
+                {actionReaders.length === 0 ? (
+                  <span className="chat-action-readers-empty">Пока никто</span>
+                ) : actionReaders.map((r) => (
+                  <div key={r.user_id} className="chat-action-reader">
+                    <span className="chat-read-avatar" style={{ background: readAvatarColor(r.user_id) }}>
+                      {readAvatarLetter(r.display_name)}
+                    </span>
+                    <span className="chat-action-reader-name">{r.display_name}</span>
+                    <span className="chat-action-reader-time">{r.read_at ? formatTime(r.read_at) : ''}</span>
+                  </div>
+                ))}
+              </div>
 
-              {actionTarget.text && (
-                <button onClick={() => copyMessageText(actionTarget)}>
-                  <Copy size={17} />
-                  Копировать
+              <div className="chat-action-menu">
+                <button onClick={() => startReply(actionTarget)}>
+                  <CornerUpLeft size={18} />
+                  Ответить
                 </button>
-              )}
 
-              {canEdit(actionTarget) && (
-                <button onClick={() => startEdit(actionTarget)}>
-                  <Pencil size={17} />
-                  Изменить
+                {actionTarget.text && (
+                  <button onClick={() => copyMessageText(actionTarget)}>
+                    <Copy size={18} />
+                    Копировать
+                  </button>
+                )}
+
+                {canEdit(actionTarget) && (
+                  <button onClick={() => startEdit(actionTarget)}>
+                    <Pencil size={18} />
+                    Изменить
+                  </button>
+                )}
+
+                <button
+                  onClick={async () => {
+                    const target = actionTarget;
+                    closeActionMenu();
+                    if (pinnedMessage?.seq === target.seq) {
+                      await unpinMessage();
+                    } else {
+                      await pinMessage(target.seq);
+                    }
+                  }}
+                >
+                  {pinnedMessage?.seq === actionTarget.seq ? <PinOff size={18} /> : <Pin size={18} />}
+                  {pinnedMessage?.seq === actionTarget.seq ? 'Открепить' : 'Закрепить'}
                 </button>
-              )}
 
-              <button
-                onClick={async () => {
-                  const target = actionTarget;
-                  closeActionMenu();
-                  if (pinnedMessage?.seq === target.seq) {
-                    await unpinMessage();
-                  } else {
-                    await pinMessage(target.seq);
-                  }
-                }}
-              >
-                {pinnedMessage?.seq === actionTarget.seq ? <PinOff size={17} /> : <Pin size={17} />}
-                {pinnedMessage?.seq === actionTarget.seq ? 'Открепить' : 'Закрепить'}
-              </button>
-
-              {canDelete(actionTarget) && (
-                <button className="danger" onClick={() => confirmDelete(actionTarget)}>
-                  <Trash2 size={17} />
-                  Удалить
-                </button>
-              )}
+                {canDelete(actionTarget) && (
+                  <button className="danger" onClick={() => confirmDelete(actionTarget)}>
+                    <Trash2 size={18} />
+                    Удалить
+                  </button>
+                )}
+              </div>
             </motion.div>
           </>
         )}
