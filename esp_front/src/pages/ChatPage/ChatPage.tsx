@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, Sun, Moon, Settings, MessageCircle, CornerUpLeft, Pencil, Check } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, Sun, Moon, Settings, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -134,7 +134,18 @@ export const ChatPage: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [micPressed, setMicPressed] = useState(false);
-  const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video'; seq?: number } | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video'; seq?: number; mediaKey?: string } | null>(null);
+  const [downloadingMedia, setDownloadingMedia] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0); // -1 = подготовка, 0-100 = прогресс, как на странице "Видео"
+  // Зум фото в лайтбоксе: scale — обычный стейт (щипок должен трекать палец 1:1,
+  // без пружины), x/y — motion-values, их же двигает drag (см. проп style на
+  // <motion.img> ниже) — так панорамирование зумленного фото и его сброс живут
+  // в одном месте, а не расходятся с внутренним состоянием drag у framer.
+  const [imgScale, setImgScale] = useState(1);
+  const imgX = useMotionValue(0);
+  const imgY = useMotionValue(0);
+  const pinchStartRef = useRef<{ dist: number; scale: number } | null>(null);
+  const lastTapRef = useRef(0);
   const [sendError, setSendError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   // Клавиатура iOS открыта — убираем нав-бар с экрана (сам он живёт в App.tsx).
@@ -379,8 +390,9 @@ export const ChatPage: React.FC = () => {
   }, []);
 
   // Пока открыт полноэкранный просмотр фото — блокируем скролл фона и
-  // вешаем Escape для закрытия (пинч-зум самого фото — нативный, ничего
-  // руками не реализуем, viewport это уже разрешает).
+  // вешаем Escape для закрытия. Пинч-зум фото приходится реализовывать самим
+  // (колесо/трекпад + touch, см. handleImage*): у всего приложения в index.html
+  // стоит viewport user-scalable=no, так что нативного зума тут нет.
   useEffect(() => {
     if (!lightbox) return;
     const prevOverflow = document.body.style.overflow;
@@ -394,6 +406,14 @@ export const ChatPage: React.FC = () => {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [lightbox]);
+
+  // Сброс зума при открытии нового медиа/закрытии — иначе следующее фото
+  // открылось бы уже приближенным состоянием предыдущего.
+  useEffect(() => {
+    setImgScale(1);
+    imgX.set(0);
+    imgY.set(0);
+  }, [lightbox?.src]);
 
   const NEAR_BOTTOM_PX = 120;
 
@@ -832,6 +852,128 @@ export const ChatPage: React.FC = () => {
     return false;
   };
 
+  // Скачивание медиа из лайтбокса — тот же паттерн (стрим чанков с прогрессом),
+  // что и на странице "Видео" (см. handleDownload в VideoPage.tsx).
+  const handleDownloadMedia = async () => {
+    if (!lightbox || downloadingMedia) return;
+
+    setDownloadingMedia(true);
+    setDownloadProgress(-1);
+
+    try {
+      const response = await fetch(lightbox.src, { credentials: 'include' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.body) throw new Error('No response body');
+
+      const contentLength = response.headers.get('Content-Length');
+      const total = contentLength ? parseInt(contentLength) : 0;
+
+      const reader = response.body.getReader();
+      const chunks: BlobPart[] = [];
+      let received = 0;
+      setDownloadProgress(0);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (total) setDownloadProgress(Math.round((received / total) * 100));
+      }
+
+      const blob = new Blob(chunks);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = lightbox.mediaKey?.split('/').pop() || `chat_media_${Date.now()}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download chat media:', error);
+      alert('Не удалось скачать файл');
+    } finally {
+      setDownloadingMedia(false);
+      setDownloadProgress(0);
+    }
+  };
+
+  const IMAGE_MIN_SCALE = 1;
+  const IMAGE_MAX_SCALE = 4;
+  // Если зум почти вернулся к исходному размеру — досрочно защёлкиваем ровно
+  // на 1 и сбрасываем панорамирование. Без этого порога щипок/колесо могли
+  // оставить фото в промежуточном состоянии вроде 1.04x, где imgScale > 1
+  // формально верно, drag остаётся в режиме панорамирования (см. проп drag
+  // на <motion.img>) — и свайп вниз для закрытия лайтбокса перестаёт работать,
+  // хотя визуально зум уже незаметен.
+  const ZOOM_SNAP_BACK = 1.08;
+  const clampImageScale = (s: number) => Math.min(IMAGE_MAX_SCALE, Math.max(IMAGE_MIN_SCALE, s));
+
+  const resetImageZoom = () => {
+    setImgScale(1);
+    imgX.set(0);
+    imgY.set(0);
+  };
+
+  // Единая точка применения нового масштаба — что бы его ни двигало (колесо,
+  // щипок), логика "снапа" и сброса панорамирования одна и та же.
+  const applyImageScale = (next: number) => {
+    const clamped = clampImageScale(next);
+    if (clamped <= ZOOM_SNAP_BACK) {
+      resetImageZoom();
+    } else {
+      setImgScale(clamped);
+    }
+  };
+
+  const toggleImageZoom = () => {
+    if (imgScale > 1) resetImageZoom();
+    else setImgScale(2.5);
+  };
+
+  const handleImageDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    toggleImageZoom();
+  };
+
+  // Колесо/трекпад — зум фото в лайтбоксе. На Mac пинч по трекпаду браузер
+  // тоже репортит как wheel-событие (с ctrlKey), так что отдельно его ловить
+  // не нужно — обрабатывается тем же путём.
+  const handleImageWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    applyImageScale(imgScale - e.deltaY * 0.0015);
+  };
+
+  const getTouchDistance = (touches: React.TouchList) =>
+    Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+
+  const handleImageTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      pinchStartRef.current = { dist: getTouchDistance(e.touches), scale: imgScale };
+      return;
+    }
+    if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTapRef.current < 300) toggleImageZoom();
+      lastTapRef.current = now;
+    }
+  };
+
+  const handleImageTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && pinchStartRef.current) {
+      const dist = getTouchDistance(e.touches);
+      applyImageScale(pinchStartRef.current.scale * (dist / pinchStartRef.current.dist));
+    }
+  };
+
+  const handleImageTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) {
+      pinchStartRef.current = null;
+      if (imgScale <= ZOOM_SNAP_BACK) resetImageZoom();
+    }
+  };
+
   // Своё и не старше часа. Ровно то же условие проверяет сервер — тут оно
   // только чтобы не показывать заведомо мёртвый пункт меню.
   const canDelete = (message: ChatMessage): boolean =>
@@ -998,7 +1140,7 @@ export const ChatPage: React.FC = () => {
           alt=""
           className="chat-media-image"
           loading="lazy"
-          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'image' }); }}
+          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'image', mediaKey: message.media_key }); }}
         />
       );
     }
@@ -1027,7 +1169,7 @@ export const ChatPage: React.FC = () => {
       return (
         <div
           className={`chat-video-thumb ${message.media_kind === 'circle' ? 'circle' : ''}`}
-          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'video', seq: message.seq }); }}
+          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'video', seq: message.seq, mediaKey: message.media_key }); }}
         >
           {message.thumbnail_key && (
             <img
@@ -1475,6 +1617,14 @@ export const ChatPage: React.FC = () => {
             onClick={() => setLightbox(null)}
           >
             <button
+              className="chat-lightbox-download"
+              onClick={(e) => { e.stopPropagation(); handleDownloadMedia(); }}
+              disabled={downloadingMedia}
+              title="Скачать"
+            >
+              {downloadingMedia ? <Loader2 size={20} className="spin" /> : <Download size={20} />}
+            </button>
+            <button
               className="chat-lightbox-close"
               onClick={() => setLightbox(null)}
               title="Закрыть"
@@ -1490,12 +1640,26 @@ export const ChatPage: React.FC = () => {
               <motion.img
                 src={lightbox.src}
                 alt=""
-                className="chat-lightbox-image"
+                className={`chat-lightbox-image ${imgScale > 1 ? 'chat-lightbox-image--zoomed' : ''}`}
                 onClick={(e) => e.stopPropagation()}
-                drag="y"
-                dragConstraints={{ top: 0, bottom: 0 }}
-                dragElastic={0.8}
+                onDoubleClick={handleImageDoubleClick}
+                onWheel={handleImageWheel}
+                onTouchStart={handleImageTouchStart}
+                onTouchMove={handleImageTouchMove}
+                onTouchEnd={handleImageTouchEnd}
+                style={{ x: imgX, y: imgY, scale: imgScale }}
+                drag={imgScale > 1 ? true : 'y'}
+                dragConstraints={imgScale > 1
+                  ? {
+                    left: -160 * (imgScale - 1), right: 160 * (imgScale - 1),
+                    top: -160 * (imgScale - 1), bottom: 160 * (imgScale - 1),
+                  }
+                  : { top: 0, bottom: 0 }}
+                dragElastic={imgScale > 1 ? 0.15 : 0.8}
                 onDragEnd={(_, info) => {
+                  // При зуме drag только панорамирует фото, закрытие свайпом
+                  // вниз работает только пока оно в исходном размере.
+                  if (imgScale > 1) return;
                   if (Math.abs(info.offset.y) > 100 || Math.abs(info.velocity.y) > 500) setLightbox(null);
                 }}
               />
@@ -1522,6 +1686,39 @@ export const ChatPage: React.FC = () => {
                 />
               </motion.div>
             )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {downloadingMedia && (
+          <motion.div
+            className="chat-download-toast"
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          >
+            <Download size={18} className="chat-download-toast-icon" />
+            <div className="chat-download-toast-body">
+              <p className="chat-download-toast-label">
+                {downloadProgress < 0
+                  ? 'Подготовка скачивания...'
+                  : downloadProgress < 100
+                    ? `Скачивание ${downloadProgress}%`
+                    : 'Завершение...'}
+              </p>
+              <div className="chat-download-toast-track">
+                <motion.div
+                  className="chat-download-toast-fill"
+                  animate={{ width: downloadProgress < 0 ? '35%' : `${downloadProgress}%` }}
+                  transition={downloadProgress < 0
+                    ? { repeat: Infinity, repeatType: 'reverse', duration: 1, ease: 'easeInOut' }
+                    : { duration: 0.15 }
+                  }
+                />
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

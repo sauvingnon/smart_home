@@ -1033,6 +1033,11 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  cursor: zoom-in;
+  touch-action: none;
+}
+
+.chat-lightbox-image--zoomed {
   cursor: grab;
 }
 
@@ -1083,6 +1088,90 @@
 
 .chat-lightbox-close:active {
   transform: scale(0.95);
+}
+
+/* Слева от крестика — та же геометрия кнопки, просто сдвинута на её
+   ширину + зазор (44 + 8 = 52px). */
+.chat-lightbox-download {
+  position: fixed;
+  top: calc(16px + env(safe-area-inset-top));
+  right: 68px;
+  z-index: 301;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: transform 0.2s, background 0.2s;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.chat-lightbox-download:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .chat-lightbox-download:not(:disabled):hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+  }
+}
+
+.chat-lightbox-download:not(:disabled):active {
+  transform: scale(0.95);
+}
+
+/* Тост прогресса скачивания — тот же паттерн, что на странице "Видео". */
+.chat-download-toast {
+  position: fixed;
+  bottom: calc(90px + env(safe-area-inset-bottom));
+  left: 16px;
+  right: 16px;
+  z-index: 310;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-download-toast-icon {
+  flex-shrink: 0;
+  color: #a78bfa;
+}
+
+.chat-download-toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-download-toast-label {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.chat-download-toast-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.chat-download-toast-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #a78bfa, #06b6d4);
 }
 
 .chat-video-thumb {

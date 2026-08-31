@@ -21,6 +21,7 @@ from app.schemas.chat import (
     UnreadCountResponse,
     VapidPublicKeyResponse,
 )
+from app.utils.time import format_ru_datetime, parse_video_key_datetime
 from config import VAPID_PUBLIC_KEY
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -99,7 +100,9 @@ async def share_video(
     if names:
         users = await worker.cache.list_users()
         display_by_username = {u["username"]: u["display_name"] for u in users}
-        text = "Распознаны лица: " + ", ".join(display_by_username.get(name, name) for name in names)
+        video_dt = parse_video_key_datetime(video_key)
+        date_line = f"Видео от {format_ru_datetime(video_dt)}\n" if video_dt else ""
+        text = date_line + "Распознаны лица: " + ", ".join(display_by_username.get(name, name) for name in names)
 
     message = await worker.chat_service.share_video(
         user_id=user_id, video_key=video_key, thumbnail_key=thumbnail_key, text=text,
