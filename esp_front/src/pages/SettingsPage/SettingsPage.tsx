@@ -390,7 +390,11 @@ export default function SettingsPage() {
             </div>
           </div>
         ) : (
-        <>
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+        >
         {/* Уведомление об успехе */}
         <AnimatePresence>
           {showSuccess && (
@@ -940,7 +944,7 @@ export default function SettingsPage() {
 
           </motion.div>
           </AnimatePresence>
-        </>
+        </motion.div>
         )}
       </div>
     </div>

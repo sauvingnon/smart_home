@@ -339,6 +339,14 @@ export const VideosPage = () => {
           </div>
         </motion.div>
 
+        {loading ? (
+          <div className="loading-container">
+            <div className="loading-card">
+              <div className="spinner" />
+              <p className="loading-text">Загрузка видео...</p>
+            </div>
+          </div>
+        ) : (
         <motion.div
           className="videos-main"
           variants={containerVar}
@@ -395,14 +403,7 @@ export const VideosPage = () => {
               )}
             </AnimatePresence>
 
-            {loading ? (
-              <div className="loading-container">
-                <div className="loading-card">
-                  <div className="spinner" />
-                  <p className="loading-text">Загрузка видео...</p>
-                </div>
-              </div>
-            ) : videos.length === 0 ? (
+            {videos.length === 0 ? (
               <div className="empty-state">
                 <FileVideo size={48} className="empty-icon" />
                 <h3>Нет видеозаписей</h3>
@@ -613,6 +614,7 @@ export const VideosPage = () => {
             </div>
           </motion.div>
         </motion.div>
+        )}
       </div>
 
       <AnimatePresence>

@@ -137,25 +137,25 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const startTimer = setTimeout(async () => {
       setLoadingHistory(true);
       try {
-        const historyRes = await apiClient.getChatMessages();
+        // Раньше это были пять последовательных await — сеть между ними
+        // отдаёт JS-поток браузеру, и он успевает отрисовать промежуточные
+        // кадры (шапка → потом баннер закрепа → потом лента), из-за чего
+        // было видно, как страница "достраивается". Promise.all не зависимые
+        // друг от друга запросы, все setState ниже происходят одним синхронным
+        // блоком без пауз для рендера между ними — один кадр вместо пяти.
+        const [historyRes, unreadRes, readsRes, pinnedRes, presenceRes] = await Promise.all([
+          apiClient.getChatMessages(),
+          apiClient.getChatUnreadCount(),
+          apiClient.getChatReadStates(),
+          apiClient.getPinnedChatMessage(),
+          apiClient.getChatPresence(),
+        ]);
         if (cancelled) return;
         setMessages(historyRes.messages);
         setHasMoreHistory(historyRes.messages.length >= HISTORY_PAGE_SIZE);
-
-        const unreadRes = await apiClient.getChatUnreadCount();
-        if (cancelled) return;
         setUnreadCount(unreadRes.unread_count);
-
-        const readsRes = await apiClient.getChatReadStates();
-        if (cancelled) return;
         setReads(readsRes.reads);
-
-        const pinnedRes = await apiClient.getPinnedChatMessage();
-        if (cancelled) return;
         setPinnedMessage(pinnedRes.message);
-
-        const presenceRes = await apiClient.getChatPresence();
-        if (cancelled) return;
         setPresence(presenceRes.entries);
       } catch {
         // WS всё равно досинхронизирует новые события
