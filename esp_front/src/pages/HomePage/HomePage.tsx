@@ -10,6 +10,7 @@ import './HomePage.css'
 import TemperatureChart from '../../components/TemperatureChart/TemperatureChart'
 import { useTheme } from '../../context/ThemeContext'
 import { useAuth } from '../../context/AuthContext'
+import { usePageVisit } from '../../hooks/usePageVisit'
 
 // --- Типы и Хелперы ---
 type WeatherData = {
@@ -153,6 +154,7 @@ const itemVar = {
 }
 
 export default function HomePage() {
+  usePageVisit('home')
   const { theme } = useTheme()
   const { isAdmin } = useAuth()
   const [data, setData] = useState<GeneralResponse | null>(null)

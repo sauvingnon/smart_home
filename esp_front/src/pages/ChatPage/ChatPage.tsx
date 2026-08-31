@@ -9,6 +9,7 @@ import { apiClient } from '../../api/client';
 import type { ChatMessage, ChatReadState } from '../../api/client';
 import { useHideNavBar } from '../../context/NavBarContext';
 import { useChatPush } from '../../hooks/useChatPush';
+import { usePageVisit } from '../../hooks/usePageVisit';
 import { VoiceMessage } from './VoiceMessage';
 import './ChatPage.css';
 
@@ -120,6 +121,7 @@ const errorMessage = (err: unknown): string =>
   err instanceof Error ? err.message : 'Не удалось отправить сообщение';
 
 export const ChatPage: React.FC = () => {
+  usePageVisit('chat');
   const { theme, toggleTheme } = useTheme();
   const { userId } = useAuth();
   const navigate = useNavigate();

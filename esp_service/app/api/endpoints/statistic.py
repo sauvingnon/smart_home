@@ -1,7 +1,7 @@
 # api/routes/esp_service.py
 import asyncio
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Body
 from app.core.worker import BackgroundWorker
 from app.schemas.telemetry_history import (
     HistoryResponse,
@@ -45,6 +45,27 @@ async def get_history_endpoint(
         records_count=len(records),  # records уже список TelemetryRecord
         records=records  # ← просто records, без распаковки!
     )
+
+@router.post("/activity/visit")
+async def record_activity_visit_endpoint(
+    section: str = Body(..., embed=True),
+    user_id: int = Depends(get_current_user_id_dep)
+):
+    """
+    Явная отметка "юзер реально открыл раздел X" — шлётся самой страницей
+    при монтировании на своём роуте, а не выводится из факта HTTP-запроса
+    (раньше так и было: любой запрос к разделу считался визитом, включая
+    фоновые синки глобальных провайдеров — искажало ленту активности).
+    Для админов не пишем: лента активности — это "кто из семьи что открыл",
+    не сам админ, который её и читает.
+    """
+    auth = get_auth_manager()
+    if await auth.is_admin(user_id):
+        return {"recorded": False}
+
+    worker = BackgroundWorker.get_instance()
+    recorded = await worker.cache.record_activity(user_id, section)
+    return {"recorded": recorded}
 
 @router.get("/login_stats")
 async def get_login_stats_endpoint(

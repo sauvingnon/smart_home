@@ -8,6 +8,7 @@ import { apiClient } from '../../api/client'
 import './SettingsPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { useAuth } from '../../context/AuthContext'
+import { usePageVisit } from '../../hooks/usePageVisit'
 
 type Settings = {
   displayMode: number
@@ -218,6 +219,7 @@ const ToggleSwitch = ({ checked, onChange, color = 'blue' }: any) => {
 }
 
 export default function SettingsPage() {
+  usePageVisit('settings')
   const { theme } = useTheme()
   const { logout } = useAuth()
   const [settings, setSettings] = useState<Settings | null>(null)

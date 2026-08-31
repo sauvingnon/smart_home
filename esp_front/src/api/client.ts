@@ -315,6 +315,18 @@ class ApiClient {
     return this.fetch('/chat/read', { method: 'POST' });
   }
 
+  // Явная отметка "я реально открыл раздел X" для ленты активности — шлётся
+  // самой страницей при монтировании (см. usePageVisit), не выводится из
+  // факта запроса: раньше на бэке любой хит по пути раздела засчитывался
+  // визитом, включая фоновые синки глобальных провайдеров (чат синкает
+  // историю всем при старте приложения, а не только на /chat).
+  async recordPageVisit(section: string): Promise<void> {
+    await this.fetch('/esp_service/activity/visit', {
+      method: 'POST',
+      body: JSON.stringify({ section }),
+    });
+  }
+
   async getChatReadStates(): Promise<{ reads: ChatReadState[] }> {
     return this.fetch('/chat/read_states');
   }

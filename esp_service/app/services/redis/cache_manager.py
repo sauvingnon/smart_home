@@ -698,33 +698,33 @@ class CacheManager:
         await self.redis_client.delete(f"{self.PUSH_SUB_PREFIX}{user_id}")
         return True
 
-    # Префикс пути → название раздела приложения, для статистики "кто что открывал".
-    # Порядок важен: смотрим на первое совпадение по startswith.
-    ROUTE_LABELS: list = [
-        ("/esp_service/camera", "Камера"),
-        ("/esp_service/video", "Видео"),
-        ("/esp_service/settings", "Настройки"),
-        ("/esp_service/sync_time", "Настройки"),
-        ("/esp_service/telemetry", "Главная"),
-        ("/esp_service/weather", "Главная"),
-        ("/esp_service/history", "Главная"),
-        ("/esp_service/stats", "Главная"),
-        ("/esp_service/downtime", "Главная"),
-        ("/chat", "Чат"),
-    ]
+    # Ключ раздела (шлёт сам фронт при реальном монтировании страницы) →
+    # отображаемое название, для статистики "кто что открывал". Раньше это
+    # был prefix-match по пути ЛЮБОГО запроса — ловил и фоновые фетчи
+    # глобальных провайдеров (например чат синкает историю/unread на
+    # холодном старте приложения для всех, не только зашедших на /chat),
+    # так что лента врала про разделы, которые юзер не открывал. Теперь
+    # запись бьёт только explicit-визит с самой страницы.
+    SECTION_LABELS: dict = {
+        "home": "Главная",
+        "camera": "Камера",
+        "video": "Видео",
+        "settings": "Настройки",
+        "chat": "Чат",
+    }
 
     VISIT_COOLDOWN_SECONDS = 3600  # один "визит" в час, как и раньше — просто теперь у визита есть свои разделы
 
-    async def record_activity(self, user_id: int, path: str) -> bool:
+    async def record_activity(self, user_id: int, section: str) -> bool:
         """
         Один визит в час на пользователя (как и раньше). Но пока визит активен
         (тот же час), каждый новый раздел, который открыл пользователь,
         дописывается в его же запись — вместо отдельной записи на каждый переход.
         Итог в activity_log: [{"time": "15:34", "routes": ["Настройки", "Камера"]}, ...]
         """
-        label = next((lbl for prefix, lbl in self.ROUTE_LABELS if path.startswith(prefix)), None)
+        label = self.SECTION_LABELS.get(section)
         if not label:
-            logger.debug(f"record_activity: путь {path} не подошёл ни под один префикс ROUTE_LABELS, пропускаю")
+            logger.debug(f"record_activity: неизвестный раздел {section}, пропускаю")
             return False
         if not await self._ensure_connection():
             logger.info(f"👁️ record_activity: нет соединения с Redis, пропускаю [{user_id}, {path}]")

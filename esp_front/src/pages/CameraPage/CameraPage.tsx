@@ -22,6 +22,7 @@ import { useParams } from 'react-router-dom'
 import type { Resolution } from '../../api/camera';
 import './CameraPage.css'
 import { useTheme } from '../../context/ThemeContext'
+import { usePageVisit } from '../../hooks/usePageVisit'
 
 const containerVar = {
   hidden: { opacity: 0 },
@@ -54,6 +55,7 @@ const STATUS_UPDATE_INTERVAL = 5000
 const RESOLUTION_CHANGE_DELAY = 1000
 
 export const CameraPage: React.FC = () => {
+  usePageVisit('camera')
   const { theme } = useTheme()
   const { cameraId } = useParams<{ cameraId: string }>()
   const [fullscreen, setFullscreen] = useState(false)

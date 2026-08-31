@@ -20,6 +20,7 @@ import {
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
+import { usePageVisit } from '../../hooks/usePageVisit'
 
 interface VideoItem {
     key: string
@@ -70,6 +71,7 @@ const itemVar = {
 }
 
 export const VideosPage = () => {
+  usePageVisit('video')
   const { theme } = useTheme()
   const navigate = useNavigate()
   const [videos, setVideos] = useState<VideoItem[]>([])
