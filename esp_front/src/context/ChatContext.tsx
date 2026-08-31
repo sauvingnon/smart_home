@@ -387,9 +387,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           : undefined,
       });
       setMessages((prev) => (prev.some((m) => m.seq === message.seq) ? prev : [...prev, message]));
-      // Своё сообщение считается прочитанным собой сразу — иначе после
-      // перезахода бейдж покажет непрочитанным то, что сам же и отправил.
-      await markRead();
     } finally {
       if (localId) {
         setPendingUploads((prev) => {
@@ -399,6 +396,17 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
     }
+    // markRead — за пределами try/finally для загрузки: раньше он стоял между
+    // setMessages и уборкой pending-плейсхолдера, а сам делает сетевой запрос
+    // (см. markRead ниже). Пока он не резолвился, в ленте одновременно висели
+    // и финальное сообщение (уже в messages), и ещё не убранный "грузится"
+    // пузырь (pendingUploads) — на медиа/войсах это давало на кадр лишнюю
+    // высоту, а следом за ней резкий скачок скролла вверх при уборке
+    // плейсхолдера. Теперь плейсхолдер убирается сразу вслед за сообщением,
+    // без ожидания сети.
+    // Своё сообщение считается прочитанным собой сразу — иначе после
+    // перезахода бейдж покажет непрочитанным то, что сам же и отправил.
+    await markRead();
   }, [markRead]);
 
   return (
