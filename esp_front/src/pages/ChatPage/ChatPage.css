@@ -1319,6 +1319,7 @@
   word-break: break-word;
   max-height: 120px;
   overflow-y: auto;
+  overscroll-behavior-y: none;
   padding: 6px 4px;
   cursor: text;
 }
