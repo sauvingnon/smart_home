@@ -497,9 +497,40 @@ class CacheManager:
         if not await self._ensure_connection():
             return False
         key = f"{self.CHAT_MSG_PREFIX}{seq}"
-        await self.redis_client.hset(key, mapping={k: str(v) for k, v in message.items()})
+        await self.redis_client.hset(key, mapping=self._encode_chat_message(message))
         await self.redis_client.zadd(self.CHAT_MESSAGES_ZSET, {str(seq): seq})
         return True
+
+    async def update_chat_message(self, seq: int, fields: dict) -> Optional[dict]:
+        """Точечно обновляет поля существующего сообщения (правка текста) и
+        возвращает его целиком. None, если сообщения нет — например, автор
+        редактирует то, что параллельно удалили."""
+        if not await self._ensure_connection():
+            return None
+        key = f"{self.CHAT_MSG_PREFIX}{seq}"
+        if not await self.redis_client.exists(key):
+            return None
+        await self.redis_client.hset(key, mapping=self._encode_chat_message(fields))
+        return await self.get_chat_message(seq)
+
+    @staticmethod
+    def _encode_chat_message(message: dict) -> dict:
+        """Redis-хэш хранит только строки. None бьём в "" отдельно: str(None)
+        дал бы литерал "None", и пустой reply_to читался бы как заполненный."""
+        return {k: "" if v is None else str(v) for k, v in message.items()}
+
+    @staticmethod
+    def _decode_chat_message(data: dict) -> dict:
+        """Обратное преобразование: числа из строк, отсутствующие поля — в
+        дефолты. Отдельным методом, потому что в Redis лежат и сообщения,
+        записанные до появления ответов/правок, у них этих полей просто нет."""
+        data["seq"] = int(data["seq"])
+        data["user_id"] = int(data["user_id"])
+        data["reply_to"] = int(data["reply_to"]) if data.get("reply_to") else None
+        data["reply_to_username"] = data.get("reply_to_username", "")
+        data["reply_to_preview"] = data.get("reply_to_preview", "")
+        data["edited_at"] = data.get("edited_at") or None
+        return data
 
     async def get_chat_messages(self, before_seq: Optional[int] = None, limit: int = 50) -> list:
         """История чата, новые сначала внутри страницы, но список возвращается
@@ -515,9 +546,7 @@ class CacheManager:
             data = await self.redis_client.hgetall(f"{self.CHAT_MSG_PREFIX}{s}")
             if not data:
                 continue
-            data["seq"] = int(data["seq"])
-            data["user_id"] = int(data["user_id"])
-            messages.append(data)
+            messages.append(self._decode_chat_message(data))
         messages.reverse()
         return messages
 
@@ -528,9 +557,7 @@ class CacheManager:
         data = await self.redis_client.hgetall(f"{self.CHAT_MSG_PREFIX}{seq}")
         if not data:
             return None
-        data["seq"] = int(data["seq"])
-        data["user_id"] = int(data["user_id"])
-        return data
+        return self._decode_chat_message(data)
 
     async def set_chat_pinned(self, seq: int) -> bool:
         """Закрепляет сообщение — один слот, новое закрепление заменяет старое."""
@@ -585,20 +612,22 @@ class CacheManager:
             removed += 1
         return removed
 
-    async def set_chat_read(self, user_id: int, seq: int) -> bool:
+    async def set_chat_read(self, user_id: int, seq: int) -> Optional[str]:
         """Отмечает, что юзер прочитал чат по последнее сообщение seq.
         read_at фиксируется только при первом достижении этого seq — повторный
         вызов с тем же (или меньшим) seq, например просто открыл чат заново
-        без новых сообщений, не должен сдвигать "прочитано" на текущее время."""
+        без новых сообщений, не должен сдвигать "прочитано" на текущее время.
+        Возвращает актуальный read_at (при повторном вызове — сохранённый ранее),
+        чтобы вызывающая сторона рассылала именно его, а не текущее время."""
         if not await self._ensure_connection():
-            return False
+            return None
         key = f"{self.CHAT_READ_PREFIX}{user_id}"
         existing = await self.redis_client.hgetall(key)
         if existing and int(existing.get("last_read_seq", 0)) >= seq:
-            return True
+            return existing.get("read_at")
         now_iso = datetime.now(tz=self.IZHEVSK_TZ).isoformat()
         await self.redis_client.hset(key, mapping={"last_read_seq": seq, "read_at": now_iso})
-        return True
+        return now_iso
 
     async def get_chat_read(self, user_id: int) -> Optional[dict]:
         """Последняя прочитанная юзером позиция. None если юзер ещё не открывал чат."""

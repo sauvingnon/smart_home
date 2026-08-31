@@ -9,6 +9,7 @@ from app.core.worker import BackgroundWorker
 from app.schemas.chat import (
     ChatMessageOut,
     ChatMessagesResponse,
+    EditMessageIn,
     MarkReadResponse,
     PinMessageIn,
     PinnedMessageResponse,
@@ -47,6 +48,7 @@ async def send_message(
     type: str = Form(...),
     text: Optional[str] = Form(None),
     media_kind: Optional[str] = Form(None),
+    reply_to: Optional[int] = Form(None),
     file: Optional[UploadFile] = File(None),
     user_id: int = Depends(get_current_user_id_dep),
 ):
@@ -65,6 +67,7 @@ async def send_message(
             media_bytes=media_bytes,
             content_type=content_type,
             media_kind=media_kind,
+            reply_to=reply_to,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -149,6 +152,25 @@ async def unpin_message(user_id: int = Depends(get_current_user_id_dep)):
     worker = BackgroundWorker.get_instance()
     await worker.chat_service.unpin_message()
     return {"status": "ok"}
+
+
+@router.patch("/messages/{seq}", response_model=ChatMessageOut)
+async def edit_message(
+    seq: int,
+    payload: EditMessageIn,
+    user_id: int = Depends(get_current_user_id_dep),
+):
+    """Поправить текст своего сообщения. Автора, тип и срок проверяет сервис —
+    403, если чужое, не текстовое или просрочено. ValueError тут отдаём как 400,
+    а не 404 как у удаления: и пустой текст, и мёртвый seq (сообщение успели
+    удалить) — это несостоятельный запрос клиента, а не отсутствующий ресурс."""
+    worker = BackgroundWorker.get_instance()
+    try:
+        return await worker.chat_service.edit_message(user_id, seq, payload.text)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.delete("/messages/{seq}")

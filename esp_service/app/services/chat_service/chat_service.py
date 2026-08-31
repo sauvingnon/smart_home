@@ -24,6 +24,16 @@ CHAT_MEDIA_MAX_BYTES = 50 * 1024 * 1024  # 50 МБ
 # сервере, а не только в UI: клиент может соврать, а удаление необратимо.
 CHAT_DELETE_WINDOW = timedelta(hours=1)
 
+# Правка обратима и ничего не разрушает (в отличие от удаления), поэтому окно
+# шире — сутки, как в Telegram, а не час.
+CHAT_EDIT_WINDOW = timedelta(hours=24)
+
+# Длина сохраняемой цитаты. Цитату денормализуем в само сообщение-ответ, а не
+# резолвим по reply_to на клиенте: исходник может быть за пределами
+# подгруженной страницы истории, вычищен по retention или удалён автором —
+# ответ на него всё равно должен показывать, на что отвечали.
+REPLY_PREVIEW_MAX_CHARS = 120
+
 ALLOWED_MEDIA_TYPES = {
     "image/jpeg", "image/png", "image/webp",
     "audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4",  # audio/mp4 — дефолт MediaRecorder на iOS Safari
@@ -202,6 +212,7 @@ class ChatService:
         media_bytes: Optional[bytes] = None,
         content_type: Optional[str] = None,
         media_kind: Optional[str] = None,
+        reply_to: Optional[int] = None,
     ) -> dict:
         text = (text or "").strip()
         # Браузер иногда шлёт content-type с параметрами (audio/webm;codecs=opus) —
@@ -233,7 +244,8 @@ class ChatService:
 
         seq = await self.cache.chat_next_seq()
         return await self._finalize_message(
-            seq, user_id, msg_type, text, media_key, media_kind, thumbnail_key=thumbnail_key,
+            seq, user_id, msg_type, text, media_key, media_kind,
+            thumbnail_key=thumbnail_key, reply_to=reply_to,
         )
 
     async def _generate_video_thumbnail(self, video_bytes: bytes, ext: str) -> str:
@@ -295,9 +307,28 @@ class ChatService:
             seq, user_id, "video", "", video_key, None, shared=True, thumbnail_key=thumbnail_key,
         )
 
+    async def _reply_snapshot(self, reply_to: Optional[int]) -> dict:
+        """Автор и короткий текст цитируемого сообщения — снимком на момент
+        ответа. Ссылка на несуществующий seq молча теряется: ответ на удалённое
+        сообщение — не повод отклонять новое."""
+        if not reply_to:
+            return {"reply_to": None, "reply_to_username": "", "reply_to_preview": ""}
+        original = await self.cache.get_chat_message(reply_to)
+        if not original:
+            return {"reply_to": None, "reply_to_username": "", "reply_to_preview": ""}
+        preview = original.get("text") or _PUSH_BODY_BY_TYPE.get(original.get("type", ""), "Сообщение")
+        if len(preview) > REPLY_PREVIEW_MAX_CHARS:
+            preview = preview[:REPLY_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
+        return {
+            "reply_to": original["seq"],
+            "reply_to_username": original.get("username", ""),
+            "reply_to_preview": preview,
+        }
+
     async def _finalize_message(
         self, seq: int, user_id: int, msg_type: str, text: str, media_key: str,
         media_kind: Optional[str], shared: bool = False, thumbnail_key: str = "",
+        reply_to: Optional[int] = None,
     ) -> dict:
         user = await self.cache.get_user(user_id)
         message = {
@@ -309,6 +340,9 @@ class ChatService:
             "media_key": media_key,
             "media_kind": media_kind or "",
             "thumbnail_key": thumbnail_key,
+            **await self._reply_snapshot(reply_to),
+            # Проставляется только правкой — у нового сообщения его нет.
+            "edited_at": None,
             # shared — сообщение ссылается на чужой объект в S3 (архив камеры), а не
             # на свою загрузку. Нужно, чтобы trim_old_messages не удалял по истечении
             # чатового retention файл, которым всё ещё владеет и распоряжается камера.
@@ -384,6 +418,44 @@ class ChatService:
         await self.cache.clear_chat_pinned()
         await self.broadcast({"type": "unpinned", "data": {}})
 
+    async def edit_message(self, user_id: int, seq: int, text: str) -> dict:
+        """Правит текст своего сообщения. Как и у удаления, все условия
+        проверяются здесь, а не только в UI — клиент волен прислать любой seq.
+
+        Медиа не редактируем: подписей у них в этом чате нет, а править сам
+        файл — это уже новое сообщение, а не правка.
+        """
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("Пустой текст — чтобы убрать сообщение, его надо удалить")
+
+        message = await self.cache.get_chat_message(seq)
+        if not message:
+            raise ValueError("Сообщение не найдено")
+        if message["user_id"] != user_id:
+            raise PermissionError("Можно править только свои сообщения")
+        if message.get("type") != "text":
+            raise PermissionError("Править можно только текстовые сообщения")
+        try:
+            ts = datetime.fromisoformat(message["ts"])
+        except (KeyError, ValueError):
+            raise PermissionError("У сообщения некорректное время — правка запрещена")
+        if _get_izhevsk_time() - ts > CHAT_EDIT_WINDOW:
+            raise PermissionError("Сообщение слишком старое — править уже нельзя")
+
+        updated = await self.cache.update_chat_message(
+            seq, {"text": text, "edited_at": _get_izhevsk_time().isoformat()},
+        )
+        if not updated:
+            raise ValueError("Сообщение не найдено")
+
+        await self.broadcast({"type": "edited", "data": updated})
+        # Закреплённое сообщение живёт у клиентов отдельной копией в баннере —
+        # без этого там осталась бы старая редакция до перезагрузки страницы.
+        if await self.cache.get_chat_pinned_seq() == seq:
+            await self.broadcast({"type": "pinned", "data": updated})
+        return updated
+
     async def delete_message(self, user_id: int, seq: int) -> None:
         """Удаляет своё сообщение, если ему меньше часа (как в Telegram).
 
@@ -443,8 +515,11 @@ class ChatService:
 
     async def mark_read(self, user_id: int) -> dict:
         seq = await self.cache.chat_current_seq()
-        await self.cache.set_chat_read(user_id, seq)
-        payload = {"user_id": user_id, "seq": seq, "at": _get_izhevsk_time().isoformat()}
+        # Рассылаем сохранённый read_at, а не текущее время: чат дёргает /read при
+        # каждом открытии и каждом новом сообщении, и "прочитано в HH:MM" у уже
+        # прочитанных сообщений иначе переписывалось бы на now при каждом вызове.
+        read_at = await self.cache.set_chat_read(user_id, seq)
+        payload = {"user_id": user_id, "seq": seq, "at": read_at or _get_izhevsk_time().isoformat()}
         await self.broadcast({"type": "read", "data": payload})
         return payload
 

@@ -19,6 +19,7 @@
   --bubble-mine-text: #ffffff;
   --bubble-other-bg: rgba(255, 255, 255, 0.7);
   --bubble-other-text: #1e293b;
+  --read-avatar-ring: rgba(240, 249, 255, 0.95);
 }
 
 .dark {
@@ -37,6 +38,7 @@
   --bubble-mine-text: #ffffff;
   --bubble-other-bg: rgba(255, 255, 255, 0.08);
   --bubble-other-text: #ffffff;
+  --read-avatar-ring: rgba(15, 23, 42, 0.9);
 }
 
 .chat-page {
@@ -301,54 +303,68 @@
   }
 }
 
-.chat-action-sheet-backdrop {
+/* Бэкдроп меню действий: размывает всё, что осталось позади — ленту, шапку,
+   поле ввода. Само сообщение из-под него поднято (.chat-bubble-outer--active
+   ниже) и остаётся резким, как в Telegram: размытие должно отсечь фон, а не
+   спрятать то, к чему меню прицеплено. Блюр небольшой — это полноэкранный
+   слой, на телефоне он перерисовывается каждый кадр анимации появления. */
+.chat-action-backdrop {
   position: fixed;
   inset: 0;
   z-index: 300;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
-  padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
 }
 
-.chat-action-sheet {
-  width: calc(100% - 32px);
-  max-width: 400px;
-  border-radius: 16px;
+/* Сообщение, над которым открыто меню, — единственное, что не размывается.
+   Над бэкдропом его поднимает z-index: ни один из родителей (.chat-page,
+   .chat-messages, .chat-messages-content) своего stacking context не создаёт,
+   так что пузырь конкурирует с бэкдропом напрямую. */
+.chat-bubble-outer--active {
+  position: relative;
+  z-index: 302;
+}
+
+/* Координаты считает JS (см. ChatPage.tsx, useLayoutEffect у actionTarget):
+   под сообщением, а если не влезает — над ним, прижато к тому же краю.
+   z-index выше поднятого пузыря — на случай, когда меню некуда деть и оно
+   ложится прямо на сообщение. */
+.chat-action-menu {
+  position: fixed;
+  z-index: 310;
+  min-width: 176px;
+  padding: 4px;
+  border-radius: 14px;
   overflow: hidden;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  box-shadow: var(--glass-shadow);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
 }
 
-.chat-action-sheet button {
+.chat-action-menu button {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border: none;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-primary);
   font-size: 15px;
+  text-align: left;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Разделители между пунктами — как в iOS-шите. :not(:first-child), а не
-   border-bottom у всех: у последнего пункта линия висела бы над краем. */
-.chat-action-sheet button:not(:first-child) {
-  border-top: 1px solid var(--glass-border);
+.chat-action-menu button:active {
+  background: rgba(127, 127, 127, 0.18);
 }
 
-.chat-action-sheet button:active {
-  background: rgba(127, 127, 127, 0.15);
-}
-
-.chat-action-sheet button.danger {
+.chat-action-menu button.danger {
   color: var(--accent-red, #ef4444);
 }
 
@@ -504,6 +520,7 @@
 }
 
 .chat-bubble {
+  position: relative; /* якорь для кружков "прочитано" на углу */
   padding: 8px 12px;
   border-radius: 16px;
   background: var(--bubble-other-bg);
@@ -533,6 +550,46 @@
   word-break: break-word;
 }
 
+/* Цитата в ответе. Текст и автор — снимок с момента ответа (см. бэк), поэтому
+   она остаётся читаемой, даже если исходник уже удалён; тап по ней прыгает к
+   оригиналу, если тот ещё в загруженной истории. */
+.chat-reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-left: 3px solid currentColor;
+  border-radius: 0 8px 8px 0;
+  background: rgba(127, 127, 127, 0.14);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.chat-reply-quote-author {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Цитата — одна строка: она напоминает контекст, а не пересказывает его. */
+.chat-reply-quote-text {
+  font-size: 13px;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Внутри медиа-пузыря рамка всего 3px — цитате нужен свой боковой отступ,
+   иначе она липнет к краю кадра. */
+.chat-bubble--media .chat-reply-quote {
+  margin: 2px 3px 4px;
+}
+
+.chat-bubble-edited {
+  font-style: italic;
+}
+
 .chat-bubble-time {
   font-size: 10px;
   opacity: 0.6;
@@ -540,11 +597,105 @@
   margin-top: 2px;
 }
 
-.chat-read-receipt {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  margin-top: 2px;
-  padding: 0 4px;
+/* Пузырь фото/видео без подписи: рамка почти в ноль — кадр сам себе пузырь,
+   как в Telegram. Совсем нулевой её не делаем, чтобы у чужих сообщений имя
+   автора не липло к краю кадра, а скругление пузыря не резало углы медиа. */
+.chat-bubble--media {
+  padding: 3px;
+  min-width: 0;
+}
+
+.chat-bubble--media .chat-bubble-author {
+  padding: 2px 6px 0;
+  margin-bottom: 3px;
+}
+
+.chat-media-frame {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
+
+/* Собственные отступы медиа внутри такого пузыря лишние — рамку задаёт он сам. */
+.chat-media-frame .chat-media-image,
+.chat-media-frame .chat-video-thumb,
+.chat-media-frame .chat-video-error {
+  margin: 0;
+}
+
+/* Время поверх кадра: тёмная пилюля, чтобы читалось и на светлом снимке.
+   Цвет фиксированный (не токен) — подложка всегда сам кадр, а не фон темы. */
+.chat-bubble-time--overlay {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  margin: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #ffffff;
+  opacity: 1;
+  line-height: 14px;
+  pointer-events: none;
+}
+
+/* У кружка правый нижний угол рамки — пустое место за окружностью,
+   поэтому время уезжает под центр, на сам кадр. */
+.chat-media-frame--circle .chat-bubble-time--overlay {
+  right: auto;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+}
+
+/* "Прочитано" — кружок с первой буквой имени, повешенный на нижний угол
+   пузыря и налезающий на него примерно на треть. Абсолютом внутри пузыря, а
+   не строкой под ним: метка не должна раздвигать ленту, когда кто-то дочитал.
+   Угол всегда обращён к центру экрана: у своих сообщений левый, у чужих
+   правый — иначе кружок уезжал бы за край списка. */
+.chat-read-avatars {
+  position: absolute;
+  bottom: -8px;
+  display: flex;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.chat-bubble-outer.mine .chat-read-avatars {
+  left: -8px;
+}
+
+/* Стопка растёт внутрь пузыря, а не наружу за край ленты. */
+.chat-bubble-outer:not(.mine) .chat-read-avatars {
+  right: -8px;
+  flex-direction: row-reverse;
+}
+
+.chat-read-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #ffffff;
+  /* Кольцо цветом фона страницы — иначе соседние кружки в стопке сливаются
+     в одно пятно, а на самом пузыре теряется край. */
+  box-shadow: 0 0 0 1.5px var(--read-avatar-ring);
+}
+
+.chat-read-avatar + .chat-read-avatar {
+  margin-left: -7px;
+}
+
+.chat-bubble-outer:not(.mine) .chat-read-avatar + .chat-read-avatar {
+  margin-left: 0;
+  margin-right: -7px;
 }
 
 /* Пузырь "идёт загрузка" — как в Telegram/VK: затемнённый превью-кадр из
@@ -829,6 +980,61 @@
   padding: 0;
 }
 
+/* Полоска "на что отвечаем / что правим" над полем ввода. Стекло то же, что у
+   .chat-input-row ниже, чтобы читалась как его продолжение, а не как
+   отдельная плашка. */
+.chat-composer-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  padding: 8px 14px;
+  border-radius: 16px;
+  color: var(--text-primary);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.chat-composer-context > svg {
+  flex: 0 0 auto;
+  color: var(--accent-blue);
+}
+
+/* min-width: 0 — иначе флекс-элемент не даст тексту ужаться до многоточия. */
+.chat-composer-context-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chat-composer-context-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-blue);
+}
+
+.chat-composer-context-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-composer-context button {
+  flex: 0 0 auto;
+  display: flex;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
 /* Тот же стеклянный стиль, что у .chat-scroll-bottom-btn — тот же
    background/border/blur/тень, просто форма пилюли вместо круга. */
 .chat-input-row {
@@ -917,11 +1123,10 @@
   cursor: text;
 }
 
-/* contenteditable-у нет ::placeholder — рисуем сами, пока поле реально
-   пустое (:empty ловит его только когда там вообще нет узлов, поэтому
-   .chat-text-input.textContent при отправке чистим через textContent = ''
-   в JS, а не через удаление символов — иначе иногда остаётся пустой <br>). */
-.chat-text-input:empty::before {
+/* contenteditable-у нет ::placeholder — рисуем сами. На :empty полагаться
+   нельзя: стерев текст руками, браузер оставляет в поле пустой <br>, узел
+   есть — плейсхолдер не возвращается. Пустоту считает JS по тексту поля. */
+.chat-text-input--empty::before {
   content: attr(data-placeholder);
   color: var(--text-tertiary);
   pointer-events: none;

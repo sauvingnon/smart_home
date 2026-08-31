@@ -20,6 +20,12 @@ export interface ChatMessage {
   media_kind: string; // '' | 'circle'
   thumbnail_key: string; // только у video, расшаренных из архива камеры
   ts: string;
+  // Ответ на сообщение. Автор и текст цитаты — снимком с момента ответа, а не
+  // ссылкой: исходник может быть уже удалён или вне подгруженной истории.
+  reply_to: number | null;
+  reply_to_username: string;
+  reply_to_preview: string;
+  edited_at: string | null;
 }
 
 export interface ChatReadState {
@@ -48,6 +54,7 @@ export type ChatWsEvent =
   | { type: 'pinned'; data: ChatMessage }
   | { type: 'unpinned'; data: Record<string, never> }
   | { type: 'deleted'; data: { seq: number } }
+  | { type: 'edited'; data: ChatMessage }
   | { type: 'presence'; data: ChatPresenceEntry }
   | { type: 'presence_snapshot'; data: ChatPresenceEntry[] }
   | { type: 'typing'; data: { user_id: number; display_name: string } };
@@ -255,12 +262,14 @@ class ApiClient {
     mediaKind?: string;
     file?: Blob;
     fileName?: string;
+    replyTo?: number | null;
     onProgress?: (ratio: number) => void;
   }): Promise<ChatMessage> {
     const form = new FormData();
     form.append('type', payload.type);
     if (payload.text) form.append('text', payload.text);
     if (payload.mediaKind) form.append('media_kind', payload.mediaKind);
+    if (payload.replyTo) form.append('reply_to', String(payload.replyTo));
     if (payload.file) form.append('file', payload.file, payload.fileName ?? 'upload');
 
     // fetch() не даёт событий прогресса загрузки (только скачивания, через
@@ -321,6 +330,10 @@ class ApiClient {
 
   async deleteChatMessage(seq: number): Promise<{ status: string }> {
     return this.fetch(`/chat/messages/${seq}`, { method: 'DELETE' });
+  }
+
+  async editChatMessage(seq: number, text: string): Promise<ChatMessage> {
+    return this.fetch(`/chat/messages/${seq}`, { method: 'PATCH', body: JSON.stringify({ text }) });
   }
 
   async getPinnedChatMessage(): Promise<{ message: ChatMessage | null }> {

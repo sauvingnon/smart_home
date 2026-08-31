@@ -40,6 +40,7 @@ interface ChatContextType {
   pinMessage: (seq: number) => Promise<void>;
   unpinMessage: () => Promise<void>;
   deleteMessage: (seq: number) => Promise<void>;
+  editMessage: (seq: number, text: string) => Promise<void>;
   presence: ChatPresenceEntry[];
   typingUsers: TypingUser[];
   notifyTyping: () => void;
@@ -196,6 +197,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else if (event.type === 'read') {
           setReads((prev) => {
             const existing = prev.find((r) => r.user_id === event.data.user_id);
+            // Повтор того же (или более старого) seq — например, юзер просто заново
+            // открыл чат: время прочтения уже зафиксировано, перетирать его нельзя.
+            if (existing && existing.last_read_seq >= event.data.seq) return prev;
             const next = prev.filter((r) => r.user_id !== event.data.user_id);
             next.push({
               user_id: event.data.user_id,
@@ -209,6 +213,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setPinnedMessage(event.data);
         } else if (event.type === 'unpinned') {
           setPinnedMessage(null);
+        } else if (event.type === 'edited') {
+          const edited = event.data;
+          setMessages((prev) => prev.map((m) => (m.seq === edited.seq ? edited : m)));
+          setPinnedMessage((prev) => (prev?.seq === edited.seq ? edited : prev));
         } else if (event.type === 'deleted') {
           // Сервер шлёт это всем, включая автора удаления: у него сообщение
           // уже убрано оптимистично, повторное удаление из массива безвредно.
@@ -331,6 +339,29 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Как и удаление — оптимистично: правка видна сразу, WS-событие потом просто
+  // подтвердит её. Откат на прежний текст, если сервер отказал (чужое, не
+  // текстовое, просрочено).
+  const editMessage = useCallback(async (seq: number, text: string) => {
+    let previous: ChatMessage | undefined;
+    setMessages((prev) => prev.map((m) => {
+      if (m.seq !== seq) return m;
+      previous = m;
+      return { ...m, text };
+    }));
+    try {
+      const updated = await apiClient.editChatMessage(seq, text);
+      setMessages((prev) => prev.map((m) => (m.seq === seq ? updated : m)));
+      setPinnedMessage((prev) => (prev?.seq === seq ? updated : prev));
+    } catch (e) {
+      if (previous) {
+        const restored = previous;
+        setMessages((prev) => prev.map((m) => (m.seq === seq ? restored : m)));
+      }
+      throw e;
+    }
+  }, []);
+
   const sendMessage = useCallback(async (payload: Parameters<typeof apiClient.sendChatMessage>[0]) => {
     // Прогресс-пузырь только для медиа (текст улетает мгновенно, показывать
     // нечего) и только локально у отправителя — превью из локального Blob,
@@ -384,6 +415,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       pinMessage,
       unpinMessage,
       deleteMessage,
+      editMessage,
       presence,
       typingUsers,
       notifyTyping,

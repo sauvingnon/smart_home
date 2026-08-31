@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, Sun, Moon, Settings, MessageCircle } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, Sun, Moon, Settings, MessageCircle, CornerUpLeft, Pencil, Check } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
 import { apiClient } from '../../api/client';
-import type { ChatMessage } from '../../api/client';
+import type { ChatMessage, ChatReadState } from '../../api/client';
 import { useHideNavBar } from '../../context/NavBarContext';
 import { VoiceMessage } from './VoiceMessage';
 import './ChatPage.css';
@@ -18,6 +18,21 @@ const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "д
 // там же оно и проверяется по-настоящему, тут только чтобы не показывать
 // заведомо мёртвый пункт меню.
 const DELETE_WINDOW_MS = 60 * 60 * 1000;
+// Окно на правку своего сообщения. Шире, чем на удаление, и так же
+// синхронно с бэком (CHAT_EDIT_WINDOW) — правка ничего не разрушает.
+const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Насколько пузырь подпрыгивает: коротко и сильно по тапу, чуть-чуть и
+// надолго — пока висит меню по долгому нажатию. Вибро-отклик на большинстве
+// телефонов из PWA не работает, поэтому подтверждение нажатия визуальное.
+const BUBBLE_POP_SCALE = 1.07;
+const BUBBLE_HOLD_SCALE = 1.03;
+const BUBBLE_POP_MS = 280;
+
+// Цвет кружка "прочитано" — по user_id, а не по позиции в списке: так буква
+// у человека всегда одного цвета, независимо от порядка ответа сервера.
+const READ_AVATAR_COLORS = ['#3b82f6', '#10b981', '#a855f7', '#f97316', '#ec4899', '#06b6d4'];
+const readAvatarColor = (userId: number) => READ_AVATAR_COLORS[Math.abs(userId) % READ_AVATAR_COLORS.length];
+const readAvatarLetter = (displayName: string) => displayName.trim().charAt(0).toUpperCase() || '?';
 
 type NotifStatus = 'unsupported' | 'ios-not-installed' | 'default' | 'denied' | 'granted';
 
@@ -130,7 +145,7 @@ export const ChatPage: React.FC = () => {
   const { userId } = useAuth();
   const {
     messages, pendingUploads, reads, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
-    pinnedMessage, pinMessage, unpinMessage, deleteMessage, presence, typingUsers, notifyTyping,
+    pinnedMessage, pinMessage, unpinMessage, deleteMessage, editMessage, presence, typingUsers, notifyTyping,
   } = useChat();
 
   const [inputText, setInputText] = useState('');
@@ -144,6 +159,15 @@ export const ChatPage: React.FC = () => {
   useHideNavBar(inputFocused);
   const [mediaErrors, setMediaErrors] = useState<Set<number>>(new Set());
   const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
+  // Меню считает свою позицию уже после того, как отрисуется — до замера
+  // собственных размеров непонятно, влезает ли оно под сообщение.
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
+  const [poppedSeq, setPoppedSeq] = useState<number | null>(null);
+  const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ответ и правка взаимоисключающие — поле ввода одно, и занято либо тем, либо другим.
+  const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
+  const [editTarget, setEditTarget] = useState<ChatMessage | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const nearBottomRef = useRef(true);
 
@@ -499,7 +523,13 @@ export const ChatPage: React.FC = () => {
     }
     setSending(true);
     try {
-      await sendMessage({ type: 'text', text });
+      if (editTarget) {
+        await editMessage(editTarget.seq, text);
+        setEditTarget(null);
+      } else {
+        await sendMessage({ type: 'text', text, replyTo: replyTarget?.seq ?? null });
+        setReplyTarget(null);
+      }
       setInputText('');
       if (textInputRef.current) textInputRef.current.textContent = '';
       setSendError(null);
@@ -515,6 +545,11 @@ export const ChatPage: React.FC = () => {
   };
 
   const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape' && (replyTarget || editTarget)) {
+      e.preventDefault();
+      cancelComposerContext();
+      return;
+    }
     if (e.key !== 'Enter') return;
     e.preventDefault();
     if (e.shiftKey) {
@@ -542,14 +577,16 @@ export const ChatPage: React.FC = () => {
 
     setSending(true);
     try {
+      const replyTo = replyTarget?.seq ?? null;
       const videoMime = guessVideoMimeType(file);
       if (videoMime) {
         const videoFile = videoMime === file.type ? file : new Blob([file], { type: videoMime });
-        await sendMessage({ type: 'video', file: videoFile, fileName: file.name || 'video.mp4' });
+        await sendMessage({ type: 'video', file: videoFile, fileName: file.name || 'video.mp4', replyTo });
       } else {
         const resized = await resizeImage(file);
-        await sendMessage({ type: 'image', file: resized, fileName: 'photo.jpg' });
+        await sendMessage({ type: 'image', file: resized, fileName: 'photo.jpg', replyTo });
       }
+      setReplyTarget(null);
       setSendError(null);
     } catch (err) {
       console.error('Не удалось отправить файл из галереи', err);
@@ -635,7 +672,9 @@ export const ChatPage: React.FC = () => {
         type: 'audio',
         file: blob,
         fileName: audioFileName(actualMimeType),
+        replyTo: replyTarget?.seq ?? null,
       });
+      setReplyTarget(null);
       setSendError(null);
     } catch (err) {
       console.error('Не удалось отправить запись', err);
@@ -724,12 +763,64 @@ export const ChatPage: React.FC = () => {
   // удержание: меню в таком случае открываться не должно.
   const LONG_PRESS_SLOP_PX = 10;
 
+  // hold — пузырь остаётся приподнятым, пока над ним висит меню. Иначе просто
+  // подпрыгивает и возвращается: это единственный отклик на нажатие, который
+  // реально виден (navigator.vibrate из PWA на iOS не работает вовсе).
+  const popBubble = (seq: number, hold = false) => {
+    if (popTimerRef.current) clearTimeout(popTimerRef.current);
+    setPoppedSeq(seq);
+    if (!hold) {
+      popTimerRef.current = setTimeout(() => setPoppedSeq(null), BUBBLE_POP_MS);
+    }
+  };
+
+  useEffect(() => () => {
+    if (popTimerRef.current) clearTimeout(popTimerRef.current);
+  }, []);
+
+  const closeActionMenu = () => {
+    setActionTarget(null);
+    setMenuPos(null);
+    setPoppedSeq(null);
+  };
+
+  // Позиция меню — вплотную к самому сообщению, а не нижним листом: под
+  // пузырём и прижато к тому же его краю, у своих справа, у чужих слева.
+  // Замеряем внешнюю обёртку, а не .chat-bubble: тот в этот момент ещё едет
+  // по spring-анимации подпрыгивания, и его rect мерцал бы вместе с ней.
+  useLayoutEffect(() => {
+    if (!actionTarget) {
+      setMenuPos(null);
+      return;
+    }
+    const menu = actionMenuRef.current;
+    const anchor = messagesContentRef.current?.querySelector(`[data-seq="${actionTarget.seq}"]`);
+    if (!menu || !anchor) return;
+
+    const box = anchor.getBoundingClientRect();
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    const GAP = 8;
+    const MARGIN = 8;
+
+    let top = box.bottom + GAP;
+    // Под сообщением не помещается (последнее в ленте, над полем ввода) —
+    // показываем над ним.
+    if (top + height > window.innerHeight - MARGIN) {
+      top = Math.max(MARGIN, box.top - GAP - height);
+    }
+    const preferredLeft = actionTarget.user_id === userId ? box.right - width : box.left;
+    const maxLeft = Math.max(MARGIN, window.innerWidth - width - MARGIN);
+    setMenuPos({ left: Math.min(Math.max(MARGIN, preferredLeft), maxLeft), top });
+  }, [actionTarget, userId]);
+
   const startLongPress = (message: ChatMessage, e: React.PointerEvent) => {
     longPressFiredRef.current = false;
     longPressOriginRef.current = { x: e.clientX, y: e.clientY };
     longPressTimerRef.current = setTimeout(() => {
       longPressFiredRef.current = true;
       navigator.vibrate?.(10);
+      popBubble(message.seq, true);
       setActionTarget(message);
     }, LONG_PRESS_MS);
   };
@@ -764,8 +855,54 @@ export const ChatPage: React.FC = () => {
   const canDelete = (message: ChatMessage): boolean =>
     message.user_id === userId && Date.now() - new Date(message.ts).getTime() < DELETE_WINDOW_MS;
 
+  // Медиа не правим: подписей у них тут нет, а поменять сам файл — это уже
+  // новое сообщение. Условие дублирует серверное, чтобы не показывать
+  // заведомо мёртвый пункт меню.
+  const canEdit = (message: ChatMessage): boolean =>
+    message.user_id === userId
+    && message.type === 'text'
+    && Date.now() - new Date(message.ts).getTime() < EDIT_WINDOW_MS;
+
+  const focusComposerAtEnd = () => {
+    const el = textInputRef.current;
+    if (!el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
+
+  const startReply = (message: ChatMessage) => {
+    closeActionMenu();
+    setEditTarget(null);
+    setReplyTarget(message);
+    focusComposerAtEnd();
+  };
+
+  const startEdit = (message: ChatMessage) => {
+    closeActionMenu();
+    setReplyTarget(null);
+    setEditTarget(message);
+    setInputText(message.text);
+    if (textInputRef.current) textInputRef.current.textContent = message.text;
+    focusComposerAtEnd();
+  };
+
+  // Отмена ответа поле не трогает (там мог быть уже набранный текст), а отмена
+  // правки — чистит: иначе в поле осталась бы чужая по смыслу старая редакция.
+  const cancelComposerContext = () => {
+    setReplyTarget(null);
+    if (!editTarget) return;
+    setEditTarget(null);
+    setInputText('');
+    if (textInputRef.current) textInputRef.current.textContent = '';
+  };
+
   const copyMessageText = async (message: ChatMessage) => {
-    setActionTarget(null);
+    closeActionMenu();
     try {
       await navigator.clipboard.writeText(message.text);
       navigator.vibrate?.(10);
@@ -777,7 +914,7 @@ export const ChatPage: React.FC = () => {
   };
 
   const confirmDelete = async (message: ChatMessage) => {
-    setActionTarget(null);
+    closeActionMenu();
     if (!window.confirm('Удалить сообщение у всех? Это необратимо.')) return;
     try {
       await deleteMessage(message.seq);
@@ -786,9 +923,15 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  // Прыжок к сообщению — из баннера закреплённого и из цитаты в ответе. Его
+  // может не быть в загруженной истории (или его удалили) — тогда просто
+  // ничего не делаем: цитата самодостаточна, текст в ней сохранён снимком.
+  // Подпрыгивание в конце — чтобы глаз нашёл, к чему именно приехали.
   const scrollToMessage = (seq: number) => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    popBubble(seq);
   };
 
   const renderMedia = (message: ChatMessage, isMine: boolean) => {
@@ -848,6 +991,29 @@ export const ChatPage: React.FC = () => {
     }
     return null;
   };
+
+  // Кто где остановился в чтении. Кружок с буквой вешаем на самое свежее
+  // прочитанное юзером сообщение — так метка одна на человека и ползёт по
+  // ленте вслед за ним, а не висит списком на последнем сообщении.
+  const readMarkers = useMemo(() => {
+    const bySeq = new Map<number, ChatReadState[]>();
+    if (messages.length === 0) return bySeq;
+    for (const r of reads) {
+      if (r.user_id === userId || r.last_read_seq <= 0) continue;
+      let target: ChatMessage | undefined;
+      for (const m of messages) {
+        if (m.seq > r.last_read_seq) break;
+        target = m;
+      }
+      // Прочитанное вымылось из загруженной истории — вешать метку не на что.
+      // На собственном сообщении она бессмысленна: автор его и так "прочитал".
+      if (!target || target.user_id === r.user_id) continue;
+      const existing = bySeq.get(target.seq);
+      if (existing) existing.push(r);
+      else bySeq.set(target.seq, [r]);
+    }
+    return bySeq;
+  }, [messages, reads, userId]);
 
   // Одна строка под заголовком "Чат": печатает > кто в сети > когда был(а) в
   // сети последний раз — приоритет тот же, что в WhatsApp/Telegram-группах.
@@ -976,41 +1142,85 @@ export const ChatPage: React.FC = () => {
           ref={messagesContentRef}
         >
         <AnimatePresence initial={false}>
-          {messages.map((message, idx) => {
+          {messages.map((message) => {
             const isMine = message.user_id === userId;
-            const isLast = idx === messages.length - 1;
-            const readers = isLast
-              ? reads.filter((r) => r.user_id !== message.user_id && r.last_read_seq >= message.seq)
-              : [];
+            const readers = readMarkers.get(message.seq) ?? [];
+            // Фото/видео без подписи — как в Telegram: пузыря вокруг медиа
+            // почти нет, а время лежит пилюлей на самом кадре. С подписью
+            // (или у голосовых) остаётся обычная раскладка со временем снизу.
+            const isMediaBubble = !!message.media_key
+              && (message.type === 'image' || message.type === 'video')
+              && !message.text;
 
             return (
               <motion.div
                 key={message.seq}
                 data-seq={message.seq}
-                className={`chat-bubble-outer ${isMine ? 'mine' : ''}`}
+                className={`chat-bubble-outer ${isMine ? 'mine' : ''} ${actionTarget?.seq === message.seq ? 'chat-bubble-outer--active' : ''}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.92 }}
               >
                 <div className="chat-bubble-col">
-                  <div
-                    className="chat-bubble"
+                  <motion.div
+                    className={`chat-bubble ${isMediaBubble ? 'chat-bubble--media' : ''}`}
+                    animate={{
+                      scale: poppedSeq !== message.seq
+                        ? 1
+                        : actionTarget?.seq === message.seq ? BUBBLE_HOLD_SCALE : BUBBLE_POP_SCALE,
+                    }}
+                    transition={{ type: 'spring', stiffness: 520, damping: 17 }}
                     onPointerDown={(e) => startLongPress(message, e)}
                     onPointerMove={cancelLongPressIfMoved}
                     onPointerUp={cancelLongPress}
                     onPointerCancel={cancelLongPress}
-                    onContextMenu={(e) => { e.preventDefault(); setActionTarget(message); }}
+                    onClick={(e) => { if (!isMediaBubble && !suppressClickIfLongPress(e)) popBubble(message.seq); }}
+                    onContextMenu={(e) => { e.preventDefault(); popBubble(message.seq, true); setActionTarget(message); }}
                   >
                     {!isMine && <div className="chat-bubble-author">{message.username}</div>}
+                    {message.reply_to !== null && (
+                      <div
+                        className="chat-reply-quote"
+                        role="button"
+                        onClick={(e) => {
+                          // Иначе клик всплывёт на сам пузырь и его подпрыгивание
+                          // перебьёт подсветку сообщения, к которому мы прыгнули.
+                          e.stopPropagation();
+                          if (!suppressClickIfLongPress(e)) scrollToMessage(message.reply_to!);
+                        }}
+                      >
+                        <span className="chat-reply-quote-author">{message.reply_to_username}</span>
+                        <span className="chat-reply-quote-text">{message.reply_to_preview}</span>
+                      </div>
+                    )}
                     {message.text && <div className="chat-bubble-text">{message.text}</div>}
-                    {message.media_key && renderMedia(message, isMine)}
-                    <div className="chat-bubble-time">{formatTime(message.ts)}</div>
-                  </div>
-                  {readers.length > 0 && (
-                    <div className="chat-read-receipt">
-                      Прочитано: {readers.map((r) => `${r.display_name} в ${r.read_at ? formatTime(r.read_at) : ''}`).join(', ')}
-                    </div>
-                  )}
+                    {message.media_key && (isMediaBubble ? (
+                      <div className={`chat-media-frame ${message.media_kind === 'circle' ? 'chat-media-frame--circle' : ''}`}>
+                        {renderMedia(message, isMine)}
+                        <span className="chat-bubble-time chat-bubble-time--overlay">{formatTime(message.ts)}</span>
+                      </div>
+                    ) : renderMedia(message, isMine))}
+                    {!isMediaBubble && (
+                      <div className="chat-bubble-time">
+                        {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
+                        {formatTime(message.ts)}
+                      </div>
+                    )}
+                    {readers.length > 0 && (
+                      <div className="chat-read-avatars">
+                        {readers.map((r) => (
+                          <span
+                            key={r.user_id}
+                            className="chat-read-avatar"
+                            style={{ background: readAvatarColor(r.user_id) }}
+                            title={`${r.display_name || 'Прочитано'}${r.read_at ? ` · прочитано в ${formatTime(r.read_at)}` : ''}`}
+                          >
+                            {readAvatarLetter(r.display_name)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </motion.div>
                 </div>
               </motion.div>
             );
@@ -1086,6 +1296,25 @@ export const ChatPage: React.FC = () => {
           </div>
         )}
 
+        {/* На что отвечаем / что правим — полоской прямо над полем ввода, как
+            в Telegram. Оба состояния взаимоисключающие, поле ввода одно. */}
+        {(editTarget || replyTarget) && (
+          <div className="chat-composer-context">
+            {editTarget ? <Pencil size={16} /> : <CornerUpLeft size={16} />}
+            <div className="chat-composer-context-body">
+              <span className="chat-composer-context-title">
+                {editTarget ? 'Редактирование' : `Ответ · ${replyTarget!.username}`}
+              </span>
+              <span className="chat-composer-context-text">
+                {previewForMessage(editTarget ?? replyTarget!)}
+              </span>
+            </div>
+            <button onClick={cancelComposerContext} title="Отменить">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         <div className="chat-input-row" ref={inputRowRef}>
           {!recording && (
             <>
@@ -1108,7 +1337,7 @@ export const ChatPage: React.FC = () => {
 
               <div
                 ref={textInputRef}
-                className="chat-text-input"
+                className={`chat-text-input ${inputText.trim() ? '' : 'chat-text-input--empty'}`}
                 contentEditable
                 suppressContentEditableWarning
                 role="textbox"
@@ -1147,7 +1376,9 @@ export const ChatPage: React.FC = () => {
               onClick={handleSendText}
               title={connectionState !== 'connected' ? 'Нет соединения — отправка не пройдёт' : undefined}
             >
-              {sending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+              {sending
+                ? <Loader2 size={18} className="spin" />
+                : editTarget ? <Check size={18} /> : <Send size={18} />}
             </button>
           ) : (
             <button
@@ -1225,33 +1456,65 @@ export const ChatPage: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Меню действий — не нижним листом, а вплотную к самому сообщению, как в
+          Telegram. Бэкдроп размывает всё остальное, а само сообщение поднято
+          над ним (.chat-bubble-outer--active) и остаётся резким: оно и есть
+          контекст меню. Меню — сосед бэкдропа, а не его потомок: иначе оно
+          осталось бы внутри его stacking context, ниже поднятого пузыря, и
+          пузырь перекрыл бы меню в тесном случае (длинное сообщение, когда
+          меню некуда деть ни под, ни над ним). */}
       <AnimatePresence>
         {actionTarget && (
-          <motion.div
-            className="chat-action-sheet-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setActionTarget(null)}
-          >
+          <>
             <motion.div
-              className="chat-action-sheet"
-              initial={{ y: 40, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 40, opacity: 0 }}
+              key="action-backdrop"
+              className="chat-action-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeActionMenu}
+            />
+            <motion.div
+              key="action-menu"
+              ref={actionMenuRef}
+              className="chat-action-menu"
+              style={{
+                left: menuPos?.left ?? 0,
+                top: menuPos?.top ?? 0,
+                // До первого замера позиция неизвестна — не показываем меню
+                // в углу экрана на один кадр.
+                visibility: menuPos ? 'visible' : 'hidden',
+                transformOrigin: actionTarget.user_id === userId ? 'top right' : 'top left',
+              }}
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.92 }}
+              transition={{ type: 'spring', stiffness: 520, damping: 30 }}
               onClick={(e) => e.stopPropagation()}
             >
+              <button onClick={() => startReply(actionTarget)}>
+                <CornerUpLeft size={17} />
+                Ответить
+              </button>
+
               {actionTarget.text && (
                 <button onClick={() => copyMessageText(actionTarget)}>
-                  <Copy size={18} />
-                  Копировать текст
+                  <Copy size={17} />
+                  Копировать
+                </button>
+              )}
+
+              {canEdit(actionTarget) && (
+                <button onClick={() => startEdit(actionTarget)}>
+                  <Pencil size={17} />
+                  Изменить
                 </button>
               )}
 
               <button
                 onClick={async () => {
                   const target = actionTarget;
-                  setActionTarget(null);
+                  closeActionMenu();
                   if (pinnedMessage?.seq === target.seq) {
                     await unpinMessage();
                   } else {
@@ -1259,18 +1522,18 @@ export const ChatPage: React.FC = () => {
                   }
                 }}
               >
-                {pinnedMessage?.seq === actionTarget.seq ? <PinOff size={18} /> : <Pin size={18} />}
-                {pinnedMessage?.seq === actionTarget.seq ? 'Открепить сообщение' : 'Закрепить сообщение'}
+                {pinnedMessage?.seq === actionTarget.seq ? <PinOff size={17} /> : <Pin size={17} />}
+                {pinnedMessage?.seq === actionTarget.seq ? 'Открепить' : 'Закрепить'}
               </button>
 
               {canDelete(actionTarget) && (
                 <button className="danger" onClick={() => confirmDelete(actionTarget)}>
-                  <Trash2 size={18} />
-                  Удалить у всех
+                  <Trash2 size={17} />
+                  Удалить
                 </button>
               )}
             </motion.div>
-          </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

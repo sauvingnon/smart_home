@@ -14,6 +14,13 @@ class ChatMessageOut(BaseModel):
     media_kind: str  # "" | "circle" (видео-кружок)
     thumbnail_key: str = ""  # только у video-сообщений — первый кадр, свой аплоад или шаринг с камеры
     ts: str
+    # Ответ на сообщение. Автор и текст цитаты лежат снимком прямо здесь —
+    # исходник может быть уже удалён или вне подгруженной страницы истории.
+    # Дефолты нужны и для сообщений, записанных до появления ответов/правок.
+    reply_to: Optional[int] = None
+    reply_to_username: str = ""
+    reply_to_preview: str = ""
+    edited_at: Optional[str] = None
 
 
 class ChatMessagesResponse(BaseModel):
@@ -63,6 +70,10 @@ class ShareVideoIn(BaseModel):
 
 class PinMessageIn(BaseModel):
     seq: int
+
+
+class EditMessageIn(BaseModel):
+    text: str
 
 
 class PinnedMessageResponse(BaseModel):
