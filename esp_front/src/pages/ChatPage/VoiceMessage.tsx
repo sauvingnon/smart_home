@@ -105,9 +105,34 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
 
     const onTime = () => {
       setCurrentTime(audio.currentTime);
-      if (audio.duration) setProgress(audio.currentTime / audio.duration);
+      if (Number.isFinite(audio.duration)) setProgress(audio.currentTime / audio.duration);
     };
-    const onLoaded = () => setDuration(audio.duration || 0);
+    // Голосовые с Android/Chrome — webm/opus от MediaRecorder, а он пишет
+    // поток без duration-box в конце файла. Известный баг Chromium: duration
+    // такого blob'а резолвится в Infinity, а не в реальное число (у iOS
+    // audio/mp4 duration-box есть всегда, там этой болячки нет). "Infinity"
+    // тихо протекал и в таймкод (formatDuration рисовал "Infinity:NaN"), и в
+    // progress волны (currentTime / Infinity == 0 всегда). Лечится
+    // стандартным воркэраундом: форс-сик в дальний конец заставляет браузер
+    // пересчитать реальную длительность и прислать её через 'durationchange',
+    // после чего возвращаем позицию на 0.
+    let onDurationChange: (() => void) | null = null;
+    const onLoaded = () => {
+      const d = audio.duration;
+      if (Number.isFinite(d)) {
+        setDuration(d || 0);
+        return;
+      }
+      onDurationChange = () => {
+        if (!Number.isFinite(audio.duration)) return;
+        setDuration(audio.duration);
+        audio.currentTime = 0;
+        audio.removeEventListener('durationchange', onDurationChange!);
+        onDurationChange = null;
+      };
+      audio.addEventListener('durationchange', onDurationChange);
+      audio.currentTime = 1e101;
+    };
     const onEnd = () => {
       setIsPlaying(false);
       setProgress(0);
@@ -128,6 +153,7 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
       audio.removeEventListener('loadedmetadata', onLoaded);
       audio.removeEventListener('ended', onEnd);
       audio.removeEventListener('pause', onPause);
+      if (onDurationChange) audio.removeEventListener('durationchange', onDurationChange);
       if (activePlayer?.audio === audio) activePlayer = null;
     };
   }, [objectUrl]);
