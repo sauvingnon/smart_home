@@ -1016,7 +1016,7 @@ export const ChatPage: React.FC = () => {
   const showReconnectTitle = connectionState !== 'connected' && hasConnectedOnceRef.current;
 
   return (
-    <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''}`}>
+    <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''} ${actionTarget ? 'chat-page--menu-open' : ''}`}>
       <div className="chat-header" ref={headerRef}>
         <div className="chat-header-card">
           <div className="chat-title">
@@ -1396,12 +1396,15 @@ export const ChatPage: React.FC = () => {
             <motion.div
               key="action-backdrop"
               className="chat-action-backdrop"
-              initial={{ opacity: 0 }}
+              // Появляется сразу, без проявления: пока он ехал по прозрачности,
+              // он каждый кадр пересчитывал размытие всего экрана, а стекло
+              // меню поверх — пересэмплировало этот меняющийся результат,
+              // отчего и дёргалось. Гаснет уже плавно: на уходе меню со своим
+              // стеклом над ним уже нет.
+              initial={{ opacity: 1 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              // Короче дефолтного: пока скрим едет, он каждый кадр пересчитывает
-              // размытие всего экрана — чем меньше таких кадров, тем ровнее.
-              transition={{ duration: 0.15 }}
+              transition={{ duration: 0.12 }}
               onClick={closeActionMenu}
             />
 
@@ -1443,12 +1446,15 @@ export const ChatPage: React.FC = () => {
                 // До первого замера позиция неизвестна — не показываем меню
                 // в углу экрана на один кадр.
                 visibility: menuPos ? 'visible' : 'hidden',
-                transformOrigin: actionTarget.user_id === userId ? 'top right' : 'top left',
               }}
-              initial={{ opacity: 0, scale: 0.92 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.92 }}
-              transition={{ type: 'spring', stiffness: 520, damping: 30 }}
+              // Только прозрачность, без scale: у карточек своё стекло, а оно
+              // при каждом изменении геометрии пересчитывает размытие заново —
+              // именно связка "стекло + пружинящий scale" и давала рябь.
+              // Пружинит вместо них копия сообщения, у неё стекла нет.
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="chat-action-readers">
