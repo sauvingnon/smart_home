@@ -1039,24 +1039,26 @@ export const ChatPage: React.FC = () => {
     return bySeq;
   }, [messages, reads, userId]);
 
-  // Плоский список для рендера: между сообщениями разных дней вклиниваем
-  // плашку-разделитель (сама плашка ещё и position: sticky в CSS — так дата
-  // "прилипает" сверху ленты при скролле, без ручного слежения за скроллом).
-  type MessageItem =
-    | { kind: 'date'; key: string; label: string }
-    | { kind: 'message'; key: string; message: ChatMessage };
-  const messageItems = useMemo(() => {
-    const items: MessageItem[] = [];
-    let lastDay: string | null = null;
+  // Сообщения, сгруппированные по дню. Каждая группа рендерится в своём
+  // контейнере — это и есть containing block для sticky-плашки даты внутри
+  // (см. .chat-day-group в CSS): плашка "прилипает" сверху только пока скролл
+  // не прошёл границу СВОЕЙ группы, и корректно отлипает на стыке дней, а не
+  // висит до конца ленты. Без этой обёртки при малом числе сообщений в дне
+  // соседние плашки на стыке дней видны одновременно (see баг с "28 августа"
+  // поверх "Вчера").
+  type DayGroup = { day: string; label: string; messages: ChatMessage[] };
+  const dayGroups = useMemo(() => {
+    const groups: DayGroup[] = [];
     for (const m of messages) {
       const day = dayKey(m.ts);
-      if (day !== lastDay) {
-        items.push({ kind: 'date', key: `date-${day}`, label: formatDateDivider(m.ts) });
-        lastDay = day;
+      const last = groups[groups.length - 1];
+      if (last && last.day === day) {
+        last.messages.push(m);
+      } else {
+        groups.push({ day, label: formatDateDivider(m.ts), messages: [m] });
       }
-      items.push({ kind: 'message', key: `msg-${m.seq}`, message: m });
     }
-    return items;
+    return groups;
   }, [messages]);
 
   // Кто прочитал именно это сообщение — для карточки над меню. Себя и автора
@@ -1194,72 +1196,71 @@ export const ChatPage: React.FC = () => {
           className={`chat-messages-content ${historyReady ? 'chat-messages-content--ready' : ''}`}
           ref={messagesContentRef}
         >
-        <AnimatePresence initial={false}>
-          {messageItems.map((item) => {
-            if (item.kind === 'date') {
-              return (
-                <div className="chat-date-divider" key={item.key}>
-                  <span>{item.label}</span>
-                </div>
-              );
-            }
+        {dayGroups.map((group) => (
+          <div className="chat-day-group" key={`day-${group.day}`}>
+            <div className="chat-date-divider">
+              <span>{group.label}</span>
+            </div>
+            <AnimatePresence initial={false}>
+              {group.messages.map((message) => {
+                if (message.type === 'system') {
+                  const isPinned = message.system_kind !== 'unpinned';
+                  return (
+                    <div
+                      className="chat-system-message"
+                      key={`msg-${message.seq}`}
+                      data-seq={message.seq}
+                      role={message.reply_to !== null ? 'button' : undefined}
+                      onClick={() => { if (message.reply_to !== null) scrollToMessage(message.reply_to); }}
+                    >
+                      {isPinned ? <Pin size={13} /> : <PinOff size={13} />}
+                      <span>
+                        <b>{message.username}</b> {isPinned ? 'закрепил(а)' : 'открепил(а)'} сообщение
+                        {message.reply_to_preview && <>: «{message.reply_to_preview}»</>}
+                      </span>
+                    </div>
+                  );
+                }
 
-            const message = item.message;
+                const isMine = message.user_id === userId;
+                const readers = readMarkers.get(message.seq) ?? [];
+                // Фото/видео без подписи — как в Telegram: пузыря вокруг медиа
+                // почти нет, а время лежит пилюлей на самом кадре. С подписью
+                // (или у голосовых) остаётся обычная раскладка со временем снизу.
+                const isMediaBubble = isMediaOnly(message);
 
-            if (message.type === 'system') {
-              const isPinned = message.system_kind !== 'unpinned';
-              return (
-                <div
-                  className="chat-system-message"
-                  key={item.key}
-                  data-seq={message.seq}
-                  role={message.reply_to !== null ? 'button' : undefined}
-                  onClick={() => { if (message.reply_to !== null) scrollToMessage(message.reply_to); }}
-                >
-                  {isPinned ? <Pin size={13} /> : <PinOff size={13} />}
-                  <span>
-                    <b>{message.username}</b> {isPinned ? 'закрепил(а)' : 'открепил(а)'} сообщение
-                    {message.reply_to_preview && <>: «{message.reply_to_preview}»</>}
-                  </span>
-                </div>
-              );
-            }
-
-            const isMine = message.user_id === userId;
-            const readers = readMarkers.get(message.seq) ?? [];
-            // Фото/видео без подписи — как в Telegram: пузыря вокруг медиа
-            // почти нет, а время лежит пилюлей на самом кадре. С подписью
-            // (или у голосовых) остаётся обычная раскладка со временем снизу.
-            const isMediaBubble = isMediaOnly(message);
-
-            return (
-              <motion.div
-                key={item.key}
-                data-seq={message.seq}
-                className={`chat-bubble-outer ${isMine ? 'mine' : ''} ${readers.length > 0 ? 'chat-bubble-outer--has-readers' : ''}`}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.92 }}
-              >
-                <div className="chat-bubble-col">
+                return (
                   <motion.div
-                    className={`chat-bubble ${isMediaBubble ? 'chat-bubble--media' : ''}`}
-                    animate={{ scale: poppedSeq === message.seq ? BUBBLE_POP_SCALE : 1 }}
-                    transition={{ type: 'spring', stiffness: 520, damping: 17 }}
-                    onPointerDown={(e) => startLongPress(message, e)}
-                    onPointerMove={cancelLongPressIfMoved}
-                    onPointerUp={cancelLongPress}
-                    onPointerCancel={cancelLongPress}
-                    onClick={(e) => { if (!isMediaBubble && !suppressClickIfLongPress(e)) popBubble(message.seq); }}
-                    onContextMenu={(e) => { e.preventDefault(); setActionTarget(message); }}
+                    key={`msg-${message.seq}`}
+                    data-seq={message.seq}
+                    className={`chat-bubble-outer ${isMine ? 'mine' : ''} ${readers.length > 0 ? 'chat-bubble-outer--has-readers' : ''}`}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.92 }}
                   >
-                    {renderBubbleContent(message, isMine, isMediaBubble, readers)}
+                    <div className="chat-bubble-col">
+                      <motion.div
+                        className={`chat-bubble ${isMediaBubble ? 'chat-bubble--media' : ''}`}
+                        animate={{ scale: poppedSeq === message.seq ? BUBBLE_POP_SCALE : 1 }}
+                        transition={{ type: 'spring', stiffness: 520, damping: 17 }}
+                        onPointerDown={(e) => startLongPress(message, e)}
+                        onPointerMove={cancelLongPressIfMoved}
+                        onPointerUp={cancelLongPress}
+                        onPointerCancel={cancelLongPress}
+                        onClick={(e) => { if (!isMediaBubble && !suppressClickIfLongPress(e)) popBubble(message.seq); }}
+                        onContextMenu={(e) => { e.preventDefault(); setActionTarget(message); }}
+                      >
+                        {renderBubbleContent(message, isMine, isMediaBubble, readers)}
+                      </motion.div>
+                    </div>
                   </motion.div>
-                </div>
-              </motion.div>
-            );
-          })}
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        ))}
 
+        <AnimatePresence initial={false}>
           {pendingUploads.map((upload) => (
             <motion.div
               key={upload.localId}
