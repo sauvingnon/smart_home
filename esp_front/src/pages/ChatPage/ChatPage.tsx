@@ -1281,7 +1281,7 @@ export const ChatPage: React.FC = () => {
       }
     }
     return groups;
-  }, [messages]);
+  }, [displayMessages]);
 
   // Кто прочитал именно это сообщение — для карточки над меню. Себя и автора
   // не показываем: своё прочтение неинтересно, авторское тривиально. Время
@@ -1451,14 +1451,25 @@ export const ChatPage: React.FC = () => {
                 // ложится сверху кадра тем же тесным пузырём. У голосовых
                 // остаётся обычная раскладка со временем снизу.
                 const isMediaBubble = isMediaMessage(message);
+                // См. exitingSeqs выше: сообщение уже удалено из messages,
+                // но ещё доигрывает collapse — height/margin едут в 0 своим
+                // ходом, вместо мгновенного исчезновения через exit
+                // (тот успевал схлопнуть только opacity/scale, а высоту —
+                // никогда, отсюда и был голый пробел снизу ленты).
+                const isExiting = exitingSeqs.has(message.seq);
 
                 return (
                   <motion.div
                     key={`msg-${message.seq}`}
                     data-seq={message.seq}
                     className={`chat-bubble-outer ${isMine ? 'mine' : ''} ${readers.length > 0 ? 'chat-bubble-outer--has-readers' : ''}`}
+                    style={isExiting ? { overflow: 'hidden', pointerEvents: 'none' } : undefined}
                     initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    animate={isExiting
+                      ? { opacity: 0, scale: 0.92, height: 0, marginTop: 0, marginBottom: 0 }
+                      : { opacity: 1, y: 0 }}
+                    transition={isExiting ? { duration: 0.22, ease: 'easeInOut' } : undefined}
+                    onAnimationComplete={() => { if (isExiting) handleExitCollapseComplete(message.seq); }}
                     exit={{ opacity: 0, scale: 0.92 }}
                   >
                     <div className="chat-bubble-col">
