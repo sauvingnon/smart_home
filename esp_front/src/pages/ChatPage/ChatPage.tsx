@@ -537,7 +537,11 @@ export const ChatPage: React.FC = () => {
       setSending(false);
       // Поле не disabled во время отправки специально — но фокус браузер всё
       // равно может увести на кнопку отправки, возвращаем его в поле ввода.
-      textInputRef.current?.focus();
+      // Именно focusComposerAtEnd (а не просто .focus()) — он явно пересобирает
+      // Range/Selection, без этого на пустом поле мобильная клавиатура не
+      // распознаёт "начало поля" и не включает автозаглавную букву для
+      // следующего сообщения.
+      focusComposerAtEnd();
     }
   };
 
@@ -1215,17 +1219,59 @@ export const ChatPage: React.FC = () => {
     return bySeq;
   }, [messages, reads, userId]);
 
+  // Удалённое (своё или чужое) сообщение не выкидываем из рендера сразу —
+  // тут же теряется вся высота его пузыря разом, лента не успевает ни
+  // анимировать исчезновение, ни подтянуть низ, и виснет голый пробел между
+  // последним сообщением и полем ввода. Вместо этого держим копию в
+  // exitingMessages, пока сам пузырь не доиграет collapse-анимацию (высота
+  // → 0, см. renderBubbleContent ниже) — ResizeObserver, который держит
+  // ленту у низа (см. выше, тот же механизм, что и под догрузку медиа),
+  // все эти кадры честно подтягивает scrollTop следом за уменьшающимся
+  // контентом. Диффим прямо в теле рендера (а не в useEffect), чтобы
+  // сообщение никогда не пропадало из вывода даже на один кадр — иначе
+  // framer-motion увидел бы его пропажу и появление в соседних рендерах
+  // как прерванный exit и дёрнул бы пузырь обратно.
+  const [exitingMessages, setExitingMessages] = useState<ChatMessage[]>([]);
+  const [prevMessagesForDiff, setPrevMessagesForDiff] = useState(messages);
+  if (messages !== prevMessagesForDiff) {
+    const currentIds = new Set(messages.map((m) => m.seq));
+    const removed = prevMessagesForDiff.filter((m) => !currentIds.has(m.seq));
+    if (removed.length > 0) {
+      setExitingMessages((prev) => {
+        const known = new Set(prev.map((m) => m.seq));
+        const additions = removed.filter((m) => !known.has(m.seq));
+        return additions.length > 0 ? [...prev, ...additions] : prev;
+      });
+    }
+    setPrevMessagesForDiff(messages);
+  }
+  const exitingSeqs = useMemo(() => new Set(exitingMessages.map((m) => m.seq)), [exitingMessages]);
+  // Финальная, уже беззвучная уборка — сам пузырь к этому моменту уже
+  // схлопнут до нуля, так что структурное исчезновение из массива не видно.
+  const handleExitCollapseComplete = useCallback((seq: number) => {
+    setExitingMessages((prev) => (prev.some((m) => m.seq === seq) ? prev.filter((m) => m.seq !== seq) : prev));
+  }, []);
+  const displayMessages = useMemo(() => {
+    if (exitingMessages.length === 0) return messages;
+    const seen = new Set(messages.map((m) => m.seq));
+    const merged = [...messages, ...exitingMessages.filter((m) => !seen.has(m.seq))];
+    merged.sort((a, b) => a.seq - b.seq);
+    return merged;
+  }, [messages, exitingMessages]);
+
   // Сообщения, сгруппированные по дню. Каждая группа рендерится в своём
   // контейнере — это и есть containing block для sticky-плашки даты внутри
   // (см. .chat-day-group в CSS): плашка "прилипает" сверху только пока скролл
   // не прошёл границу СВОЕЙ группы, и корректно отлипает на стыке дней, а не
   // висит до конца ленты. Без этой обёртки при малом числе сообщений в дне
   // соседние плашки на стыке дней видны одновременно (see баг с "28 августа"
-  // поверх "Вчера").
+  // поверх "Вчера"). Строим из displayMessages, а не messages — иначе группа
+  // единственного за день сообщения пропадала бы из вывода в тот же миг, что
+  // и само сообщение, оборвав его collapse-анимацию на середине.
   type DayGroup = { day: string; label: string; messages: ChatMessage[] };
   const dayGroups = useMemo(() => {
     const groups: DayGroup[] = [];
-    for (const m of messages) {
+    for (const m of displayMessages) {
       const day = dayKey(m.ts);
       const last = groups[groups.length - 1];
       if (last && last.day === day) {
