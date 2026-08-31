@@ -406,19 +406,59 @@ class ChatService:
             await self.cache.delete_push_subscription(admin["user_id"])
             raise ValueError("Подписка протухла и удалена, подпишись заново")
 
-    async def pin_message(self, seq: int) -> dict:
+    async def pin_message(self, user_id: int, seq: int) -> dict:
         """Закрепить сообщение — один слот на весь чат, новое закрепление
-        тихо заменяет старое (как в личках Telegram, не стек)."""
+        тихо заменяет старое (как в личках Telegram, не стек). Кто и что
+        закрепил — отдельным системным сообщением в самой ленте (см.
+        _create_system_message), а не только баннером, который просто
+        перезапишется следующим пином."""
         message = await self.cache.get_chat_message(seq)
         if not message:
             raise ValueError("Сообщение не найдено")
         await self.cache.set_chat_pinned(seq)
         await self.broadcast({"type": "pinned", "data": message})
+        await self._create_system_message(user_id, "pinned", seq)
         return message
 
-    async def unpin_message(self) -> None:
+    async def unpin_message(self, user_id: Optional[int] = None) -> None:
+        # Снимок закреплённого seq — до очистки, иначе будет нечего показать
+        # в системном сообщении "открепил(а)". user_id нет у автоматических
+        # вызовов (удаление закреплённого сообщения его автором, чистка по
+        # retention) — там открепление не чей-то жест, а системный побочный
+        # эффект, системное сообщение в этом случае пропускаем.
+        pinned_seq = await self.cache.get_chat_pinned_seq()
         await self.cache.clear_chat_pinned()
         await self.broadcast({"type": "unpinned", "data": {}})
+        if pinned_seq is not None and user_id is not None:
+            await self._create_system_message(user_id, "unpinned", pinned_seq)
+
+    async def _create_system_message(self, user_id: int, system_kind: str, reply_to: Optional[int]) -> dict:
+        """Служебное сообщение прямо в ленте (закрепление/открепление) — как в
+        Telegram: не тост, а обычная запись с собственным seq, переживающая
+        перезагрузку и историю. user_id/username — кто совершил действие,
+        reply_to/reply_to_preview (снимок через тот же _reply_snapshot, что и
+        у ответов) — какое сообщение затронуто. Без web push: это служебное
+        событие, а не повод будить чужой телефон."""
+        user = await self.cache.get_user(user_id)
+        seq = await self.cache.chat_next_seq()
+        message = {
+            "seq": seq,
+            "user_id": user_id,
+            "username": user["display_name"] if user else str(user_id),
+            "type": "system",
+            "system_kind": system_kind,
+            "text": "",
+            "media_key": "",
+            "media_kind": "",
+            "thumbnail_key": "",
+            **await self._reply_snapshot(reply_to),
+            "edited_at": None,
+            "shared": "",
+            "ts": _get_izhevsk_time().isoformat(),
+        }
+        await self.cache.save_chat_message(seq, message)
+        await self.broadcast({"type": "message", "data": message})
+        return message
 
     async def edit_message(self, user_id: int, seq: int, text: str) -> dict:
         """Правит текст своего сообщения. Как и у удаления, все условия

@@ -190,7 +190,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const incoming = event.data;
           setMessages((prev) => (prev.some((m) => m.seq === incoming.seq) ? prev : [...prev, incoming]));
 
-          if (incoming.user_id === userId || isOnChatPageRef.current) return;
+          // Системные (закрепил/открепил) — видны в ленте, но не считаются
+          // непрочитанным и не всплывают тостом: это служебная отметка, а не
+          // контент, который юзер мог бы "пропустить".
+          if (incoming.type === 'system' || incoming.user_id === userId || isOnChatPageRef.current) return;
 
           setUnreadCount((prev) => prev + 1);
           setToast(incoming);

@@ -39,6 +39,27 @@ const readAvatarLetter = (displayName: string) => displayName.trim().charAt(0).t
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
+// Ключ дня для группировки — по локальным Y/M/D, а не по самой ISO-строке
+// (та в UTC и может съехать на соседний день от локального).
+const dayKey = (iso: string): string => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+};
+
+// Плашка-разделитель дат в ленте — "Сегодня"/"Вчера"/"31 августа", как в Telegram.
+const formatDateDivider = (iso: string): string => {
+  const date = new Date(iso);
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+  if (diffDays === 0) return 'Сегодня';
+  if (diffDays === 1) return 'Вчера';
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString('ru-RU', sameYear
+    ? { day: 'numeric', month: 'long' }
+    : { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
 // Пережимаем фото на клиенте перед аплоадом — сервер не транскодирует ничего,
 // вся тяжесть кодирования лежит на клиенте (см. обсуждение с пользователем).
 async function resizeImage(file: File, maxDim = 1600): Promise<Blob> {
@@ -132,6 +153,12 @@ export const ChatPage: React.FC = () => {
   const [editTarget, setEditTarget] = useState<ChatMessage | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const nearBottomRef = useRef(true);
+  // Палец сейчас на ленте — пока это так, ничего не пишем в scrollTop сами
+  // (см. ResizeObserver ниже): программная запись scrollTop поверх активного
+  // тач-жеста на iOS — известный триггер "заморозки" слоя скролла в WKWebView,
+  // тот же класс бага, что раньше ловили на backdrop-filter меню действий.
+  const isTouchingListRef = useRef(false);
+  const pendingBottomPinRef = useRef(false);
 
   const { notifStatus, busy: pushBusy, requestAccess: requestNotificationAccess } = useChatPush();
 
@@ -292,13 +319,35 @@ export const ChatPage: React.FC = () => {
     const content = messagesContentRef.current;
     if (!container || !content) return;
     const ro = new ResizeObserver(() => {
-      if (nearBottomRef.current) {
-        container.scrollTop = container.scrollHeight;
+      if (!nearBottomRef.current) return;
+      // Палец на ленте (см. isTouchingListRef выше) — не пишем scrollTop
+      // прямо сейчас, запоминаем и дописываем по touchend.
+      if (isTouchingListRef.current) {
+        pendingBottomPinRef.current = true;
+        return;
       }
+      container.scrollTop = container.scrollHeight;
     });
     ro.observe(content);
     return () => ro.disconnect();
   }, []);
+
+  const handleMessagesTouchStart = () => {
+    isTouchingListRef.current = true;
+  };
+
+  const handleMessagesTouchEnd = () => {
+    isTouchingListRef.current = false;
+    if (!pendingBottomPinRef.current) return;
+    pendingBottomPinRef.current = false;
+    // Кадр запаса — чтобы не столкнуться с ещё не отыгравшей нативной
+    // инерцией/отскоком у самого конца жеста.
+    requestAnimationFrame(() => {
+      if (listRef.current && nearBottomRef.current) {
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+      }
+    });
+  };
 
 
   // Отпускаем камеру/микрофон при уходе со страницы
@@ -973,6 +1022,9 @@ export const ChatPage: React.FC = () => {
       let target: ChatMessage | undefined;
       for (const m of messages) {
         if (m.seq > r.last_read_seq) break;
+        // Системные (закрепил/открепил) — не настоящий контент, кружок
+        // "прочитано" под служебной плашкой смотрелся бы странно.
+        if (m.type === 'system') continue;
         target = m;
       }
       // Прочитанное вымылось из загруженной истории — вешать метку не на что.
@@ -984,6 +1036,26 @@ export const ChatPage: React.FC = () => {
     }
     return bySeq;
   }, [messages, reads, userId]);
+
+  // Плоский список для рендера: между сообщениями разных дней вклиниваем
+  // плашку-разделитель (сама плашка ещё и position: sticky в CSS — так дата
+  // "прилипает" сверху ленты при скролле, без ручного слежения за скроллом).
+  type MessageItem =
+    | { kind: 'date'; key: string; label: string }
+    | { kind: 'message'; key: string; message: ChatMessage };
+  const messageItems = useMemo(() => {
+    const items: MessageItem[] = [];
+    let lastDay: string | null = null;
+    for (const m of messages) {
+      const day = dayKey(m.ts);
+      if (day !== lastDay) {
+        items.push({ kind: 'date', key: `date-${day}`, label: formatDateDivider(m.ts) });
+        lastDay = day;
+      }
+      items.push({ kind: 'message', key: `msg-${m.seq}`, message: m });
+    }
+    return items;
+  }, [messages]);
 
   // Кто прочитал именно это сообщение — для карточки над меню. Себя и автора
   // не показываем: своё прочтение неинтересно, авторское тривиально. Время
@@ -1096,7 +1168,10 @@ export const ChatPage: React.FC = () => {
         className="chat-messages"
         ref={listRef}
         onScroll={handleScroll}
+        onTouchStart={handleMessagesTouchStart}
         onTouchMove={dismissKeyboardOnUserScroll}
+        onTouchEnd={handleMessagesTouchEnd}
+        onTouchCancel={handleMessagesTouchEnd}
         onWheel={dismissKeyboardOnUserScroll}
         // paddingTop, а не padding-top у страницы: лента занимает экран целиком
         // и проходит под шапкой, поэтому сообщения видно прямо за таблетками.
@@ -1118,7 +1193,36 @@ export const ChatPage: React.FC = () => {
           ref={messagesContentRef}
         >
         <AnimatePresence initial={false}>
-          {messages.map((message) => {
+          {messageItems.map((item) => {
+            if (item.kind === 'date') {
+              return (
+                <div className="chat-date-divider" key={item.key}>
+                  <span>{item.label}</span>
+                </div>
+              );
+            }
+
+            const message = item.message;
+
+            if (message.type === 'system') {
+              const isPinned = message.system_kind !== 'unpinned';
+              return (
+                <div
+                  className="chat-system-message"
+                  key={item.key}
+                  data-seq={message.seq}
+                  role={message.reply_to !== null ? 'button' : undefined}
+                  onClick={() => { if (message.reply_to !== null) scrollToMessage(message.reply_to); }}
+                >
+                  {isPinned ? <Pin size={13} /> : <PinOff size={13} />}
+                  <span>
+                    <b>{message.username}</b> {isPinned ? 'закрепил(а)' : 'открепил(а)'} сообщение
+                    {message.reply_to_preview && <>: «{message.reply_to_preview}»</>}
+                  </span>
+                </div>
+              );
+            }
+
             const isMine = message.user_id === userId;
             const readers = readMarkers.get(message.seq) ?? [];
             // Фото/видео без подписи — как в Telegram: пузыря вокруг медиа
@@ -1128,7 +1232,7 @@ export const ChatPage: React.FC = () => {
 
             return (
               <motion.div
-                key={message.seq}
+                key={item.key}
                 data-seq={message.seq}
                 className={`chat-bubble-outer ${isMine ? 'mine' : ''} ${readers.length > 0 ? 'chat-bubble-outer--has-readers' : ''}`}
                 initial={{ opacity: 0, y: 10 }}

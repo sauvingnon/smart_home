@@ -141,7 +141,7 @@ async def pin_message(
     """Закрепить сообщение — один слот на чат, новое закрепление заменяет старое."""
     worker = BackgroundWorker.get_instance()
     try:
-        message = await worker.chat_service.pin_message(payload.seq)
+        message = await worker.chat_service.pin_message(user_id, payload.seq)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return message
@@ -150,7 +150,7 @@ async def pin_message(
 @router.post("/unpin")
 async def unpin_message(user_id: int = Depends(get_current_user_id_dep)):
     worker = BackgroundWorker.get_instance()
-    await worker.chat_service.unpin_message()
+    await worker.chat_service.unpin_message(user_id)
     return {"status": "ok"}
 
 

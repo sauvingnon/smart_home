@@ -517,6 +517,16 @@
   position: relative;
   flex: 1 1 auto;
   overflow-y: auto;
+  /* Гасим резиновый отскок (rubber-band) на границах именно этой ленты — не
+     ради красоты, а потому что резкий разворот жеста прямо во время отскока
+     у края является известным триггером бага WebKit/WKWebView: слой скролла
+     "замерзает" на статичном снимке контента вместо живой прокрутки (баг
+     компоновщика, не наш код — тот же класс проблемы, что раньше ловили на
+     backdrop-filter меню действий, см. -webkit-overflow-scrolling ниже).
+     Без самого отскока разворачивать физически нечего — лента просто жёстко
+     стопорится о границу, ценой немного менее "пружинистого" фирменного
+     iOS-фила именно в этом месте. */
+  overscroll-behavior-y: none;
   /* Явный overflow-x:hidden — без него браузер сам подставляет overflow-x:
      auto (раз overflow-y уже не visible), и .chat-messages становится
      собственным горизонтальным скролл-контейнером при любом переполнении
@@ -562,6 +572,69 @@
 
 .chat-messages-content--ready {
   opacity: 1;
+}
+
+/* Плашка-разделитель дня. sticky, а не обычный поток — top: 0 держит её
+   прилипшей к верхней кромке .chat-messages (там же, где заканчивается
+   динамический paddingTop под шапку) весь тот отрезок скролла, пока следующая
+   такая же плашка не подойдёт снизу и не вытолкнет предыдущую — тот самый
+   "плавающий" эффект даты сверху ленты, как в Telegram, без единой строчки
+   JS-слежения за скроллом. */
+.chat-date-divider {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  /* Сама обёртка не должна ловить тапы по сообщению под ней (см.
+     pointer-events: auto у .chat-header выше — тот же паттерн). */
+  pointer-events: none;
+}
+
+.chat-date-divider span {
+  pointer-events: auto;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--glass-shadow);
+}
+
+/* Служебная запись в ленте — "юзер закрепил(а)/открепил(а) сообщение".
+   Центрированная плашка без пузыря и без своих действий (долгий тап/меню),
+   единственный жест — тап целиком прыгает к затронутому сообщению. */
+.chat-system-message {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 90%;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+}
+
+.chat-system-message svg {
+  flex: 0 0 auto;
+  color: var(--accent-blue);
+}
+
+.chat-system-message b {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 /* fixed относительно экрана, а не относительно .chat-messages — иначе

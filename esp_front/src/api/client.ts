@@ -14,7 +14,7 @@ export interface ChatMessage {
   seq: number;
   user_id: number;
   username: string;
-  type: 'text' | 'image' | 'audio' | 'video';
+  type: 'text' | 'image' | 'audio' | 'video' | 'system';
   text: string;
   media_key: string;
   media_kind: string; // '' | 'circle'
@@ -26,6 +26,9 @@ export interface ChatMessage {
   reply_to_username: string;
   reply_to_preview: string;
   edited_at: string | null;
+  // Только у type === 'system': 'pinned' | 'unpinned'. Кто — user_id/username,
+  // какое сообщение — reply_to/reply_to_preview (тот же снимок, что у ответов).
+  system_kind: string;
 }
 
 export interface ChatReadState {

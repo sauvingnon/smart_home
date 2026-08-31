@@ -8,7 +8,7 @@ class ChatMessageOut(BaseModel):
     seq: int
     user_id: int
     username: str
-    type: str  # "text" | "image" | "audio" | "video"
+    type: str  # "text" | "image" | "audio" | "video" | "system"
     text: str
     media_key: str
     media_kind: str  # "" | "circle" (видео-кружок)
@@ -21,6 +21,10 @@ class ChatMessageOut(BaseModel):
     reply_to_username: str = ""
     reply_to_preview: str = ""
     edited_at: Optional[str] = None
+    # Только у type=="system": "pinned" | "unpinned". user_id/username — кто
+    # закрепил/открепил, reply_to/reply_to_preview (снимок, тот же механизм,
+    # что у ответов) — какое сообщение.
+    system_kind: str = ""
 
 
 class ChatMessagesResponse(BaseModel):
