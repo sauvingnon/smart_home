@@ -951,9 +951,8 @@ export const ChatPage: React.FC = () => {
     </>
   );
 
-  const isMediaOnly = (message: ChatMessage): boolean => !!message.media_key
-    && (message.type === 'image' || message.type === 'video')
-    && !message.text;
+  const isMediaMessage = (message: ChatMessage): boolean => !!message.media_key
+    && (message.type === 'image' || message.type === 'video');
 
   const renderMedia = (message: ChatMessage, isMine: boolean) => {
     const url = apiClient.getChatMediaSrc(message.media_key);
@@ -1224,10 +1223,11 @@ export const ChatPage: React.FC = () => {
 
                 const isMine = message.user_id === userId;
                 const readers = readMarkers.get(message.seq) ?? [];
-                // Фото/видео без подписи — как в Telegram: пузыря вокруг медиа
-                // почти нет, а время лежит пилюлей на самом кадре. С подписью
-                // (или у голосовых) остаётся обычная раскладка со временем снизу.
-                const isMediaBubble = isMediaOnly(message);
+                // Фото/видео — как в Telegram: пузыря вокруг медиа почти нет,
+                // а время лежит пилюлей на самом кадре. Подпись, если есть,
+                // ложится сверху кадра тем же тесным пузырём. У голосовых
+                // остаётся обычная раскладка со временем снизу.
+                const isMediaBubble = isMediaMessage(message);
 
                 return (
                   <motion.div
@@ -1532,11 +1532,11 @@ export const ChatPage: React.FC = () => {
                 exit={{ scale: 1 }}
                 transition={{ type: 'spring', stiffness: 520, damping: 17 }}
               >
-                <div className={`chat-bubble ${isMediaOnly(actionTarget) ? 'chat-bubble--media' : ''}`}>
+                <div className={`chat-bubble ${isMediaMessage(actionTarget) ? 'chat-bubble--media' : ''}`}>
                   {renderBubbleContent(
                     actionTarget,
                     actionTarget.user_id === userId,
-                    isMediaOnly(actionTarget),
+                    isMediaMessage(actionTarget),
                     readMarkers.get(actionTarget.seq) ?? [],
                   )}
                 </div>
