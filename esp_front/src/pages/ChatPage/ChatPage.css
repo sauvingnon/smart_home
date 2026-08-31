@@ -595,7 +595,7 @@
   pointer-events: auto;
   padding: 4px 12px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
   background: var(--glass-bg);
@@ -616,7 +616,7 @@
   max-width: 90%;
   padding: 6px 14px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.4;
   text-align: center;
   color: var(--text-secondary);
@@ -780,7 +780,7 @@
 }
 
 .chat-bubble-time {
-  font-size: 10px;
+  font-size: 12px;
   opacity: 0.6;
   text-align: right;
   margin-top: 2px;
