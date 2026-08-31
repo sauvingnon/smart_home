@@ -23,6 +23,9 @@
   /* Непрозрачный двойник --bubble-other-bg для пузыря, поднятого над блюром
      меню: сквозь полупрозрачный там просвечивал бы сам скрим. */
   --bubble-other-solid: #f4fafe;
+  /* Поверхность карточек меню действий. Не стекло: они лежат на уже размытом
+     скриме, и собственный backdrop-filter им только вредит (см. ниже). */
+  --menu-surface: rgba(255, 255, 255, 0.95);
 }
 
 .dark {
@@ -43,6 +46,7 @@
   --bubble-other-text: #ffffff;
   --read-avatar-ring: rgba(15, 23, 42, 0.9);
   --bubble-other-solid: #242a3d;
+  --menu-surface: rgba(36, 42, 61, 0.96);
 }
 
 .chat-page {
@@ -363,14 +367,18 @@
   min-width: 248px;
 }
 
+/* Сплошная поверхность вместо стекла — намеренно, а не для экономии. Стекло
+   тут пересэмплировало бы фон каждый кадр появления, а фон под ним в этот
+   самый момент нестабилен вдвойне: скрим проявляет своё размытие, и сами
+   карточки едут по scale. Из-за этого меню сначала рисовалось, потом заметно
+   передёргивало градиентом и только затем устаканивалось. Размывать тут и
+   нечего: всё, что позади, уже размыл скрим. */
 .chat-action-menu,
 .chat-action-readers {
   border-radius: 16px;
   overflow: hidden;
-  background: var(--glass-bg);
+  background: var(--menu-surface);
   border: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
 }
 
