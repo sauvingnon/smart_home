@@ -198,6 +198,22 @@ export const ChatPage: React.FC = () => {
   const recordTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Фейд-ин страницы завязан на этот флаг, а не на historyReady из
+  // ChatContext напрямую: historyReady грузится фоном ещё в ChatProvider на
+  // верху приложения (сразу после логина) и обратно в false никогда не
+  // сбрасывается — так что к моменту реального захода на вкладку он почти
+  // всегда уже true, и просто применить его классом в первом же рендере
+  // означало бы отрисоваться сразу в конечном состоянии: transition нечего
+  // отыгрывать, если "было" и "стало" совпадают на первом же кадре. rAF
+  // гарантирует, что первый paint страницы всегда происходит в
+  // "невидимом" состоянии — ровно как loading-стейт на Видео/Настройках,
+  // которые тоже стартуют заново при каждом монтировании страницы.
+  const [pageEntered, setPageEntered] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setPageEntered(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   useEffect(() => {
     markRead();
   }, [messages.length, markRead]);
@@ -1091,7 +1107,7 @@ export const ChatPage: React.FC = () => {
   const showReconnectTitle = connectionState !== 'connected' && hasConnectedOnceRef.current;
 
   return (
-    <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''} ${actionTarget ? 'chat-page--menu-open' : ''}`}>
+    <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''} ${actionTarget ? 'chat-page--menu-open' : ''} ${pageEntered ? 'chat-page--entered' : ''}`}>
       <div className="chat-header" ref={headerRef}>
         <div className="chat-header-card">
           <div className="chat-title">
@@ -1192,7 +1208,7 @@ export const ChatPage: React.FC = () => {
         )}
 
         <div
-          className={`chat-messages-content ${historyReady ? 'chat-messages-content--ready' : ''}`}
+          className={`chat-messages-content ${pageEntered && historyReady ? 'chat-messages-content--ready' : ''}`}
           ref={messagesContentRef}
         >
         {dayGroups.map((group) => (

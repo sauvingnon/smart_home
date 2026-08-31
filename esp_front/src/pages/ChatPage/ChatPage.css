@@ -120,6 +120,17 @@
      сообщения видно, а проскроллить их за таблетками нельзя. Касания ловят
      только сами таблетки (pointer-events: auto ниже). */
   pointer-events: none;
+  /* Фейд-ин шапки при заходе на вкладку — только opacity, без transform:
+     .chat-header/.chat-input-bar намеренно position:fixed (см. их
+     комментарии ниже), а transform на них самих или их обёртке подставил бы
+     им нового containing block и сломал позиционирование относительно
+     экрана. */
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.chat-page--entered .chat-header {
+  opacity: 1;
 }
 
 .chat-header > * {
@@ -559,9 +570,11 @@
    анимирует их по одному (иначе при каждом возврате на /chat 50 сообщений
    заново бы "выезжали"), так что первая загрузка ничем не смягчалась.
    Вместо анимации по каждому пузырю — один плавный фейд всей ленты целиком,
-   один раз за сессию (historyReady в ChatContext не сбрасывается обратно).
-   Скролл-к-низу (см. ChatPage.tsx) успевает отработать, пока opacity ещё 0 —
-   так что фейд-ин показывает уже готовую, докрученную ленту. */
+   при каждом заходе на вкладку (см. pageEntered в ChatPage.tsx — он не
+   зависит от historyReady из ChatContext, который грузится фоном один раз
+   за сессию и потом всегда true). Скролл-к-низу (см. ChatPage.tsx) успевает
+   отработать, пока opacity ещё 0 — так что фейд-ин показывает уже готовую,
+   докрученную ленту. */
 .chat-messages-content {
   display: flex;
   flex-direction: column;
@@ -1146,7 +1159,14 @@
      для раскладки (fixed-позиционирование, измерение высоты под ленту, см.
      ChatPage.tsx) — визуально она теперь прозрачна, всю "магию" даёт сам
      .chat-input-row, как у стрелки скролла. */
-  transition: bottom 0.2s ease;
+  transition: bottom 0.2s ease, opacity 0.25s ease;
+  /* Фейд-ин при заходе на вкладку — см. тот же приём и его обоснование у
+     .chat-header выше. */
+  opacity: 0;
+}
+
+.chat-page--entered .chat-input-bar {
+  opacity: 1;
 }
 
 .chat-page--composing .chat-input-bar {
