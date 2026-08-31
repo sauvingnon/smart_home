@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, Sun, Moon, Settings, MessageCircle, CornerUpLeft, Pencil, Check } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
@@ -7,6 +8,7 @@ import { useChat, previewForMessage } from '../../context/ChatContext';
 import { apiClient } from '../../api/client';
 import type { ChatMessage, ChatReadState } from '../../api/client';
 import { useHideNavBar } from '../../context/NavBarContext';
+import { useChatPush } from '../../hooks/useChatPush';
 import { VoiceMessage } from './VoiceMessage';
 import './ChatPage.css';
 
@@ -33,29 +35,6 @@ const BUBBLE_POP_MS = 280;
 const READ_AVATAR_COLORS = ['#3b82f6', '#10b981', '#a855f7', '#f97316', '#ec4899', '#06b6d4'];
 const readAvatarColor = (userId: number) => READ_AVATAR_COLORS[Math.abs(userId) % READ_AVATAR_COLORS.length];
 const readAvatarLetter = (displayName: string) => displayName.trim().charAt(0).toUpperCase() || '?';
-
-type NotifStatus = 'unsupported' | 'ios-not-installed' | 'default' | 'denied' | 'granted';
-
-const isIosNotStandalone = (): boolean => {
-  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isStandalone =
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (navigator as unknown as { standalone?: boolean }).standalone === true;
-  return isIos && !isStandalone;
-};
-
-// Notification.permission читается синхронно — незачем определять статус
-// асинхронно в useEffect после первого рендера: баннер "включить уведомления"
-// на мгновение мелькал бы даже там, где разрешение давно выдано (или
-// платформа вообще не поддерживает пуши), пока эффект не отработает.
-const getInitialNotifStatus = (): NotifStatus => {
-  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-    return isIosNotStandalone() ? 'ios-not-installed' : 'unsupported';
-  }
-  if (Notification.permission === 'denied') return 'denied';
-  if (Notification.permission === 'granted') return 'granted';
-  return 'default';
-};
 
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -119,21 +98,10 @@ const guessVideoMimeType = (file: File): string | null => {
 const errorMessage = (err: unknown): string =>
   err instanceof Error ? err.message : 'Не удалось отправить сообщение';
 
-// VAPID-ключ приходит в URL-safe base64, а PushManager.subscribe хочет Uint8Array.
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; i++) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
 export const ChatPage: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   const { userId } = useAuth();
+  const navigate = useNavigate();
   const {
     messages, pendingUploads, reads, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
     pinnedMessage, pinMessage, unpinMessage, deleteMessage, editMessage, presence, typingUsers, notifyTyping,
@@ -165,8 +133,7 @@ export const ChatPage: React.FC = () => {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const nearBottomRef = useRef(true);
 
-  const [notifStatus, setNotifStatus] = useState<NotifStatus>(getInitialNotifStatus);
-  const [pushBusy, setPushBusy] = useState(false);
+  const { notifStatus, busy: pushBusy, requestAccess: requestNotificationAccess } = useChatPush();
 
   // connectionState стартует как 'connecting' при каждом монтировании страницы
   // (см. ChatContext) — без этой отметки заголовок дёргался бы "Подключение…"
@@ -360,57 +327,6 @@ export const ChatPage: React.FC = () => {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [lightbox]);
-
-  // Статус баннера уже посчитан синхронно в useState-инициализаторе выше —
-  // тут только досинкать push-подписку с сервером, если разрешение уже было
-  // выдано раньше. Настоящий системный диалог (requestNotificationAccess) НЕ
-  // дёргаем автоматически — он выдаётся браузером только один раз, и
-  // случайный отказ обратно не открыть через JS.
-  useEffect(() => {
-    if (notifStatus === 'granted') ensureSubscribed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Разрешение уже есть (выдано раньше) — просто синхронизируем подписку с
-  // сервером молча, без всякого UI и без повторного системного диалога.
-  const ensureSubscribed = async () => {
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        const { public_key } = await apiClient.getVapidPublicKey();
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(public_key),
-        });
-      }
-      await apiClient.subscribeChatPush(subscription.toJSON() as PushSubscriptionJSON);
-    } catch (err) {
-      console.error('Не удалось синхронизировать push-подписку', err);
-    }
-  };
-
-  // Единственное место, где реально вызывается системный диалог — по тапу
-  // юзера на баннер, никогда автоматически.
-  const requestNotificationAccess = async () => {
-    if (pushBusy) return;
-    setPushBusy(true);
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        setNotifStatus('granted');
-        await ensureSubscribed();
-      } else if (permission === 'denied') {
-        setNotifStatus('denied');
-      }
-      // permission === 'default' — юзер закрыл диалог без выбора, баннер
-      // остаётся, можно попробовать снова позже
-    } catch (err) {
-      console.error('Не удалось запросить разрешение на уведомления', err);
-    } finally {
-      setPushBusy(false);
-    }
-  };
 
   const NEAR_BOTTOM_PX = 120;
 
@@ -1116,8 +1032,7 @@ export const ChatPage: React.FC = () => {
           </div>
 
           <div className="header-actions">
-            {/* Пока просто заглушка в шапке — действия нет, экран настроек ещё не сделан. */}
-            <button className="header-action-btn" title="Настройки">
+            <button className="header-action-btn" onClick={() => navigate('/chat/settings')} title="Настройки">
               <Settings size={20} />
             </button>
             <button
@@ -1484,6 +1399,9 @@ export const ChatPage: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              // Короче дефолтного: пока скрим едет, он каждый кадр пересчитывает
+              // размытие всего экрана — чем меньше таких кадров, тем ровнее.
+              transition={{ duration: 0.15 }}
               onClick={closeActionMenu}
             />
 
