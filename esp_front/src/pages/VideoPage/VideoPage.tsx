@@ -15,7 +15,8 @@ import {
   LogIn,
   LogOut,
   Loader2,
-  MessageCircle
+  MessageCircle,
+  Filter
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './VideoPage.css'
@@ -83,6 +84,7 @@ export const VideosPage = () => {
   const [downloadProgress, setDownloadProgress] = useState(0) // -1 = подготовка, 0-100 = прогресс
   const [sharingId, setSharingId] = useState<string | null>(null)
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
+  const [showFilters, setShowFilters] = useState(false)
 
   const toggleFilter = (label: string) => {
     setActiveFilters(prev => {
@@ -347,26 +349,51 @@ export const VideosPage = () => {
             <div className="section-header">
               <Video size={20} className="section-icon" />
               <h2>Записи</h2>
+              {videos.length > 0 && (
+                <button
+                  className={`filter-toggle-btn ${activeFilters.size > 0 ? 'active' : ''}`}
+                  onClick={() => setShowFilters(prev => !prev)}
+                  aria-expanded={showFilters}
+                  title="Фильтр по людям"
+                >
+                  <Filter size={18} />
+                  {activeFilters.size > 0 && (
+                    <span className="filter-toggle-badge">{activeFilters.size}</span>
+                  )}
+                </button>
+              )}
             </div>
 
-            {videos.length > 0 && (
-              <div className="people-filter">
-                {PEOPLE_FILTERS.map(label => (
-                  <button
-                    key={label}
-                    className={`people-filter-chip ${activeFilters.has(label) ? 'active' : ''}`}
-                    onClick={() => toggleFilter(label)}
-                  >
-                    {recognizedDisplayName(label)}
-                  </button>
-                ))}
-                {activeFilters.size > 0 && (
-                  <button className="people-filter-clear" onClick={() => setActiveFilters(new Set())}>
-                    Сбросить
-                  </button>
-                )}
-              </div>
-            )}
+            <AnimatePresence initial={false}>
+              {videos.length > 0 && showFilters && (
+                <motion.div
+                  key="people-filter"
+                  className="people-filter"
+                  initial={{ height: 0, opacity: 0, marginBottom: 0 }}
+                  animate={{ height: 'auto', opacity: 1, marginBottom: '1.25rem' }}
+                  exit={{ height: 0, opacity: 0, marginBottom: 0 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ overflow: 'hidden' }}
+                >
+                  <div className="people-filter-chips">
+                    {PEOPLE_FILTERS.map(label => (
+                      <button
+                        key={label}
+                        className={`people-filter-chip ${activeFilters.has(label) ? 'active' : ''}`}
+                        onClick={() => toggleFilter(label)}
+                      >
+                        {recognizedDisplayName(label)}
+                      </button>
+                    ))}
+                    {activeFilters.size > 0 && (
+                      <button className="people-filter-clear" onClick={() => setActiveFilters(new Set())}>
+                        Сбросить
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {loading ? (
               <div className="loading-container">
