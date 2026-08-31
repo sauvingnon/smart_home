@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
-  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, RefreshCw, User, Users, ChevronDown, Search, Fan, Check, X,
+  Sunrise, Sunset, Moon, Wind, Bath, Eye, HardDrive, MemoryStick, RefreshCw, User, Users, ChevronDown, Search, Fan, Check, X,
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './HomePage.css'
@@ -49,6 +49,17 @@ type DiskUsage = {
   used_percent: number;
 }
 
+type MemoryUsage = {
+  total_gb: number;
+  used_gb: number;
+  used_percent: number;
+}
+
+type CpuUsage = {
+  used_percent: number;
+  cores: number;
+}
+
 type GeneralResponse = {
   telemetry: {
     device_id: string;
@@ -63,6 +74,8 @@ type GeneralResponse = {
   sensor_status: string;
   toilet_status: string;
   disk_usage?: DiskUsage;
+  memory_usage?: MemoryUsage;
+  cpu_usage?: CpuUsage;
 }
 
 const weatherTranslations: Record<string, string> = {
@@ -97,6 +110,14 @@ const getStatusStyle = (status: string) => {
     default:
       return { text: 'Не подключена', active: false, color: '#94a3b8', bg: 'rgba(148,163,184,0.1)' }
   }
+};
+
+// Для RAM и CPU шкала обратная дисковой: чем больше занято, тем хуже
+const getLoadStyle = (percent?: number) => {
+  if (percent === undefined) return { color: undefined, bg: undefined }
+  if (percent >= 90) return { color: '#f87171', bg: 'rgba(239,68,68,0.15)' }
+  if (percent >= 75) return { color: '#fbbf24', bg: 'rgba(251,191,36,0.15)' }
+  return { color: '#34d399', bg: 'rgba(52,211,153,0.15)' }
 };
 
 const containerVar = {
@@ -462,6 +483,60 @@ export default function HomePage() {
                     background: (weather?.wind_speed ?? 0) >= 12 ? '#f87171' :
                                 (weather?.wind_speed ?? 0) >= 8  ? '#fbbf24' :
                                 '#818cf8',
+                  }}
+                />
+              </div>
+            </motion.div>
+
+            {/* RAM */}
+            <motion.div variants={itemVar} className="system-card">
+              <div className="card-icon" style={
+                !data?.memory_usage ? {} :
+                { background: getLoadStyle(data.memory_usage.used_percent).bg, color: getLoadStyle(data.memory_usage.used_percent).color }
+              }>
+                <MemoryStick size={20} />
+              </div>
+              <div>
+                <div className="card-value">
+                  {data?.memory_usage ? `${data.memory_usage.used_gb} GB` : '--'}
+                </div>
+                <div className="card-label">
+                  {data?.memory_usage ? `занято из ${data.memory_usage.total_gb} GB` : 'Память'}
+                </div>
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{
+                    width: data?.memory_usage ? `${data.memory_usage.used_percent}%` : '0%',
+                    background: getLoadStyle(data?.memory_usage?.used_percent).color,
+                  }}
+                />
+              </div>
+            </motion.div>
+
+            {/* CPU */}
+            <motion.div variants={itemVar} className="system-card">
+              <div className="card-icon" style={
+                !data?.cpu_usage ? {} :
+                { background: getLoadStyle(data.cpu_usage.used_percent).bg, color: getLoadStyle(data.cpu_usage.used_percent).color }
+              }>
+                <Cpu size={20} />
+              </div>
+              <div>
+                <div className="card-value">
+                  {data?.cpu_usage ? `${data.cpu_usage.used_percent}%` : '--'}
+                </div>
+                <div className="card-label">
+                  {data?.cpu_usage ? `загрузка · ${data.cpu_usage.cores} ядер` : 'Процессор'}
+                </div>
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{
+                    width: data?.cpu_usage ? `${data.cpu_usage.used_percent}%` : '0%',
+                    background: getLoadStyle(data?.cpu_usage?.used_percent).color,
                   }}
                 />
               </div>

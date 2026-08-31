@@ -9,3 +9,4 @@ ffmpeg
 aiobotocore
 python-multipart
 pywebpush
+psutil

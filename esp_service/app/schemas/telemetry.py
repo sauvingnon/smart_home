@@ -8,6 +8,15 @@ class DiskUsage(BaseModel):
     free_gb: float
     used_percent: float
 
+class MemoryUsage(BaseModel):
+    total_gb: float
+    used_gb: float
+    used_percent: float
+
+class CpuUsage(BaseModel):
+    used_percent: float
+    cores: int
+
 class TelemetryData(BaseModel):
     """Модель телеметрии от устройства"""
     device_id: str = Field(..., description="ID устройства")
@@ -56,4 +65,6 @@ class GeneralResponse(BaseModel):
     sensor_status: Optional[str] = Field(None, description="Статус датчиков (например, 'ok', 'error')")
     toilet_status: Optional[str] = Field(None, description="Статус уборной (например, 'ok', 'error')")
     disk_usage: Optional[DiskUsage] = Field(None, description="Использование дискового пространства сервера")
+    memory_usage: Optional[MemoryUsage] = Field(None, description="Использование оперативной памяти сервера")
+    cpu_usage: Optional[CpuUsage] = Field(None, description="Загрузка процессора сервера")
     

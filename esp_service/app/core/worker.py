@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional
 import shutil
+import psutil
 from fastapi import Request, HTTPException, WebSocket
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from app.services.redis.cache_manager import CacheManager
@@ -9,7 +10,7 @@ from datetime import datetime, timedelta
 from logger import logger
 from app.services.mqtt_service.mqtt import MQTTService, BoardData
 from app.services.s3_service.s3_manager import S3Manager
-from app.schemas.telemetry import TelemetryData, GeneralResponse, DiskUsage
+from app.schemas.telemetry import TelemetryData, GeneralResponse, DiskUsage, MemoryUsage, CpuUsage
 from app.schemas.weather_data import WeatherData
 from app.schemas.settings import SettingsData
 from app.schemas.device_status import DeviceStatus
@@ -654,6 +655,8 @@ class BackgroundWorker:
             used_percent=round(disk.used / disk.total * 100, 1),
         )
 
+        memory_usage, cpu_usage = await self._get_host_load()
+
         return GeneralResponse(
             telemetry=standard_telemetry,
             central_board_status=self.device_status.value if self.device_status else "offline",
@@ -661,7 +664,39 @@ class BackgroundWorker:
             sensor_status=self.sensor_status.value if self.sensor_status else "offline",
             toilet_status=self.toilet_status.value if self.toilet_status else "offline",
             disk_usage=disk_usage,
+            memory_usage=memory_usage,
+            cpu_usage=cpu_usage,
         )
+
+    async def _get_host_load(self) -> tuple[Optional[MemoryUsage], Optional[CpuUsage]]:
+        """RAM и загрузка CPU сервера.
+
+        cpu_percent считается по короткому семплу в отдельном потоке: без
+        интервала psutil вернул бы 0.0 на первом вызове, а блокировать
+        event loop на время замера нельзя.
+        """
+        try:
+            mem = psutil.virtual_memory()
+            memory_usage = MemoryUsage(
+                total_gb=round(mem.total / (1024 ** 3), 1),
+                used_gb=round((mem.total - mem.available) / (1024 ** 3), 1),
+                used_percent=round(mem.percent, 1),
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось получить статистику RAM: {e}")
+            memory_usage = None
+
+        try:
+            percent = await asyncio.to_thread(psutil.cpu_percent, 0.3)
+            cpu_usage = CpuUsage(
+                used_percent=round(percent, 1),
+                cores=psutil.cpu_count(logical=True) or 1,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось получить статистику CPU: {e}")
+            cpu_usage = None
+
+        return memory_usage, cpu_usage
     
     async def get_current_config(self, timeout: float = 5.0) -> Optional[SettingsData]:
         """Получить текущие настройки (синхронный запрос-ответ)"""
