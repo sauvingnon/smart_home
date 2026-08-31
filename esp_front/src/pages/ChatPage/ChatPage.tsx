@@ -937,14 +937,33 @@ export const ChatPage: React.FC = () => {
           <span className="chat-reply-quote-text">{message.reply_to_preview}</span>
         </div>
       )}
-      {message.text && <div className="chat-bubble-text">{message.text}</div>}
+      {message.text && (
+        <div className="chat-bubble-text">
+          {message.text}
+          {/* Время текста — не своей строкой снизу, а "утоплено" в правый
+              нижний угол последней строки (как в WhatsApp/Telegram): это
+              последний узел внутри текста, float:right встаёт в конец
+              последней строки, если там есть место, иначе уходит под неё
+              вплотную к правому краю. У медиа-подписей (isMediaBubble) время
+              не дублируем — оно уже на самом кадре (chat-bubble-time--overlay
+              ниже). */}
+          {!isMediaBubble && (
+            <span className="chat-bubble-time chat-bubble-time--inline">
+              {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
+              {formatTime(message.ts)}
+            </span>
+          )}
+        </div>
+      )}
       {message.media_key && (isMediaBubble ? (
         <div className={`chat-media-frame ${message.media_kind === 'circle' ? 'chat-media-frame--circle' : ''}`}>
           {renderMedia(message, isMine)}
           <span className="chat-bubble-time chat-bubble-time--overlay">{formatTime(message.ts)}</span>
         </div>
       ) : renderMedia(message, isMine))}
-      {!isMediaBubble && (
+      {/* Голосовые (и другие немедийные сообщения без текста) — своей
+          строкой под контентом, тут утапливать время некуда. */}
+      {!isMediaBubble && !message.text && (
         <div className="chat-bubble-time">
           {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
           {formatTime(message.ts)}
