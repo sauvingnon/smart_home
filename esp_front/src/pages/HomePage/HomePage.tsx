@@ -112,12 +112,35 @@ const getStatusStyle = (status: string) => {
   }
 };
 
-// Для RAM и CPU шкала обратная дисковой: чем больше занято, тем хуже
-const getLoadStyle = (percent?: number) => {
-  if (percent === undefined) return { color: undefined, bg: undefined }
-  if (percent >= 90) return { color: '#f87171', bg: 'rgba(239,68,68,0.15)' }
-  if (percent >= 75) return { color: '#fbbf24', bg: 'rgba(251,191,36,0.15)' }
-  return { color: '#34d399', bg: 'rgba(52,211,153,0.15)' }
+// Плитки телеметрии красятся по метрике, а не по нагрузке: раньше цвет
+// зависел от процента и в норме все три были одинаково зелёные — то есть
+// неразличимы с одного взгляда. Диск отдельно: там цвет всё ещё умеет
+// предупреждать, место на сервере кончается по-настоящему (см. ниже).
+const TILE_COLORS = {
+  disk: { color: '#60a5fa', bg: 'rgba(59,130,246,0.15)' },
+  memory: { color: '#34d399', bg: 'rgba(52,211,153,0.15)' },
+  cpu: { color: '#f87171', bg: 'rgba(239,68,68,0.15)' },
+};
+
+// Остаток места на диске, ниже которого плитка перестаёт быть синей. Пороги
+// тут, а не по месту: их три потребителя — иконка плитки, её полоска и
+// нижний баннер "диск почти заполнен", и разъезжаться им нельзя.
+const DISK_CRITICAL_GB = 2;
+const DISK_WARNING_GB = 5;
+
+// Та же логика для RAM и CPU, только шкала в процентах занятого, а не в
+// оставшихся гигабайтах: до порога — свой цвет плитки, дальше предупреждение.
+const LOAD_WARNING_PERCENT = 75;
+const LOAD_CRITICAL_PERCENT = 90;
+
+const ALERT_ICON = { background: 'rgba(239,68,68,0.15)', color: '#f87171' };
+const WARN_ICON = { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' };
+
+const loadIconStyle = (percent: number | undefined, base: { color: string; bg: string }) => {
+  if (percent === undefined) return {};
+  if (percent >= LOAD_CRITICAL_PERCENT) return ALERT_ICON;
+  if (percent >= LOAD_WARNING_PERCENT) return WARN_ICON;
+  return { background: base.bg, color: base.color };
 };
 
 const containerVar = {
@@ -435,9 +458,9 @@ export default function HomePage() {
             <motion.div variants={itemVar} className="system-card">
               <div className="card-icon" style={
                 !data?.disk_usage ? {} :
-                data.disk_usage.free_gb <= 0.5 ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' } :
-                data.disk_usage.free_gb <= 2 ? { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' } :
-                { background: 'rgba(52,211,153,0.15)', color: '#34d399' }
+                data.disk_usage.free_gb <= DISK_CRITICAL_GB ? ALERT_ICON :
+                data.disk_usage.free_gb <= DISK_WARNING_GB ? WARN_ICON :
+                { background: TILE_COLORS.disk.bg, color: TILE_COLORS.disk.color }
               }>
                 <HardDrive size={20} />
               </div>
@@ -454,10 +477,6 @@ export default function HomePage() {
                   className="progress-fill"
                   style={{
                     width: data?.disk_usage ? `${data.disk_usage.used_percent}%` : '0%',
-                    background: !data?.disk_usage ? undefined :
-                      data.disk_usage.free_gb <= 0.5 ? '#f87171' :
-                      data.disk_usage.free_gb <= 2 ? '#fbbf24' :
-                      '#34d399',
                   }}
                 />
               </div>
@@ -490,10 +509,7 @@ export default function HomePage() {
 
             {/* RAM */}
             <motion.div variants={itemVar} className="system-card">
-              <div className="card-icon" style={
-                !data?.memory_usage ? {} :
-                { background: getLoadStyle(data.memory_usage.used_percent).bg, color: getLoadStyle(data.memory_usage.used_percent).color }
-              }>
+              <div className="card-icon" style={loadIconStyle(data?.memory_usage?.used_percent, TILE_COLORS.memory)}>
                 <MemoryStick size={20} />
               </div>
               <div>
@@ -509,7 +525,6 @@ export default function HomePage() {
                   className="progress-fill"
                   style={{
                     width: data?.memory_usage ? `${data.memory_usage.used_percent}%` : '0%',
-                    background: getLoadStyle(data?.memory_usage?.used_percent).color,
                   }}
                 />
               </div>
@@ -517,10 +532,7 @@ export default function HomePage() {
 
             {/* CPU */}
             <motion.div variants={itemVar} className="system-card">
-              <div className="card-icon" style={
-                !data?.cpu_usage ? {} :
-                { background: getLoadStyle(data.cpu_usage.used_percent).bg, color: getLoadStyle(data.cpu_usage.used_percent).color }
-              }>
+              <div className="card-icon" style={loadIconStyle(data?.cpu_usage?.used_percent, TILE_COLORS.cpu)}>
                 <Cpu size={20} />
               </div>
               <div>
@@ -536,7 +548,6 @@ export default function HomePage() {
                   className="progress-fill"
                   style={{
                     width: data?.cpu_usage ? `${data.cpu_usage.used_percent}%` : '0%',
-                    background: getLoadStyle(data?.cpu_usage?.used_percent).color,
                   }}
                 />
               </div>
@@ -727,7 +738,7 @@ export default function HomePage() {
             </div>
           </motion.div>
         )}
-        {data?.disk_usage && data.disk_usage.free_gb <= 0.5 && !loading && (
+        {data?.disk_usage && data.disk_usage.free_gb <= DISK_CRITICAL_GB && !loading && (
           <motion.div
             initial={{ y: 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
