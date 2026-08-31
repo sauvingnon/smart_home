@@ -18,9 +18,9 @@ const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "д
 // там же оно и проверяется по-настоящему, тут только чтобы не показывать
 // заведомо мёртвый пункт меню.
 const DELETE_WINDOW_MS = 60 * 60 * 1000;
-// Окно на правку своего сообщения. Шире, чем на удаление, и так же
-// синхронно с бэком (CHAT_EDIT_WINDOW) — правка ничего не разрушает.
-const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Окно на правку — такое же, как на удаление, и так же синхронно с бэком
+// (CHAT_EDIT_WINDOW), где оно и проверяется по-настоящему.
+const EDIT_WINDOW_MS = 60 * 60 * 1000;
 // Насколько пузырь подпрыгивает: коротко и сильно по тапу, чуть-чуть и
 // надолго — пока висит меню по долгому нажатию. Вибро-отклик на большинстве
 // телефонов из PWA не работает, поэтому подтверждение нажатия визуальное.
@@ -59,15 +59,6 @@ const getInitialNotifStatus = (): NotifStatus => {
 
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-
-const formatLastSeen = (iso: string): string => {
-  const diffMin = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
-  if (diffMin < 1) return 'только что';
-  if (diffMin < 60) return `${diffMin} мин назад`;
-  const diffHours = Math.floor(diffMin / 60);
-  if (diffHours < 24) return `${diffHours} ч назад`;
-  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-};
 
 // Пережимаем фото на клиенте перед аплоадом — сервер не транскодирует ничего,
 // вся тяжесть кодирования лежит на клиенте (см. обсуждение с пользователем).
@@ -162,6 +153,9 @@ export const ChatPage: React.FC = () => {
   // Меню считает свою позицию уже после того, как отрисуется — до замера
   // собственных размеров непонятно, влезает ли оно под сообщение.
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
+  // Геометрия пузыря, над которым открыто меню — по ней рисуется его копия
+  // поверх размытого фона.
+  const [anchorRect, setAnchorRect] = useState<{ left: number; top: number; width: number } | null>(null);
   const actionMenuRef = useRef<HTMLDivElement>(null);
   const [poppedSeq, setPoppedSeq] = useState<number | null>(null);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -781,23 +775,27 @@ export const ChatPage: React.FC = () => {
   const closeActionMenu = () => {
     setActionTarget(null);
     setMenuPos(null);
+    setAnchorRect(null);
     setPoppedSeq(null);
   };
 
   // Позиция меню — вплотную к самому сообщению, а не нижним листом: под
   // пузырём и прижато к тому же его краю, у своих справа, у чужих слева.
-  // Замеряем внешнюю обёртку, а не .chat-bubble: тот в этот момент ещё едет
-  // по spring-анимации подпрыгивания, и его rect мерцал бы вместе с ней.
+  // Этим же замером ставится копия пузыря поверх блюра, поэтому меряем именно
+  // .chat-bubble, а не внешнюю обёртку (у чужих сообщений она растянута на всю
+  // ширину ленты, её края к пузырю отношения не имеют).
   useLayoutEffect(() => {
     if (!actionTarget) {
       setMenuPos(null);
+      setAnchorRect(null);
       return;
     }
     const menu = actionMenuRef.current;
-    const anchor = messagesContentRef.current?.querySelector(`[data-seq="${actionTarget.seq}"]`);
+    const anchor = messagesContentRef.current?.querySelector(`[data-seq="${actionTarget.seq}"] .chat-bubble`);
     if (!menu || !anchor) return;
 
     const box = anchor.getBoundingClientRect();
+    setAnchorRect({ left: box.left, top: box.top, width: box.width });
     const width = menu.offsetWidth;
     const height = menu.offsetHeight;
     const GAP = 8;
@@ -820,7 +818,8 @@ export const ChatPage: React.FC = () => {
     longPressTimerRef.current = setTimeout(() => {
       longPressFiredRef.current = true;
       navigator.vibrate?.(10);
-      popBubble(message.seq, true);
+      // Оригинал не трогаем: подпрыгнет его копия поверх блюра, а масштаб на
+      // оригинале только сбил бы замер его же геометрии под эту копию.
       setActionTarget(message);
     }, LONG_PRESS_MS);
   };
@@ -934,6 +933,61 @@ export const ChatPage: React.FC = () => {
     popBubble(seq);
   };
 
+  // Содержимое пузыря отдельно от самого пузыря: этим же кодом рисуется его
+  // копия поверх блюра при открытом меню (см. .chat-bubble-clone), чтобы
+  // оригинал и копия не разъезжались при любой правке разметки.
+  const renderBubbleContent = (message: ChatMessage, isMine: boolean, isMediaBubble: boolean, readers: ChatReadState[]) => (
+    <>
+      {!isMine && <div className="chat-bubble-author">{message.username}</div>}
+      {message.reply_to !== null && (
+        <div
+          className="chat-reply-quote"
+          role="button"
+          onClick={(e) => {
+            // Иначе клик всплывёт на сам пузырь и его подпрыгивание
+            // перебьёт подсветку сообщения, к которому мы прыгнули.
+            e.stopPropagation();
+            if (!suppressClickIfLongPress(e)) scrollToMessage(message.reply_to!);
+          }}
+        >
+          <span className="chat-reply-quote-author">{message.reply_to_username}</span>
+          <span className="chat-reply-quote-text">{message.reply_to_preview}</span>
+        </div>
+      )}
+      {message.text && <div className="chat-bubble-text">{message.text}</div>}
+      {message.media_key && (isMediaBubble ? (
+        <div className={`chat-media-frame ${message.media_kind === 'circle' ? 'chat-media-frame--circle' : ''}`}>
+          {renderMedia(message, isMine)}
+          <span className="chat-bubble-time chat-bubble-time--overlay">{formatTime(message.ts)}</span>
+        </div>
+      ) : renderMedia(message, isMine))}
+      {!isMediaBubble && (
+        <div className="chat-bubble-time">
+          {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
+          {formatTime(message.ts)}
+        </div>
+      )}
+      {readers.length > 0 && (
+        <div className="chat-read-avatars">
+          {readers.map((r) => (
+            <span
+              key={r.user_id}
+              className="chat-read-avatar"
+              style={{ background: readAvatarColor(r.user_id) }}
+              title={`${r.display_name || 'Прочитано'}${r.read_at ? ` · прочитано в ${formatTime(r.read_at)}` : ''}`}
+            >
+              {readAvatarLetter(r.display_name)}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  const isMediaOnly = (message: ChatMessage): boolean => !!message.media_key
+    && (message.type === 'image' || message.type === 'video')
+    && !message.text;
+
   const renderMedia = (message: ChatMessage, isMine: boolean) => {
     const url = apiClient.getChatMediaSrc(message.media_key);
     if (message.type === 'image') {
@@ -1027,21 +1081,16 @@ export const ChatPage: React.FC = () => {
     ))
     : [];
 
-  // Одна строка под заголовком "Чат": печатает > кто в сети > когда был(а) в
-  // сети последний раз — приоритет тот же, что в WhatsApp/Telegram-группах.
+  // Одна строка под заголовком "Чат": печатает > кто в сети. "Был(а) в сети
+  // N назад" тут был третьим вариантом и убран намеренно — если сейчас никого
+  // нет, строка просто пропадает, а не сообщает, когда кто-то заходил.
   const othersTyping = typingUsers.filter((t) => t.user_id !== userId);
-  const othersPresence = presence.filter((p) => p.user_id !== userId);
-  const onlineOthers = othersPresence.filter((p) => p.online);
+  const onlineOthers = presence.filter((p) => p.user_id !== userId && p.online);
   let headerSubtitle: string | null = null;
   if (othersTyping.length > 0) {
     headerSubtitle = `${othersTyping.map((t) => t.display_name).join(', ')} печатает…`;
   } else if (onlineOthers.length > 0) {
     headerSubtitle = `${onlineOthers.map((p) => p.display_name).join(', ')} в сети`;
-  } else {
-    const mostRecent = othersPresence
-      .filter((p) => p.last_seen)
-      .sort((a, b) => new Date(b.last_seen!).getTime() - new Date(a.last_seen!).getTime())[0];
-    if (mostRecent) headerSubtitle = `${mostRecent.display_name} был(а) в сети ${formatLastSeen(mostRecent.last_seen!)}`;
   }
 
   // Реконнект в заголовке показываем только если связь уже была установлена
@@ -1160,15 +1209,13 @@ export const ChatPage: React.FC = () => {
             // Фото/видео без подписи — как в Telegram: пузыря вокруг медиа
             // почти нет, а время лежит пилюлей на самом кадре. С подписью
             // (или у голосовых) остаётся обычная раскладка со временем снизу.
-            const isMediaBubble = !!message.media_key
-              && (message.type === 'image' || message.type === 'video')
-              && !message.text;
+            const isMediaBubble = isMediaOnly(message);
 
             return (
               <motion.div
                 key={message.seq}
                 data-seq={message.seq}
-                className={`chat-bubble-outer ${isMine ? 'mine' : ''} ${actionTarget?.seq === message.seq ? 'chat-bubble-outer--active' : ''}`}
+                className={`chat-bubble-outer ${isMine ? 'mine' : ''} ${readers.length > 0 ? 'chat-bubble-outer--has-readers' : ''}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.92 }}
@@ -1176,62 +1223,16 @@ export const ChatPage: React.FC = () => {
                 <div className="chat-bubble-col">
                   <motion.div
                     className={`chat-bubble ${isMediaBubble ? 'chat-bubble--media' : ''}`}
-                    animate={{
-                      scale: poppedSeq !== message.seq
-                        ? 1
-                        : actionTarget?.seq === message.seq ? BUBBLE_HOLD_SCALE : BUBBLE_POP_SCALE,
-                    }}
+                    animate={{ scale: poppedSeq === message.seq ? BUBBLE_POP_SCALE : 1 }}
                     transition={{ type: 'spring', stiffness: 520, damping: 17 }}
                     onPointerDown={(e) => startLongPress(message, e)}
                     onPointerMove={cancelLongPressIfMoved}
                     onPointerUp={cancelLongPress}
                     onPointerCancel={cancelLongPress}
                     onClick={(e) => { if (!isMediaBubble && !suppressClickIfLongPress(e)) popBubble(message.seq); }}
-                    onContextMenu={(e) => { e.preventDefault(); popBubble(message.seq, true); setActionTarget(message); }}
+                    onContextMenu={(e) => { e.preventDefault(); setActionTarget(message); }}
                   >
-                    {!isMine && <div className="chat-bubble-author">{message.username}</div>}
-                    {message.reply_to !== null && (
-                      <div
-                        className="chat-reply-quote"
-                        role="button"
-                        onClick={(e) => {
-                          // Иначе клик всплывёт на сам пузырь и его подпрыгивание
-                          // перебьёт подсветку сообщения, к которому мы прыгнули.
-                          e.stopPropagation();
-                          if (!suppressClickIfLongPress(e)) scrollToMessage(message.reply_to!);
-                        }}
-                      >
-                        <span className="chat-reply-quote-author">{message.reply_to_username}</span>
-                        <span className="chat-reply-quote-text">{message.reply_to_preview}</span>
-                      </div>
-                    )}
-                    {message.text && <div className="chat-bubble-text">{message.text}</div>}
-                    {message.media_key && (isMediaBubble ? (
-                      <div className={`chat-media-frame ${message.media_kind === 'circle' ? 'chat-media-frame--circle' : ''}`}>
-                        {renderMedia(message, isMine)}
-                        <span className="chat-bubble-time chat-bubble-time--overlay">{formatTime(message.ts)}</span>
-                      </div>
-                    ) : renderMedia(message, isMine))}
-                    {!isMediaBubble && (
-                      <div className="chat-bubble-time">
-                        {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
-                        {formatTime(message.ts)}
-                      </div>
-                    )}
-                    {readers.length > 0 && (
-                      <div className="chat-read-avatars">
-                        {readers.map((r) => (
-                          <span
-                            key={r.user_id}
-                            className="chat-read-avatar"
-                            style={{ background: readAvatarColor(r.user_id) }}
-                            title={`${r.display_name || 'Прочитано'}${r.read_at ? ` · прочитано в ${formatTime(r.read_at)}` : ''}`}
-                          >
-                            {readAvatarLetter(r.display_name)}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {renderBubbleContent(message, isMine, isMediaBubble, readers)}
                   </motion.div>
                 </div>
               </motion.div>
@@ -1469,12 +1470,11 @@ export const ChatPage: React.FC = () => {
       </AnimatePresence>
 
       {/* Меню действий — не нижним листом, а вплотную к самому сообщению, как в
-          Telegram. Бэкдроп размывает всё остальное, а само сообщение поднято
-          над ним (.chat-bubble-outer--active) и остаётся резким: оно и есть
-          контекст меню. Меню — сосед бэкдропа, а не его потомок: иначе оно
-          осталось бы внутри его stacking context, ниже поднятого пузыря, и
-          пузырь перекрыл бы меню в тесном случае (длинное сообщение, когда
-          меню некуда деть ни под, ни над ним). */}
+          Telegram. Бэкдроп размывает всё остальное, а сообщение остаётся
+          резким — своей копией поверх блюра (см. .chat-bubble-clone ниже): оно
+          и есть контекст меню. Все трое — соседи, а не потомки бэкдропа: иначе
+          они оказались бы внутри его stacking context, и порядок копия/меню
+          пришлось бы разруливать уже там. */}
       <AnimatePresence>
         {actionTarget && (
           <>
@@ -1486,6 +1486,35 @@ export const ChatPage: React.FC = () => {
               exit={{ opacity: 0 }}
               onClick={closeActionMenu}
             />
+
+            {/* Копия сообщения поверх размытого фона. Поднять оригинал по
+                z-index не выходит: он лежит внутри .chat-messages — скролл-
+                контейнера с -webkit-overflow-scrolling, а такой контейнер на
+                iOS уводит потомков в собственный слой, из которого наружу, над
+                бэкдропом, уже не всплыть. Поэтому оригинал остаётся размытым
+                внизу, а сверху ровно по его координатам рисуется непрозрачный
+                двойник — он его полностью перекрывает. */}
+            {anchorRect && (
+              <motion.div
+                key="action-clone"
+                className={`chat-bubble-clone ${actionTarget.user_id === userId ? 'mine' : ''}`}
+                style={{ left: anchorRect.left, top: anchorRect.top, width: anchorRect.width }}
+                initial={{ scale: 1 }}
+                animate={{ scale: BUBBLE_HOLD_SCALE }}
+                exit={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 520, damping: 17 }}
+              >
+                <div className={`chat-bubble ${isMediaOnly(actionTarget) ? 'chat-bubble--media' : ''}`}>
+                  {renderBubbleContent(
+                    actionTarget,
+                    actionTarget.user_id === userId,
+                    isMediaOnly(actionTarget),
+                    readMarkers.get(actionTarget.seq) ?? [],
+                  )}
+                </div>
+              </motion.div>
+            )}
+
             <motion.div
               key="action-menu"
               ref={actionMenuRef}
@@ -1521,20 +1550,20 @@ export const ChatPage: React.FC = () => {
 
               <div className="chat-action-menu">
                 <button onClick={() => startReply(actionTarget)}>
-                  <CornerUpLeft size={18} />
+                  <CornerUpLeft size={20} />
                   Ответить
                 </button>
 
                 {actionTarget.text && (
                   <button onClick={() => copyMessageText(actionTarget)}>
-                    <Copy size={18} />
+                    <Copy size={20} />
                     Копировать
                   </button>
                 )}
 
                 {canEdit(actionTarget) && (
                   <button onClick={() => startEdit(actionTarget)}>
-                    <Pencil size={18} />
+                    <Pencil size={20} />
                     Изменить
                   </button>
                 )}
@@ -1550,13 +1579,13 @@ export const ChatPage: React.FC = () => {
                     }
                   }}
                 >
-                  {pinnedMessage?.seq === actionTarget.seq ? <PinOff size={18} /> : <Pin size={18} />}
+                  {pinnedMessage?.seq === actionTarget.seq ? <PinOff size={20} /> : <Pin size={20} />}
                   {pinnedMessage?.seq === actionTarget.seq ? 'Открепить' : 'Закрепить'}
                 </button>
 
                 {canDelete(actionTarget) && (
                   <button className="danger" onClick={() => confirmDelete(actionTarget)}>
-                    <Trash2 size={18} />
+                    <Trash2 size={20} />
                     Удалить
                   </button>
                 )}

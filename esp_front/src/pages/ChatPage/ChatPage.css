@@ -308,10 +308,11 @@
 }
 
 /* Бэкдроп меню действий: размывает всё, что осталось позади — ленту, шапку,
-   поле ввода. Само сообщение из-под него поднято (.chat-bubble-outer--active
-   ниже) и остаётся резким, как в Telegram: размытие должно отсечь фон, а не
-   спрятать то, к чему меню прицеплено. Блюр небольшой — это полноэкранный
-   слой, на телефоне он перерисовывается каждый кадр анимации появления. */
+   поле ввода. Само сообщение при этом остаётся резким, как в Telegram —
+   размытие должно отсечь фон, а не спрятать то, к чему меню прицеплено, —
+   но не поднятием оригинала, а его копией поверх (.chat-bubble-clone ниже).
+   Блюр небольшой: это полноэкранный слой, на телефоне он перерисовывается
+   каждый кадр анимации появления. */
 .chat-action-backdrop {
   position: fixed;
   inset: 0;
@@ -321,28 +322,31 @@
   -webkit-backdrop-filter: blur(8px) saturate(120%);
 }
 
-/* Сообщение, над которым открыто меню, — единственное, что не размывается.
-   Над бэкдропом его поднимает z-index: ни один из родителей (.chat-page,
-   .chat-messages, .chat-messages-content) своего stacking context не создаёт,
-   так что пузырь конкурирует с бэкдропом напрямую. */
-.chat-bubble-outer--active {
-  position: relative;
-  z-index: 302;
+/* Копия сообщения, лежащая поверх размытого фона (координаты и ширину задаёт
+   JS по замеру оригинала). Оригинал остаётся на месте, размытый, ровно под
+   ней — копия непрозрачна и перекрывает его целиком. Так сделано потому, что
+   сам оригинал над бэкдроп-фильтром не поднимается: он внутри скролл-
+   контейнера .chat-messages, а тот на iOS держит потомков в своём слое. */
+.chat-bubble-clone {
+  position: fixed;
+  z-index: 305;
+  pointer-events: none;
 }
 
-/* Поднять пузырь над скримом мало: у него свой backdrop-filter и
-   полупрозрачный фон, поэтому сквозь него просвечивал размытый и затемнённый
-   скрим — сообщение выглядело замыленным вместе с фоном. Поэтому поднятый
-   пузырь становится непрозрачным и своё размытие выключает. Свой пузырь
-   трогать не надо: у него фон и так сплошной градиент. */
-.chat-bubble-outer--active .chat-bubble {
+/* Фон обязательно непрозрачный и без своего backdrop-filter: иначе сквозь
+   копию просвечивал бы тот самый размытый и затемнённый скрим, и сообщение
+   снова выглядело бы замыленным. */
+.chat-bubble-clone .chat-bubble {
+  width: 100%;
+  box-sizing: border-box;
   background: var(--bubble-other-solid);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
-.chat-bubble-outer--active.mine .chat-bubble {
+.chat-bubble-clone.mine .chat-bubble {
   background: var(--bubble-mine-bg);
+  color: var(--bubble-mine-text);
 }
 
 /* Координаты считает JS (см. ChatPage.tsx, useLayoutEffect у actionTarget):
@@ -355,13 +359,13 @@
   z-index: 310;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  min-width: 208px;
+  gap: 8px;
+  min-width: 248px;
 }
 
 .chat-action-menu,
 .chat-action-readers {
-  border-radius: 14px;
+  border-radius: 16px;
   overflow: hidden;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
@@ -371,7 +375,7 @@
 }
 
 .chat-action-menu {
-  padding: 4px;
+  padding: 6px;
 }
 
 /* Подробности прочтения: кто и во сколько. В ленте на сообщении висят только
@@ -379,12 +383,12 @@
 .chat-action-readers {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 12px 16px;
 }
 
 .chat-action-readers-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -392,15 +396,15 @@
 }
 
 .chat-action-readers-empty {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
 }
 
 .chat-action-reader {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 10px;
+  font-size: 15px;
   color: var(--text-primary);
 }
 
@@ -421,9 +425,9 @@
 /* Тот же кружок с буквой, что и в ленте, только без кольца — тут он лежит на
    ровной подложке карточки, отделять его от соседей не от чего. */
 .chat-action-reader .chat-read-avatar {
-  width: 20px;
-  height: 20px;
-  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
   box-shadow: none;
 }
 
@@ -431,13 +435,13 @@
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 12px 14px;
+  gap: 13px;
+  padding: 14px 16px;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   background: transparent;
   color: var(--text-primary);
-  font-size: 16px;
+  font-size: 17px;
   text-align: left;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -589,6 +593,13 @@
 
 .chat-bubble-outer.mine {
   align-self: flex-end;
+}
+
+/* Кружок "прочитано" свисает под кромкой пузыря на свою половину и в общий
+   зазор ленты (10px) не помещается — упирался в следующее сообщение. Отступ
+   вешаем только на сообщения с кружком: у остальных лишняя дыра ни к чему. */
+.chat-bubble-outer--has-readers {
+  margin-bottom: 10px;
 }
 
 .chat-bubble-col {

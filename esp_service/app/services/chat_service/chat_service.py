@@ -24,9 +24,11 @@ CHAT_MEDIA_MAX_BYTES = 50 * 1024 * 1024  # 50 МБ
 # сервере, а не только в UI: клиент может соврать, а удаление необратимо.
 CHAT_DELETE_WINDOW = timedelta(hours=1)
 
-# Правка обратима и ничего не разрушает (в отличие от удаления), поэтому окно
-# шире — сутки, как в Telegram, а не час.
-CHAT_EDIT_WINDOW = timedelta(hours=24)
+# Окно на правку своего сообщения. Держим равным окну удаления — по просьбе
+# пользователя: одно правило на все действия над своим сообщением проще, чем
+# два разных срока. Константа отдельная, а не алиас: правила разные по смыслу
+# и когда-нибудь снова могут разойтись.
+CHAT_EDIT_WINDOW = timedelta(hours=1)
 
 # Длина сохраняемой цитаты. Цитату денормализуем в само сообщение-ответ, а не
 # резолвим по reply_to на клиенте: исходник может быть за пределами
@@ -441,7 +443,7 @@ class ChatService:
         except (KeyError, ValueError):
             raise PermissionError("У сообщения некорректное время — правка запрещена")
         if _get_izhevsk_time() - ts > CHAT_EDIT_WINDOW:
-            raise PermissionError("Сообщение слишком старое — править уже нельзя")
+            raise PermissionError("Сообщение старше часа — править уже нельзя")
 
         updated = await self.cache.update_chat_message(
             seq, {"text": text, "edited_at": _get_izhevsk_time().isoformat()},
