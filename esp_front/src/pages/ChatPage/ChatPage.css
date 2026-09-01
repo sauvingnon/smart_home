@@ -578,7 +578,25 @@
 .chat-messages-content {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* gap: 10px тут был и убран намеренно — вместе с таким же gap у
+     .chat-day-group ниже. Зазор между строками ленты теперь принадлежит самой
+     строке (margin-bottom у .chat-bubble-outer / .chat-system-message /
+     .chat-date-divider), а не контейнеру. Причина — удаление: пузырь при
+     удалении едет height/margin → 0, но gap он как flex-ребёнок занимает
+     ровно до анмаунта, и заанимировать его нельзя ничем. Отсюда был щелчок на
+     10px в конце каждого удаления, а если строка почему-то не доанмаунтилась
+     (см. страховку-таймер в ChatPage.tsx) — эти 10px оставались навсегда и
+     копились с каждым удалением. Собственный margin строки схлопывается
+     вместе с ней, одной и той же анимацией. */
+  gap: 0;
+  /* Прижим ленты к низу — раскладкой, а не коррекцией scrollTop из JS.
+     Свободное место (когда сообщений меньше экрана) уходит НАД контент, так
+     что последнее сообщение всегда стоит у поля ввода, а не висит вверху с
+     дырой под собой. При переполнении auto-margin схлопывается в 0 сам — то
+     есть на длинную ленту это не влияет вообще. Это безопасная версия
+     justify-content: flex-end, у которой в скролл-контейнере верх контента
+     становится недостижимым. */
+  margin-top: auto;
   opacity: 0;
   transition: opacity 0.25s ease;
 }
@@ -598,7 +616,8 @@
 .chat-day-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* См. .chat-messages-content выше: зазор живёт на самих строках. */
+  gap: 0;
 }
 
 /* Плашка-разделитель дня. sticky, а не обычный поток — top: 0 держит её
@@ -610,6 +629,8 @@
   position: sticky;
   top: 0;
   z-index: 5;
+  /* Строка ленты сама несёт свой нижний зазор — см. .chat-messages-content. */
+  margin-bottom: 10px;
   display: flex;
   justify-content: center;
   /* Сама обёртка не должна ловить тапы по сообщению под ней (см.
@@ -640,6 +661,8 @@
    рядом с обычными сообщениями. */
 .chat-system-message {
   align-self: center;
+  /* Свой нижний зазор — см. .chat-messages-content. */
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -715,6 +738,9 @@
 .chat-bubble-outer {
   display: flex;
   max-width: 86%;
+  /* Зазор до следующей строки — свой, а не gap контейнера: только так он
+     схлопывается вместе с пузырём при удалении. См. .chat-messages-content. */
+  margin-bottom: 10px;
 }
 
 .chat-bubble-outer.mine {
@@ -725,7 +751,9 @@
    зазор ленты (10px) не помещается — упирался в следующее сообщение. Отступ
    вешаем только на сообщения с кружком: у остальных лишняя дыра ни к чему. */
 .chat-bubble-outer--has-readers {
-  margin-bottom: 10px;
+  /* 20px, а не 10: базовые 10 у .chat-bubble-outer выше — это бывший gap
+     контейнера, и кружок "прочитано" в них по-прежнему не помещается. */
+  margin-bottom: 20px;
 }
 
 .chat-bubble-col {

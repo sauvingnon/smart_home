@@ -31,6 +31,12 @@ const BUBBLE_POP_SCALE = 1.07;
 const BUBBLE_HOLD_SCALE = 1.03;
 const BUBBLE_POP_MS = 280;
 
+// Сколько длится схлопывание удалённого сообщения (height/margin → 0, см.
+// exitingMessages ниже). Одно число на саму анимацию и на страховочный
+// таймер, который дожинает строку, если анимация почему-то не доиграла —
+// расходиться этим двум значениям нельзя.
+const EXIT_COLLAPSE_MS = 220;
+
 // Цвет кружка "прочитано" — по user_id, а не по позиции в списке: так буква
 // у человека всегда одного цвета, независимо от порядка ответа сервера.
 const READ_AVATAR_COLORS = ['#3b82f6', '#10b981', '#a855f7', '#f97316', '#ec4899', '#06b6d4'];
@@ -172,6 +178,10 @@ export const ChatPage: React.FC = () => {
   // тот же класс бага, что раньше ловили на backdrop-filter меню действий.
   const isTouchingListRef = useRef(false);
   const pendingBottomPinRef = useRef(false);
+  // До какого момента идёт наш собственный smooth-скролл к низу (см. эффект на
+  // новое сообщение ниже). Пока он не истёк, settleBottom не трогает scrollTop:
+  // жёсткая запись поверх плавной анимации обрывает её на полпути.
+  const smoothScrollUntilRef = useRef(0);
 
   const { notifStatus, busy: pushBusy, requestAccess: requestNotificationAccess } = useChatPush();
 
@@ -257,6 +267,9 @@ export const ChatPage: React.FC = () => {
     if (lastSeqRef.current !== last.seq) {
       lastSeqRef.current = last.seq;
       if (last.user_id === userId || nearBottomRef.current) {
+        // Отмечаем окно, пока скролл наш: settleBottom в это время молчит,
+        // чтобы не обрубить smooth-анимацию жёсткой записью scrollTop.
+        smoothScrollUntilRef.current = isInitialLoad ? 0 : Date.now() + 600;
         requestAnimationFrame(() => {
           listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: isInitialLoad ? 'auto' : 'smooth' });
         });
@@ -290,7 +303,11 @@ export const ChatPage: React.FC = () => {
       // отступ ДВАЖДЫ — отсюда и лишняя дыра под последним сообщением. Тут
       // нужна только собственная высота бара (он оверлеит верхнюю кромку
       // ленты, а не весь зазор до низа экрана).
-      setMessagesPadBottom(rect.height + 8);
+      // Плюс-8 тут больше нет: с тех пор как зазор ленты переехал с gap
+      // контейнера на margin-bottom самих строк (см. ChatPage.css), последнее
+      // сообщение несёт свои 10px под собой само — иначе отступ до бара
+      // сложился бы дважды.
+      setMessagesPadBottom(rect.height);
     };
     recalc();
     const ro = new ResizeObserver(recalc);
@@ -377,6 +394,34 @@ export const ChatPage: React.FC = () => {
       }
     });
   };
+
+  // Проверка инварианта, а не ещё один автоскролл: "если мы считаем, что юзер
+  // внизу, то низ ленты обязан быть у поля ввода". Стоит один replace-кадр,
+  // ничего не делает в 99% случаев — и закрывает остаточную щель независимо от
+  // того, кто её оставил (недоигравшее схлопывание, правка, поменявшая высоту
+  // пузыря, дозагрузившееся медиа). ResizeObserver ниже ловит только изменения
+  // размера контента; случаи, когда контент тот же, а scrollTop разъехался, —
+  // мимо него.
+  const settleBottom = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    if (!nearBottomRef.current) return;
+    // Палец на ленте — та же причина, что у ResizeObserver ниже: писать
+    // scrollTop поверх активного тач-жеста на iOS нельзя.
+    if (isTouchingListRef.current) return;
+    if (Date.now() < smoothScrollUntilRef.current) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight > 2) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
+
+  // Любая мутация ленты (пришло, удалили, поправили) — после коммита сверяем
+  // инвариант. Правка высоты пузыря до этого не обрабатывалась вообще и
+  // держалась только на ResizeObserver.
+  useEffect(() => {
+    const raf = requestAnimationFrame(settleBottom);
+    return () => cancelAnimationFrame(raf);
+  }, [messages, settleBottom]);
 
 
   // Отпускаем камеру/микрофон при уходе со страницы
@@ -1261,6 +1306,20 @@ export const ChatPage: React.FC = () => {
   const handleExitCollapseComplete = useCallback((seq: number) => {
     setExitingMessages((prev) => (prev.some((m) => m.seq === seq) ? prev.filter((m) => m.seq !== seq) : prev));
   }, []);
+  // Страховка к onAnimationComplete: это единственный выход из
+  // exitingMessages, и полагаться на него одного нельзя. Лента в эти 220мс
+  // перерисовывается от чего угодно (typing/presence/read-события, WS-эхо
+  // самого удаления), и если framer-motion не доведёт схлопывание до конца,
+  // строка нулевой высоты останется в ленте навсегда — со своим margin-bottom,
+  // накапливая по 10px "непонятной пустоты" на каждое удаление. Таймер жнёт её
+  // принудительно; если анимация доиграла штатно, ему уже нечего удалять.
+  useEffect(() => {
+    if (exitingMessages.length === 0) return;
+    const timers = exitingMessages.map((m) => setTimeout(() => {
+      handleExitCollapseComplete(m.seq);
+    }, EXIT_COLLAPSE_MS + 120));
+    return () => timers.forEach(clearTimeout);
+  }, [exitingMessages, handleExitCollapseComplete]);
   const displayMessages = useMemo(() => {
     if (exitingMessages.length === 0) return messages;
     const seen = new Set(messages.map((m) => m.seq));
@@ -1466,6 +1525,11 @@ export const ChatPage: React.FC = () => {
                 // ходом, вместо мгновенного исчезновения через exit
                 // (тот успевал схлопнуть только opacity/scale, а высоту —
                 // никогда, отсюда и был голый пробел снизу ленты).
+                // marginBottom в этой анимации до недавнего был пустышкой:
+                // зазор между строками задавался gap контейнера, а gap у
+                // отдельного ребёнка не анимируется ничем. Теперь зазор — это
+                // собственный margin-bottom строки (см. ChatPage.css), и он
+                // схлопывается вместе с высотой, а не щёлкает в конце.
                 const isExiting = exitingSeqs.has(message.seq);
 
                 return (
@@ -1478,7 +1542,7 @@ export const ChatPage: React.FC = () => {
                     animate={isExiting
                       ? { opacity: 0, scale: 0.92, height: 0, marginTop: 0, marginBottom: 0 }
                       : { opacity: 1, y: 0 }}
-                    transition={isExiting ? { duration: 0.22, ease: 'easeInOut' } : undefined}
+                    transition={isExiting ? { duration: EXIT_COLLAPSE_MS / 1000, ease: 'easeInOut' } : undefined}
                     onAnimationComplete={() => { if (isExiting) handleExitCollapseComplete(message.seq); }}
                     exit={{ opacity: 0, scale: 0.92 }}
                   >
