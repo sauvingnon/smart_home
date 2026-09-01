@@ -58,7 +58,6 @@
   position: relative;
   overflow-x: hidden;
   font-family: system-ui, -apple-system, sans-serif;
-  padding-bottom: 80px;
 }
 
 /* Фоновые пятна */
@@ -437,6 +436,10 @@
 
 .day-block {
   margin-bottom: 1.5rem;
+}
+
+.day-block:last-child {
+  margin-bottom: 0;
 }
 
 .day-header {
