@@ -530,6 +530,7 @@ export default function HomePage() {
 
             {/* System Stats */}
             <motion.div variants={itemVar} className="system-card">
+              <div className="tile-glow" style={{ background: 'rgba(96,165,250,0.2)' }} />
               <div className="card-icon" style={
                 !data?.disk_usage ? {} :
                 data.disk_usage.free_gb <= DISK_CRITICAL_GB ? ALERT_ICON :
