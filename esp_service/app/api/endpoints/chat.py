@@ -105,7 +105,7 @@ async def share_video(
         users = await worker.cache.list_users()
         display_by_username = {u["username"]: u["display_name"] for u in users}
         lines.append("Распознаны лица: " + ", ".join(display_by_username.get(name, name) for name in names))
-    text = "\n".join(lines)
+    text = " · ".join(lines)
 
     message = await worker.chat_service.share_video(
         user_id=user_id, video_key=video_key, thumbnail_key=thumbnail_key, text=text,
