@@ -138,7 +138,12 @@ body {
   z-index: 10;
   max-width: 28rem;
   margin: 0 auto;
-  padding: 2rem 1.5rem 80px 1.5rem;
+  /* 80px — тот же базовый отступ, что у Settings/Video, но без учёта
+     safe-area-inset-bottom (домашняя полоса на iPhone) BottomNavBar внизу
+     оказывается выше, чем эти 80px, и последний блок ("Активность"/
+     "Доступность") утыкается прямо в таб-бар. ChatPage тот же safe-area уже
+     добавляет к своим 84px — делаем так же поверх своих 80px. */
+  padding: 2rem 1.5rem calc(80px + env(safe-area-inset-bottom)) 1.5rem;
 }
 
 /* Хедер */
