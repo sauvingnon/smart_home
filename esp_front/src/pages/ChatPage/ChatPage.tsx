@@ -991,6 +991,14 @@ export const ChatPage: React.FC = () => {
   const focusComposerAtEnd = () => {
     const el = textInputRef.current;
     if (!el) return;
+    // На iOS автозаглавная буква — часть внутренней "сессии редактирования"
+    // WebKit, а не просто состояние каретки: после программной очистки поля
+    // (textContent = '') эта сессия не обновляется, и просто .focus() с
+    // пересборкой Range её не сбрасывает. Снятие/возврат contenteditable
+    // форсирует WebKit считать поле заново начатым — как будто оно только
+    // что стало редактируемым.
+    el.contentEditable = 'false';
+    el.contentEditable = 'true';
     el.focus();
     const range = document.createRange();
     range.selectNodeContents(el);
@@ -1644,6 +1652,7 @@ export const ChatPage: React.FC = () => {
                 className={`chat-text-input ${inputText.trim() ? '' : 'chat-text-input--empty'}`}
                 contentEditable
                 suppressContentEditableWarning
+                autoCapitalize="sentences"
                 role="textbox"
                 aria-multiline="true"
                 aria-label="Сообщение"
