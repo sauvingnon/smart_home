@@ -562,11 +562,11 @@ export const CameraPage: React.FC = () => {
               <div className="stat-info">
                 <span className="stat-label">Статус</span>
                 <span className={`stat-value ${cameraStatus?.mode !== 'never_connected' && cameraStatus?.mode !== 'offline' ? 'connected' : 'disconnected'}`}>
-                  {cameraStatus?.mode === 'streaming' && '📹 Стрим'}
-                  {cameraStatus?.mode === 'recording' && '🔴 Запись'}
-                  {cameraStatus?.mode === 'connected' && '✅ В сети'}
-                  {cameraStatus?.mode === 'offline' && '❌ Офлайн'}
-                  {cameraStatus?.mode === 'never_connected' && '🔌 Не подключена'}
+                  {cameraStatus?.mode === 'streaming' && 'Стрим'}
+                  {cameraStatus?.mode === 'recording' && 'Запись'}
+                  {cameraStatus?.mode === 'connected' && 'В сети'}
+                  {cameraStatus?.mode === 'offline' && 'Офлайн'}
+                  {cameraStatus?.mode === 'never_connected' && 'Не подключена'}
                 </span>
               </div>
             </div>
