@@ -1731,55 +1731,62 @@ export const ChatPage: React.FC = () => {
         )}
 
         <div className="chat-input-row" ref={inputRowRef}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            hidden
+            onChange={handleGallerySelected}
+          />
+
           {!recording && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/*"
-                hidden
-                onChange={handleGallerySelected}
-              />
-
-              <button
-                className="chat-icon-button"
-                disabled={sending}
-                onClick={() => fileInputRef.current?.click()}
-                title="Галерея"
-              >
-                <Paperclip size={20} />
-              </button>
-
-              <div
-                key={composerKey}
-                ref={textInputRef}
-                className={`chat-text-input ${inputText.trim() ? '' : 'chat-text-input--empty'}`}
-                contentEditable
-                suppressContentEditableWarning
-                autoCapitalize="sentences"
-                role="textbox"
-                aria-multiline="true"
-                aria-label="Сообщение"
-                data-placeholder="Сообщение…"
-                onInput={syncComposerState}
-                onFocus={() => setInputFocused(true)}
-                onBlur={() => setInputFocused(false)}
-                onKeyDown={handleComposerKeyDown}
-                onPaste={handleComposerPaste}
-                enterKeyHint="send"
-              />
-            </>
+            <button
+              className="chat-icon-button"
+              disabled={sending}
+              onClick={() => fileInputRef.current?.click()}
+              title="Галерея"
+            >
+              <Paperclip size={20} />
+            </button>
           )}
 
-          {recording && (
-            <>
-              <button className="chat-recording-cancel" onClick={cancelRecording} title="Отменить">
-                <Trash2 size={18} />
-              </button>
-              <span className="chat-recording-dot" />
-              <span className="chat-recording-timer">{formatDuration(recordingSeconds)}</span>
-            </>
-          )}
+          {/* Слот с текстовым полем — вне зависимости от recording. Поле
+              никогда не размонтируется и не теряет фокус при старте записи:
+              размонтирование contentEditable снимает с него фокус, а с ним и
+              клавиатуру (браузер закрывает её сам, это не наша анимация и
+              не отменить её после факта). Вместо этого во время записи поле
+              просто визуально прикрывается непрозрачным оверлеем с таймером —
+              фокус и клавиатура остаются как были. */}
+          <div className="chat-composer-slot">
+            <div
+              key={composerKey}
+              ref={textInputRef}
+              className={`chat-text-input ${inputText.trim() ? '' : 'chat-text-input--empty'}`}
+              contentEditable
+              suppressContentEditableWarning
+              autoCapitalize="sentences"
+              role="textbox"
+              aria-multiline="true"
+              aria-label="Сообщение"
+              data-placeholder="Сообщение…"
+              onInput={syncComposerState}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              onKeyDown={handleComposerKeyDown}
+              onPaste={handleComposerPaste}
+              enterKeyHint="send"
+            />
+
+            {recording && (
+              <div className="chat-recording-overlay">
+                <button className="chat-recording-cancel" onClick={cancelRecording} title="Отменить">
+                  <Trash2 size={18} />
+                </button>
+                <span className="chat-recording-dot" />
+                <span className="chat-recording-timer">{formatDuration(recordingSeconds)}</span>
+              </div>
+            )}
+          </div>
 
           {/* Одна и та же кнопка живёт и как "начать голосовое", и как "тап/отпускание
               чтобы отправить" — специально НЕ размонтируется между этими состояниями

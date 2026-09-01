@@ -1473,9 +1473,22 @@
   }
 }
 
-.chat-text-input {
+/* Обёртка вокруг текстового поля — сама несёт flex-рост, который раньше был
+   на .chat-text-input напрямую, потому что во время записи ГС в неё же
+   добавляется .chat-recording-overlay (см. ChatPage.tsx): якорь position
+   нужен самой обёртке, а не полю, иначе оверлей растянулся бы на всю строку
+   ввода, а не только на область поля. */
+.chat-composer-slot {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
+  /* Однострочное поле (32px) на 2px ниже кнопки записи внутри оверлея
+     (34px, как у .chat-icon-button) — без этого её слегка обрезало бы по
+     верху/низу слота. */
+  min-height: 34px;
+}
+
+.chat-text-input {
   min-height: 20px;
   border: none;
   outline: none;
@@ -1500,6 +1513,22 @@
   content: attr(data-placeholder);
   color: var(--text-tertiary);
   pointer-events: none;
+}
+
+/* Пока идёт запись, поле ввода никуда не девается (см. ChatPage.tsx) — так
+   клавиатура, если была открыта, и не думает закрываться. Оверлей просто
+   визуально прикрывает поле таймером/крестиком поверх, непрозрачным фоном:
+   под ним по-прежнему живой, сфокусированный contentEditable, просто
+   невидимый. Фон не завязан на :focus-within (белеет только пока печатают)
+   — во время записи поле остаётся сфокусированным всегда, вне зависимости
+   от темы, так что этот белый тут даём напрямую, а не наследуем. */
+.chat-recording-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
 }
 
 .chat-send-button {
