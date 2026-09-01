@@ -47,6 +47,24 @@ const readAvatarLetter = (displayName: string) => displayName.trim().charAt(0).t
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
+// Дата+время прочтения для карточки в меню сообщения — просто время для
+// сегодняшних отметок, иначе ещё и дата, чтобы не гадать, вчера это было
+// или неделю назад.
+const formatReadDateTime = (iso: string): string => {
+  const date = new Date(iso);
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+  const time = formatTime(iso);
+  if (diffDays === 0) return time;
+  if (diffDays === 1) return `вчера, ${time}`;
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const datePart = date.toLocaleDateString('ru-RU', sameYear
+    ? { day: 'numeric', month: 'short' }
+    : { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${datePart}, ${time}`;
+};
+
 // Ключ дня для группировки — по локальным Y/M/D, а не по самой ISO-строке
 // (та в UTC и может съехать на соседний день от локального).
 const dayKey = (iso: string): string => {
@@ -755,7 +773,7 @@ export const ChatPage: React.FC = () => {
   // копировать/закрепить/удалить. Тап-и-клик на медиа внутри пузыря при этом
   // должен молчать один раз, иначе после долгого нажатия ещё и лайтбокс
   // откроется.
-  const LONG_PRESS_MS = 450;
+  const LONG_PRESS_MS = 300;
   // Палец почти всегда чуть ползёт даже при "неподвижном" удержании, так что
   // порог, а не любое движение. Сдвинулся дальше — это скролл ленты, а не
   // удержание: меню в таком случае открываться не должно.
@@ -1914,7 +1932,7 @@ export const ChatPage: React.FC = () => {
                       {readAvatarLetter(r.display_name)}
                     </span>
                     <span className="chat-action-reader-name">{r.display_name}</span>
-                    <span className="chat-action-reader-time">{r.read_at ? formatTime(r.read_at) : ''}</span>
+                    <span className="chat-action-reader-time">{r.read_at ? formatReadDateTime(r.read_at) : ''}</span>
                   </div>
                 ))}
               </div>
