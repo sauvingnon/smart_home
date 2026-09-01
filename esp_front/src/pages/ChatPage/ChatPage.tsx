@@ -1065,7 +1065,15 @@ export const ChatPage: React.FC = () => {
   // Содержимое пузыря отдельно от самого пузыря: этим же кодом рисуется его
   // копия поверх блюра при открытом меню (см. .chat-bubble-clone), чтобы
   // оригинал и копия не разъезжались при любой правке разметки.
-  const renderBubbleContent = (message: ChatMessage, isMine: boolean, isMediaBubble: boolean, readers: ChatReadState[]) => (
+  const renderBubbleContent = (message: ChatMessage, isMine: boolean, isMediaBubble: boolean, readers: ChatReadState[]) => {
+    const timeLabel = (
+      <>
+        {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
+        {formatTime(message.ts)}
+      </>
+    );
+
+    return (
     <>
       {!isMine && <div className="chat-bubble-author">{message.username}</div>}
       {message.reply_to !== null && (
@@ -1087,17 +1095,21 @@ export const ChatPage: React.FC = () => {
         <div className="chat-bubble-text">
           {message.text}
           {/* Время текста — не своей строкой снизу, а "утоплено" в правый
-              нижний угол последней строки (как в WhatsApp/Telegram): это
-              последний узел внутри текста, float:right встаёт в конец
-              последней строки, если там есть место, иначе уходит под неё
-              вплотную к правому краю. У медиа-подписей (isMediaBubble) время
-              не дублируем — оно уже на самом кадре (chat-bubble-time--overlay
-              ниже). */}
+              нижний угол последней строки (как в WhatsApp/Telegram). Рисуем
+              его дважды: невидимая распорка остаётся в потоке последней
+              строки и держит под время место (а если места нет — переносится
+              и добавляет строку), само же время лежит абсолютом в правом
+              нижнем углу текста. Флоатом это не делается: пузырь —
+              flex-элемент с shrink-to-fit шириной, и флоат учитывался в его
+              max-content, т.е. пузырь просто расширялся под время и оно
+              всегда садилось справа от текста, а не под ним. У медиа-подписей
+              (isMediaBubble) время не дублируем — оно уже на самом кадре
+              (chat-bubble-time--overlay ниже). */}
           {!isMediaBubble && (
-            <span className="chat-bubble-time chat-bubble-time--inline">
-              {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
-              {formatTime(message.ts)}
-            </span>
+            <>
+              <span className="chat-bubble-time-spacer" aria-hidden="true">{timeLabel}</span>
+              <span className="chat-bubble-time chat-bubble-time--inline">{timeLabel}</span>
+            </>
           )}
         </div>
       )}
@@ -1110,10 +1122,7 @@ export const ChatPage: React.FC = () => {
       {/* Голосовые (и другие немедийные сообщения без текста) — своей
           строкой под контентом, тут утапливать время некуда. */}
       {!isMediaBubble && !message.text && (
-        <div className="chat-bubble-time">
-          {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
-          {formatTime(message.ts)}
-        </div>
+        <div className="chat-bubble-time">{timeLabel}</div>
       )}
       {readers.length > 0 && (
         <div className="chat-read-avatars">
@@ -1130,7 +1139,8 @@ export const ChatPage: React.FC = () => {
         </div>
       )}
     </>
-  );
+    );
+  };
 
   const isMediaMessage = (message: ChatMessage): boolean => !!message.media_key
     && (message.type === 'image' || message.type === 'video');
