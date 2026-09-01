@@ -158,7 +158,6 @@ export const ChatPage: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [micPressed, setMicPressed] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video'; seq?: number; mediaKey?: string } | null>(null);
   const [downloadingMedia, setDownloadingMedia] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0); // -1 = подготовка, 0-100 = прогресс, как на странице "Видео"
@@ -244,6 +243,14 @@ export const ChatPage: React.FC = () => {
   const recordStartRef = useRef(0);
   const recordTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Живой уровень сигнала с микрофона (для пульсирующего кольца вокруг
+  // кнопки) гонится прямо в CSS-переменную на кнопке через ref, а не в React
+  // state — на ~30 кадрах в секунду ре-рендер компонента такого размера
+  // обошёлся бы куда дороже прямой записи в style. См. startLevelMeter ниже.
+  const micButtonRef = useRef<HTMLButtonElement>(null);
+  const meterAudioCtxRef = useRef<AudioContext | null>(null);
+  const meterAnalyserRef = useRef<AnalyserNode | null>(null);
+  const meterRafRef = useRef<number | null>(null);
 
   // Фейд-ин страницы завязан на этот флаг, а не на historyReady из
   // ChatContext напрямую: historyReady грузится фоном ещё в ChatProvider на
@@ -408,6 +415,8 @@ export const ChatPage: React.FC = () => {
       if (recordTimeoutRef.current) clearTimeout(recordTimeoutRef.current);
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
       if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+      if (meterRafRef.current) cancelAnimationFrame(meterRafRef.current);
+      meterAudioCtxRef.current?.close().catch(() => {});
     };
   }, []);
 
@@ -612,12 +621,69 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  // Живой уровень громкости для пульсирующего кольца вокруг кнопки —
+  // настоящий RMS по временной области сигнала (как и амплитудная огибающая
+  // в VoiceMessage — см. её комментарий, тот же принцип: не подделка и не
+  // спектр), а не декоративная анимация. requestAnimationFrame, а не
+  // setInterval — синхронизируется с отрисовкой и сам встаёт на паузу на
+  // фоновой вкладке.
+  const startLevelMeter = (stream: MediaStream) => {
+    try {
+      const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const audioCtx = new AudioContextCtor();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      meterAudioCtxRef.current = audioCtx;
+      meterAnalyserRef.current = analyser;
+
+      const data = new Uint8Array(analyser.fftSize);
+      const tick = () => {
+        const node = meterAnalyserRef.current;
+        if (!node) return;
+        node.getByteTimeDomainData(data);
+        let sumSquares = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sumSquares += v * v;
+        }
+        const rms = Math.sqrt(sumSquares / data.length);
+        // Обычная речь даёт RMS в районе 0.02-0.15 — без усиления кольцо
+        // почти не двигалось бы, *5 выводит его в заметный диапазон.
+        const level = Math.min(1, rms * 5);
+        micButtonRef.current?.style.setProperty('--mic-level', level.toFixed(3));
+        meterRafRef.current = requestAnimationFrame(tick);
+      };
+      meterRafRef.current = requestAnimationFrame(tick);
+    } catch (err) {
+      // Кольцо — чисто декоративный слой поверх уже идущей записи: если
+      // AudioContext недоступен, просто не пульсируем, саму запись это
+      // ронять не должно.
+      console.error('Не удалось запустить измеритель громкости', err);
+    }
+  };
+
+  const stopLevelMeter = () => {
+    if (meterRafRef.current) {
+      cancelAnimationFrame(meterRafRef.current);
+      meterRafRef.current = null;
+    }
+    meterAnalyserRef.current = null;
+    if (meterAudioCtxRef.current) {
+      meterAudioCtxRef.current.close().catch(() => {});
+      meterAudioCtxRef.current = null;
+    }
+    micButtonRef.current?.style.setProperty('--mic-level', '0');
+  };
+
   const startRecording = async () => {
     if (recording || sending) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       recordedChunksRef.current = [];
+      startLevelMeter(stream);
 
       const mimeType = AUDIO_MIME_CANDIDATES.find((t) => MediaRecorder.isTypeSupported(t));
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -655,6 +721,7 @@ export const ChatPage: React.FC = () => {
     if (!recorder || !recording) return;
 
     clearRecordingTimers();
+    stopLevelMeter();
 
     await new Promise<void>((resolve) => {
       recorder.addEventListener('stop', () => resolve(), { once: true });
@@ -706,6 +773,7 @@ export const ChatPage: React.FC = () => {
     if (!recorder) return;
 
     clearRecordingTimers();
+    stopLevelMeter();
     recorder.stop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -726,7 +794,6 @@ export const ChatPage: React.FC = () => {
   const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (sending) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setMicPressed(true);
     const wasAlreadyRecording = recording;
     pressWasSecondTapRef.current = wasAlreadyRecording;
     if (!wasAlreadyRecording) {
@@ -739,7 +806,6 @@ export const ChatPage: React.FC = () => {
   };
 
   const handleMicPointerUp = () => {
-    setMicPressed(false);
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -756,7 +822,6 @@ export const ChatPage: React.FC = () => {
   // намеренно ничего не отменяем и не отправляем: реальный звук мог уже
   // записаться, юзер сам решит через крестик или повторный тап.
   const handleMicPointerCancel = () => {
-    setMicPressed(false);
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -1720,7 +1785,8 @@ export const ChatPage: React.FC = () => {
             </button>
           ) : (
             <button
-              className={`chat-icon-button chat-mic-button ${recording ? 'recording' : ''} ${micPressed ? 'chat-mic-button--pressed' : ''}`}
+              ref={micButtonRef}
+              className={`chat-icon-button chat-mic-button ${recording ? 'recording' : ''}`}
               disabled={sending}
               onPointerDown={handleMicPointerDown}
               onPointerUp={handleMicPointerUp}
