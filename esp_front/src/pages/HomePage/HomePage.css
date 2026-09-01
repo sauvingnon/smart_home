@@ -138,12 +138,17 @@ body {
   z-index: 10;
   max-width: 28rem;
   margin: 0 auto;
-  /* 80px — тот же базовый отступ, что у Settings/Video, но без учёта
-     safe-area-inset-bottom (домашняя полоса на iPhone) BottomNavBar внизу
-     оказывается выше, чем эти 80px, и последний блок ("Активность"/
-     "Доступность") утыкается прямо в таб-бар. ChatPage тот же safe-area уже
-     добавляет к своим 84px — делаем так же поверх своих 80px. */
-  padding: 2rem 1.5rem calc(80px + env(safe-area-inset-bottom)) 1.5rem;
+  /* Реальная высота BottomNavBar — padding-top 10 + иконка 22 + gap 4 +
+     лейбл ~13 + padding самого nav-item 16 + padding-bottom бара 20 — уже
+     под 85px сама по себе, без всякой safe-area. 80px здесь этого даже не
+     покрывали (не то что не оставляли видимый зазор — упирались впритык),
+     а env(safe-area-inset-bottom) тут ничего не спасает: во viewport meta
+     нет viewport-fit=cover, без него iOS отдаёт эту переменную нулём. Берём
+     110px с запасом, чтобы под последним блоком был явный видимый зазор, а
+     не расчёт впритык. env() оставлен на будущее — вдруг где-то всё же
+     ненулевой, хуже не станет.
+  */
+  padding: 2rem 1.5rem calc(110px + env(safe-area-inset-bottom)) 1.5rem;
 }
 
 /* Хедер */

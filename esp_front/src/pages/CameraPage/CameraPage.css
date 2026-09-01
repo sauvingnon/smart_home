@@ -120,10 +120,11 @@
   max-width: 64rem;
   margin: 0 auto;
   padding: 2rem 1.5rem;
-  /* См. HomePage.css — тот же safe-area-inset-bottom нужен и тут, иначе
-     BottomNavBar (который его учитывает) оказывается ниже этих 80px, и
-     последний блок ("Зрители") утыкается прямо в таб-бар. */
-  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  /* См. HomePage.css — 80px не хватало даже без всякой safe-area (реальная
+     высота BottomNavBar ~85px), а env(safe-area-inset-bottom) тут не спасал:
+     без viewport-fit=cover в viewport meta iOS отдаёт эту переменную нулём.
+     110px — с явным видимым зазором, а не впритык. */
+  padding-bottom: calc(110px + env(safe-area-inset-bottom));
 }
 
 /* Glass-карточка */
@@ -581,7 +582,7 @@
 @media (max-width: 640px) {
   .camera-page-container {
     padding: 1rem;
-    padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    padding-bottom: calc(110px + env(safe-area-inset-bottom));
   }
 
   .camera-header {
