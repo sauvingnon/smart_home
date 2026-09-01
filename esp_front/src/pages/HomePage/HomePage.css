@@ -278,13 +278,13 @@ body {
   position: absolute;
   top: 0;
   right: 0;
-  width: 16rem;
-  height: 16rem;
-  background: rgba(14, 165, 233, 0.15);
+  width: 11rem;
+  height: 11rem;
+  background: rgba(14, 165, 233, 0.18);
   border-radius: 50%;
-  filter: blur(80px);
-  margin-right: -4rem;
-  margin-top: -4rem;
+  filter: blur(70px);
+  margin-right: -2.5rem;
+  margin-top: -2.5rem;
   pointer-events: none;
 }
 
@@ -548,6 +548,8 @@ body {
 
 /* Системные карточки */
 .system-card {
+  position: relative;
+  overflow: hidden;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(8px);
@@ -560,6 +562,19 @@ body {
   aspect-ratio: 1 / 1;
   transition: all 0.2s;
   cursor: default;
+}
+
+.tile-glow {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 50%;
+  filter: blur(40px);
+  margin-right: -1.25rem;
+  margin-top: -1.25rem;
+  pointer-events: none;
 }
 
 .system-card:hover {
@@ -604,6 +619,13 @@ body {
   color: var(--text-tertiary);
   font-weight: 700;
   letter-spacing: 0.05em;
+  margin-bottom: 0.15rem;
+}
+
+.card-detail {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  margin-top: 0.2rem;
 }
 
 .progress-bar {

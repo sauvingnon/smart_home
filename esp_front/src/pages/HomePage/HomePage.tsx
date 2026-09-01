@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import { motion, AnimatePresence, animate, useMotionValue } from 'framer-motion'
 import {
   Thermometer, Droplets, Camera, Cpu, AlertCircle,
   Sun, Cloud, CloudRain, CloudSnow,
@@ -77,6 +77,47 @@ type GeneralResponse = {
   disk_usage?: DiskUsage;
   memory_usage?: MemoryUsage;
   cpu_usage?: CpuUsage;
+}
+
+// Кеш последних значений живёт в памяти модуля, а не в стейте компонента —
+// переживает размонтирование HomePage при уходе на другую вкладку внутри
+// SPA (но не полную перезагрузку). Без него при каждом повторном заходе
+// стейты и температура на миг проваливались в "--", пока не придёт ответ
+// home_bootstrap, и было видно как значения дёргаются.
+type HomeCache = {
+  data: GeneralResponse | null
+  weather: WeatherData | null
+  downtimeStats: DowntimeStats | null
+  visitStats: VisitStats | null
+}
+const homeCache: HomeCache = { data: null, weather: null, downtimeStats: null, visitStats: null }
+
+// Плавно едет от старого числа к новому вместо мгновенной подмены — так
+// обновление кеша свежими данными с сервера не выглядит как дёрганье.
+function useAnimatedNumber(value: number | null | undefined, decimals = 1): number | null {
+  const motionValue = useMotionValue(value ?? 0)
+  const [display, setDisplay] = useState<number | null>(value ?? null)
+  const prevValue = useRef<number | null | undefined>(value)
+
+  useEffect(() => {
+    if (value == null) return
+    if (prevValue.current == null) {
+      motionValue.set(value)
+      setDisplay(value)
+      prevValue.current = value
+      return
+    }
+    if (prevValue.current === value) return
+    prevValue.current = value
+    const controls = animate(motionValue, value, {
+      duration: 0.6,
+      ease: 'easeOut',
+      onUpdate: v => setDisplay(v),
+    })
+    return () => controls.stop()
+  }, [value])
+
+  return display == null ? null : Number(display.toFixed(decimals))
 }
 
 const weatherTranslations: Record<string, string> = {
@@ -160,11 +201,11 @@ export default function HomePage() {
   usePageVisit('home')
   const { theme } = useTheme()
   const { isAdmin } = useAuth()
-  const [data, setData] = useState<GeneralResponse | null>(null)
-  const [weather, setWeather] = useState<WeatherData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [visitStats, setVisitStats] = useState<VisitStats | null>(null)
-  const [downtimeStats, setDowntimeStats] = useState<DowntimeStats | null>(null)
+  const [data, setData] = useState<GeneralResponse | null>(() => homeCache.data)
+  const [weather, setWeather] = useState<WeatherData | null>(() => homeCache.weather)
+  const [loading, setLoading] = useState(() => !homeCache.data)
+  const [visitStats, setVisitStats] = useState<VisitStats | null>(() => homeCache.visitStats)
+  const [downtimeStats, setDowntimeStats] = useState<DowntimeStats | null>(() => homeCache.downtimeStats)
   const [selectedDowntimeDevice, setSelectedDowntimeDevice] = useState<string | null>(null)
   const [selectedDowntimeDate, setSelectedDowntimeDate] = useState<string | null>(null)
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set())
@@ -194,13 +235,15 @@ export default function HomePage() {
       setLoading(true)
       const res = await apiClient.fetch('/esp_service/telemetry')
       setData(res)
+      homeCache.data = res
     } catch { } finally { setLoading(false) }
   }
-  
+
   const fetchWeather = async () => {
     try {
       const res = await apiClient.fetch('/esp_service/weather');
       setWeather(res);
+      homeCache.weather = res
     } catch {}
   }
 
@@ -230,8 +273,7 @@ export default function HomePage() {
   };
 
   const getGlobalStatusText = (): string => {
-    if (loading) return 'Обновление...';
-    if (!data) return 'Нет данных';
+    if (!data) return loading ? 'Обновление...' : 'Нет данных';
     if (isAllOnline()) return 'Всё работает';
     const offlineCount = [data.central_board_status, data.camera_status, data.sensor_status, data.toilet_status]
       .filter(s => !getStatusStyle(s || '').active).length;
@@ -244,10 +286,10 @@ export default function HomePage() {
     try {
       setLoading(true)
       const res = await apiClient.fetch('/esp_service/home_bootstrap')
-      if (res.status) setData(res.status)
-      if (res.weather) setWeather(res.weather)
-      if (res.downtime) setDowntimeStats(res.downtime)
-      if (isAdmin && res.login_stats) setVisitStats(res.login_stats)
+      if (res.status) { setData(res.status); homeCache.data = res.status }
+      if (res.weather) { setWeather(res.weather); homeCache.weather = res.weather }
+      if (res.downtime) { setDowntimeStats(res.downtime); homeCache.downtimeStats = res.downtime }
+      if (isAdmin && res.login_stats) { setVisitStats(res.login_stats); homeCache.visitStats = res.login_stats }
     } catch { } finally { setLoading(false) }
   }
 
@@ -260,6 +302,10 @@ export default function HomePage() {
     // соединений на клиенте.
     fetchBootstrap()
   }, [isAdmin])
+
+  const animatedTemp = useAnimatedNumber(data?.telemetry?.temperature, 1)
+  const animatedHumidity = useAnimatedNumber(data?.telemetry?.humidity, 0)
+  const animatedWeatherTemp = useAnimatedNumber(weather?.current_temp, 0)
 
   const overallUptime = downtimeStats
     ? (() => {
@@ -394,14 +440,14 @@ export default function HomePage() {
                   </span>
                   <div className="temperature-value">
                     <span className="temperature-number">
-                      {data?.telemetry?.temperature?.toFixed(1) || '--'}
+                      {animatedTemp != null ? animatedTemp.toFixed(1) : '--'}
                     </span>
                     <span className="temperature-unit">°</span>
                   </div>
                 </div>
                 <div className="humidity-indicator">
                   <Droplets size={20} className="humidity-icon" />
-                  <span className="humidity-value">{data?.telemetry?.humidity?.toFixed(0) || '--'}%</span>
+                  <span className="humidity-value">{animatedHumidity != null ? animatedHumidity.toFixed(0) : '--'}%</span>
                 </div>
               </div>
 
@@ -458,7 +504,7 @@ export default function HomePage() {
                 </div>
                 <div>
                   <div className="weather-temp">
-                    {weather?.current_temp ?? '--'}°
+                    {animatedWeatherTemp ?? '--'}°
                   </div>
                   <div className="weather-condition">
                     {weather ? weatherTranslations[weather.current_condition] : 'Загрузка...'}
@@ -493,11 +539,12 @@ export default function HomePage() {
                 <HardDrive size={20} />
               </div>
               <div>
+                <div className="card-label">Диск</div>
                 <div className="card-value">
                   {data?.disk_usage ? `${data.disk_usage.free_gb} GB` : '--'}
                 </div>
-                <div className="card-label">
-                  {data?.disk_usage ? `свободно из ${data.disk_usage.total_gb} GB` : 'Диск'}
+                <div className="card-detail">
+                  {data?.disk_usage ? `свободно из ${data.disk_usage.total_gb} GB` : 'нет данных'}
                 </div>
               </div>
               <div className="progress-bar">
@@ -511,6 +558,7 @@ export default function HomePage() {
             </motion.div>
 
             <motion.div variants={itemVar} className="system-card">
+              <div className="tile-glow" style={{ background: 'rgba(129,140,248,0.2)' }} />
               <div className="card-icon" style={
                 (weather?.wind_speed ?? 0) >= 12 ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' } :
                 (weather?.wind_speed ?? 0) >= 8  ? { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' } :
@@ -519,8 +567,9 @@ export default function HomePage() {
                 <Wind size={20} />
               </div>
               <div>
-                <div className="card-value">{weather?.wind_speed ?? 0}</div>
-                <div className="card-label">Метры/Сек</div>
+                <div className="card-label">Ветер</div>
+                <div className="card-value">{weather?.wind_speed ?? '--'}</div>
+                <div className="card-detail">м/с</div>
               </div>
               <div className="progress-bar">
                 <div
@@ -537,15 +586,17 @@ export default function HomePage() {
 
             {/* RAM */}
             <motion.div variants={itemVar} className="system-card">
+              <div className="tile-glow" style={{ background: 'rgba(52,211,153,0.2)' }} />
               <div className="card-icon" style={loadIconStyle(data?.memory_usage?.used_percent, TILE_COLORS.memory)}>
                 <MemoryStick size={20} />
               </div>
               <div>
+                <div className="card-label">Память</div>
                 <div className="card-value">
                   {data?.memory_usage ? `${data.memory_usage.used_gb} GB` : '--'}
                 </div>
-                <div className="card-label">
-                  {data?.memory_usage ? `занято из ${data.memory_usage.total_gb} GB` : 'Память'}
+                <div className="card-detail">
+                  {data?.memory_usage ? `занято из ${data.memory_usage.total_gb} GB` : 'нет данных'}
                 </div>
               </div>
               <div className="progress-bar">
@@ -560,15 +611,17 @@ export default function HomePage() {
 
             {/* CPU */}
             <motion.div variants={itemVar} className="system-card">
+              <div className="tile-glow" style={{ background: 'rgba(248,113,113,0.2)' }} />
               <div className="card-icon" style={loadIconStyle(data?.cpu_usage?.used_percent, TILE_COLORS.cpu)}>
                 <Cpu size={20} />
               </div>
               <div>
+                <div className="card-label">Процессор</div>
                 <div className="card-value">
                   {data?.cpu_usage ? `${data.cpu_usage.used_percent}%` : '--'}
                 </div>
-                <div className="card-label">
-                  {data?.cpu_usage ? `загрузка · ${data.cpu_usage.cores} ядер` : 'Процессор'}
+                <div className="card-detail">
+                  {data?.cpu_usage ? `загрузка · ${data.cpu_usage.cores} ядер` : 'нет данных'}
                 </div>
               </div>
               <div className="progress-bar">
