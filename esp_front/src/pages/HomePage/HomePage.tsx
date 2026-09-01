@@ -239,6 +239,11 @@ export default function HomePage() {
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set())
   const [silentLoading, setSilentLoading] = useState(false)
   const [silentFeedback, setSilentFeedback] = useState<'ok' | 'error' | null>(null)
+  // Последний запрос к серверу упал — значит то, что сейчас на экране, это
+  // homeCache (память модуля/localStorage), а не подтверждённо свежие данные.
+  // Без этого флага упавший fetchBootstrap молча оставлял старые цифры на
+  // экране без единого намёка, что сервер вообще недоступен.
+  const [dataStale, setDataStale] = useState(false)
 
   useEffect(() => {
     if (selectedDowntimeDevice) {
@@ -265,7 +270,8 @@ export default function HomePage() {
       setData(res)
       homeCache.data = res
       persistHomeCache()
-    } catch { } finally { setLoading(false) }
+      setDataStale(false)
+    } catch { setDataStale(true) } finally { setLoading(false) }
   }
 
   const fetchWeather = async () => {
@@ -274,7 +280,8 @@ export default function HomePage() {
       setWeather(res);
       homeCache.weather = res
       persistHomeCache()
-    } catch {}
+      setDataStale(false)
+    } catch { setDataStale(true) }
   }
 
   const activateSilentMode = async () => {
@@ -321,7 +328,8 @@ export default function HomePage() {
       if (res.downtime) { setDowntimeStats(res.downtime); homeCache.downtimeStats = res.downtime }
       if (isAdmin && res.login_stats) { setVisitStats(res.login_stats); homeCache.visitStats = res.login_stats }
       persistHomeCache()
-    } catch { } finally { setLoading(false) }
+      setDataStale(false)
+    } catch { setDataStale(true) } finally { setLoading(false) }
   }
 
   useEffect(() => {
@@ -337,6 +345,39 @@ export default function HomePage() {
   const animatedTemp = useAnimatedNumber(data?.telemetry?.temperature, 1)
   const animatedHumidity = useAnimatedNumber(data?.telemetry?.humidity, 0)
   const animatedWeatherTemp = useAnimatedNumber(weather?.current_temp, 0)
+
+  // Список активных баннеров снизу экрана, в порядке стекания (первый — ниже
+  // всех). dataStale стоит первым: если сервер вообще недоступен, это самая
+  // фундаментальная проблема — остальные баннеры опираются на данные, которым
+  // в этот момент нельзя доверять.
+  type AlertItem = { key: string; icon: JSX.Element; title: string; text: string; style?: Record<string, string> }
+  const activeAlerts: AlertItem[] = []
+  if (dataStale) {
+    activeAlerts.push({
+      key: 'stale',
+      icon: <AlertCircle size={24} className="alert-icon" style={{ color: '#fbbf24' }} />,
+      title: 'Нет связи с сервером',
+      text: 'Не удалось обновить данные — показаны последние сохранённые.',
+      style: { background: 'rgba(251,191,36,0.15)', borderColor: '#fbbf24' },
+    })
+  }
+  if (data?.central_board_status !== 'online' && !loading) {
+    activeAlerts.push({
+      key: 'board',
+      icon: <AlertCircle size={24} className="alert-icon" />,
+      title: 'Внимание',
+      text: 'Данные устарели. Проверьте питание главной платы.',
+    })
+  }
+  if (data?.disk_usage && data.disk_usage.free_gb <= DISK_CRITICAL_GB && !loading) {
+    activeAlerts.push({
+      key: 'disk',
+      icon: <HardDrive size={24} className="alert-icon" style={{ color: '#f87171' }} />,
+      title: 'Диск почти заполнен',
+      text: `Осталось ${data.disk_usage.free_gb} GB — срочно освободите место.`,
+      style: { background: 'rgba(239,68,68,0.15)', borderColor: '#f87171' },
+    })
+  }
 
   const overallUptime = downtimeStats
     ? (() => {
@@ -849,38 +890,26 @@ export default function HomePage() {
         </motion.div>
       </div>
 
-      {/* Alert Overlay */}
+      {/* Alert Overlay — баннеры стекаются снизу вверх по порядку из activeAlerts,
+          а не жёстко зашитыми bottom: 100px/160px, потому что баннеров теперь
+          три (было два) и ручные тернарки под отступы дальше не масштабируются. */}
       <AnimatePresence>
-        {data?.central_board_status !== 'online' && !loading && (
+        {activeAlerts.map((alert, i) => (
           <motion.div
+            key={alert.key}
             initial={{ y: 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 50, opacity: 0 }}
             className="alert-message"
-            style={{ bottom: '100px' }}
+            style={{ bottom: `${100 + i * 60}px`, ...alert.style }}
           >
-            <AlertCircle size={24} className="alert-icon" />
+            {alert.icon}
             <div className="alert-content">
-              <p className="alert-title">Внимание</p>
-              <p className="alert-text">Данные устарели. Проверьте питание главной платы.</p>
+              <p className="alert-title">{alert.title}</p>
+              <p className="alert-text">{alert.text}</p>
             </div>
           </motion.div>
-        )}
-        {data?.disk_usage && data.disk_usage.free_gb <= DISK_CRITICAL_GB && !loading && (
-          <motion.div
-            initial={{ y: 50, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 50, opacity: 0 }}
-            className="alert-message"
-            style={{ bottom: data?.central_board_status !== 'online' ? '160px' : '100px', background: 'rgba(239,68,68,0.15)', borderColor: '#f87171' }}
-          >
-            <HardDrive size={24} className="alert-icon" style={{ color: '#f87171' }} />
-            <div className="alert-content">
-              <p className="alert-title">Диск почти заполнен</p>
-              <p className="alert-text">Осталось {data.disk_usage.free_gb} GB — срочно освободите место.</p>
-            </div>
-          </motion.div>
-        )}
+        ))}
       </AnimatePresence>
       
       <AnimatePresence>
