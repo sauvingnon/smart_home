@@ -79,18 +79,46 @@ type GeneralResponse = {
   cpu_usage?: CpuUsage;
 }
 
-// Кеш последних значений живёт в памяти модуля, а не в стейте компонента —
-// переживает размонтирование HomePage при уходе на другую вкладку внутри
-// SPA (но не полную перезагрузку). Без него при каждом повторном заходе
-// стейты и температура на миг проваливались в "--", пока не придёт ответ
-// home_bootstrap, и было видно как значения дёргаются.
+// Кеш последних значений живёт в памяти модуля и дублируется в localStorage.
+// Память модуля переживает размонтирование HomePage при уходе на другую
+// вкладку внутри SPA, но обнуляется при холодном старте PWA (новый JS-
+// контекст) — тогда единственное, что успевает подставиться до первого
+// ответа сервера, это то, что мы успели сохранить в localStorage в прошлый
+// раз. Без этого при каждом заходе (и особенно при первом после перезапуска
+// PWA) стейты и температура на миг проваливались в "--", пока не придёт
+// ответ home_bootstrap, и было видно как значения дёргаются.
 type HomeCache = {
   data: GeneralResponse | null
   weather: WeatherData | null
   downtimeStats: DowntimeStats | null
   visitStats: VisitStats | null
 }
-const homeCache: HomeCache = { data: null, weather: null, downtimeStats: null, visitStats: null }
+
+// Версия в ключе — если форма закешированных объектов когда-нибудь поменяется
+// несовместимо, старые записи у пользователей просто перестанут матчиться и
+// будут проигнорированы вместо попытки отрендерить их в новом формате.
+const HOME_CACHE_KEY = 'home_cache_v1'
+
+function readHomeCacheFromStorage(): HomeCache {
+  const empty: HomeCache = { data: null, weather: null, downtimeStats: null, visitStats: null }
+  try {
+    const raw = localStorage.getItem(HOME_CACHE_KEY)
+    if (!raw) return empty
+    return { ...empty, ...JSON.parse(raw) }
+  } catch {
+    return empty
+  }
+}
+
+const homeCache: HomeCache = readHomeCacheFromStorage()
+
+function persistHomeCache() {
+  try {
+    localStorage.setItem(HOME_CACHE_KEY, JSON.stringify(homeCache))
+  } catch {
+    // приватный режим / забита квота — просто не кешируем на диск
+  }
+}
 
 // Плавно едет от старого числа к новому вместо мгновенной подмены — так
 // обновление кеша свежими данными с сервера не выглядит как дёрганье.
@@ -236,6 +264,7 @@ export default function HomePage() {
       const res = await apiClient.fetch('/esp_service/telemetry')
       setData(res)
       homeCache.data = res
+      persistHomeCache()
     } catch { } finally { setLoading(false) }
   }
 
@@ -244,6 +273,7 @@ export default function HomePage() {
       const res = await apiClient.fetch('/esp_service/weather');
       setWeather(res);
       homeCache.weather = res
+      persistHomeCache()
     } catch {}
   }
 
@@ -290,6 +320,7 @@ export default function HomePage() {
       if (res.weather) { setWeather(res.weather); homeCache.weather = res.weather }
       if (res.downtime) { setDowntimeStats(res.downtime); homeCache.downtimeStats = res.downtime }
       if (isAdmin && res.login_stats) { setVisitStats(res.login_stats); homeCache.visitStats = res.login_stats }
+      persistHomeCache()
     } catch { } finally { setLoading(false) }
   }
 
