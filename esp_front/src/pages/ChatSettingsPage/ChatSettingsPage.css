@@ -25,7 +25,9 @@
 }
 
 .chat-settings-page {
-  min-height: 100vh;
+  /* dvh, а не vh: см. HomePage.css — статичный vh не наводит WebKit
+     перекомпоновать/перерисовать #app-background под чёлкой при смене темы. */
+  min-height: 100dvh;
   color: var(--text-primary);
   position: relative;
   overflow-x: hidden;

@@ -51,7 +51,9 @@
 }
 
 .settings-page {
-  min-height: 100vh;
+  /* dvh, а не vh: см. HomePage.css — статичный vh не наводит WebKit
+     перекомпоновать/перерисовать #app-background под чёлкой при смене темы. */
+  min-height: 100dvh;
   /* Фон теперь #app-background (position:fixed, вне React-дерева, см.
      index.html/index.css) — не дублируем его тут. */
   color: var(--text-primary);
