@@ -9,6 +9,7 @@ import './SettingsPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { useAuth } from '../../context/AuthContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
+import { useOnTabReselect } from '../../context/NavBarContext'
 
 type Settings = {
   displayMode: number
@@ -220,6 +221,7 @@ const ToggleSwitch = ({ checked, onChange, color = 'blue' }: any) => {
 
 export default function SettingsPage() {
   usePageVisit('settings')
+  useOnTabReselect(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
   const { theme } = useTheme()
   const { logout } = useAuth()
   const [settings, setSettings] = useState<Settings | null>(null)

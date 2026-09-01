@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
-import { useNavBarHidden } from '../../context/NavBarContext';
+import { useNavBarHidden, useTriggerTabReselect } from '../../context/NavBarContext';
 import { Home, Camera, MessageCircle, Video, Settings } from 'lucide-react';
 import './BottomNavBar.css';
 
@@ -20,6 +20,7 @@ export const BottomNavBar = () => {
   const { isAdmin } = useAuth();
   const { unreadCount } = useChat();
   const location = useLocation();
+  const triggerReselect = useTriggerTabReselect();
   // Прячем классом, а не размонтированием: компонент живёт один раз на всё
   // приложение (см. App.tsx), и его размонтирование убивало бы shared-layout
   // анимацию таблетки — ровно то, ради чего он туда и поднят.
@@ -37,6 +38,9 @@ export const BottomNavBar = () => {
             key={path}
             to={path}
             className={`nav-item ${isActive ? 'active' : ''}`}
+            onClick={() => {
+              if (isActive) triggerReselect();
+            }}
           >
             {isActive && (
               <motion.div

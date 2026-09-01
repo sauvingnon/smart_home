@@ -11,6 +11,7 @@ import TemperatureChart from '../../components/TemperatureChart/TemperatureChart
 import { useTheme } from '../../context/ThemeContext'
 import { useAuth } from '../../context/AuthContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
+import { useOnTabReselect } from '../../context/NavBarContext'
 
 // --- Типы и Хелперы ---
 type WeatherData = {
@@ -227,6 +228,7 @@ const itemVar = {
 
 export default function HomePage() {
   usePageVisit('home')
+  useOnTabReselect(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
   const { theme } = useTheme()
   const { isAdmin } = useAuth()
   const [data, setData] = useState<GeneralResponse | null>(() => homeCache.data)

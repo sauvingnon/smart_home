@@ -23,6 +23,7 @@ import type { Resolution } from '../../api/camera';
 import './CameraPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
+import { useOnTabReselect } from '../../context/NavBarContext'
 
 const containerVar = {
   hidden: { opacity: 0 },
@@ -56,6 +57,7 @@ const RESOLUTION_CHANGE_DELAY = 1000
 
 export const CameraPage: React.FC = () => {
   usePageVisit('camera')
+  useOnTabReselect(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
   const { theme } = useTheme()
   const { cameraId } = useParams<{ cameraId: string }>()
   const [fullscreen, setFullscreen] = useState(false)

@@ -22,6 +22,7 @@ import { apiClient } from '../../api/client'
 import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
+import { useOnTabReselect } from '../../context/NavBarContext'
 
 interface VideoItem {
     key: string
@@ -73,6 +74,7 @@ const itemVar = {
 
 export const VideosPage = () => {
   usePageVisit('video')
+  useOnTabReselect(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
   const { theme } = useTheme()
   const navigate = useNavigate()
   const [videos, setVideos] = useState<VideoItem[]>([])

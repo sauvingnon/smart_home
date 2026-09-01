@@ -10,6 +10,7 @@ import type { ChatMessage, ChatReadState } from '../../api/client';
 import { useHideNavBar } from '../../context/NavBarContext';
 import { useChatPush } from '../../hooks/useChatPush';
 import { usePageVisit } from '../../hooks/usePageVisit';
+import { useOnTabReselect } from '../../context/NavBarContext';
 import { VoiceMessage } from './VoiceMessage';
 import { useChatListAnchor } from './useChatListAnchor';
 import './ChatPage.css';
@@ -214,6 +215,9 @@ export const ChatPage: React.FC = () => {
     handleTouchStart: handleMessagesTouchStart,
     handleTouchEnd: handleMessagesTouchEnd,
   } = listAnchor;
+  // Повторный тап по табу "Чат" — как кнопка "вниз": та же санкционированная
+  // точка входа в scrollTop ленты, никакой отдельной записи scrollTop тут нет.
+  useOnTabReselect(() => scrollListToBottom('smooth'));
   // Кнопка "вниз" — прямое следствие режима залипания, а не отдельный стейт,
   // который надо не забыть погасить в каждой ветке.
   const showScrollDown = !listAnchor.isStuck;
