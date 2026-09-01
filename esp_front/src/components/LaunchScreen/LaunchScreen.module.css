@@ -88,7 +88,6 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
   text-transform: uppercase;
-  animation: fadeInUp 0.8s ease-out;
 }
 
 .subtitle {
@@ -100,19 +99,6 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
   text-transform: uppercase;
-  animation: fadeInUp 0.8s ease-out 0.1s both;
-}
-
-/* Анимация появления */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* Адаптив */
