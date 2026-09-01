@@ -231,6 +231,10 @@ export const ChatPage: React.FC = () => {
   const [messagesPadBottom, setMessagesPadBottom] = useState(78);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLDivElement>(null);
+  // Ремаунтим contenteditable-поле после отправки (см. handleSendText) —
+  // рост этого ключа форсирует React пересоздать DOM-узел с нуля.
+  const [composerKey, setComposerKey] = useState(0);
+  const composerRefocusRef = useRef(false);
   const lastSeqRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
@@ -547,6 +551,7 @@ export const ChatPage: React.FC = () => {
       return;
     }
     setSending(true);
+    let sent = false;
     try {
       if (editTarget) {
         await editMessage(editTarget.seq, text);
@@ -556,20 +561,30 @@ export const ChatPage: React.FC = () => {
         setReplyTarget(null);
       }
       setInputText('');
-      if (textInputRef.current) textInputRef.current.textContent = '';
+      sent = true;
       setSendError(null);
     } catch (err) {
       console.error('Не удалось отправить сообщение', err);
       setSendError(errorMessage(err));
     } finally {
       setSending(false);
-      // Поле не disabled во время отправки специально — но фокус браузер всё
-      // равно может увести на кнопку отправки, возвращаем его в поле ввода.
-      // Именно focusComposerAtEnd (а не просто .focus()) — он явно пересобирает
-      // Range/Selection, без этого на пустом поле мобильная клавиатура не
-      // распознаёт "начало поля" и не включает автозаглавную букву для
-      // следующего сообщения.
-      focusComposerAtEnd();
+      if (sent) {
+        // Просто textContent = '' + .focus() не сбрасывает "сессию
+        // автозаглавной буквы" WebKit — после программной очистки поля
+        // следующее сообщение стабильно начиналось со строчной. Толкание
+        // contentEditable false→true на том же узле тоже не помогло (было
+        // опробовано ранее). Реально работает только пересоздание самого
+        // DOM-узла — рост composerKey размонтирует старый div и монтирует
+        // новый, для WebKit это буквально "поле только что появилось".
+        composerRefocusRef.current = true;
+        setComposerKey((k) => k + 1);
+      } else {
+        // Поле не disabled во время отправки специально — но фокус браузер
+        // всё равно может увести на кнопку отправки, возвращаем его в поле
+        // ввода. Ремаунт тут не нужен и вреден: текст не отправился и
+        // должен остаться как есть, а новый пустой узел его бы стёр.
+        focusComposerAtEnd();
+      }
     }
   };
 
@@ -1078,21 +1093,6 @@ export const ChatPage: React.FC = () => {
   const focusComposerAtEnd = () => {
     const el = textInputRef.current;
     if (!el) return;
-    // На iOS автозаглавная буква — часть внутренней "сессии редактирования"
-    // WebKit, а не просто состояние каретки: после программной очистки поля
-    // (textContent = '') эта сессия не обновляется, и просто .focus() с
-    // пересборкой Range её не сбрасывает. Снятие/возврат contenteditable
-    // форсирует WebKit считать поле заново начатым — как будто оно только
-    // что стало редактируемым.
-    el.contentEditable = 'false';
-    // Без принудительного reflow между false и true браузер схлопывает два
-    // синхронных присваивания в одно — WebKit не успевает реально закрыть
-    // сессию редактирования перед тем, как она тут же открывается заново,
-    // и трюк ничего не даёт со второго сообщения (только с первого, когда
-    // поле и так в pristine-состоянии). offsetHeight форсирует layout между
-    // шагами, так что "false" реально применяется до возврата в "true".
-    void el.offsetHeight;
-    el.contentEditable = 'true';
     el.focus();
     const range = document.createRange();
     range.selectNodeContents(el);
@@ -1101,6 +1101,15 @@ export const ChatPage: React.FC = () => {
     selection?.removeAllRanges();
     selection?.addRange(range);
   };
+
+  // Фокусируем поле уже после того, как React примонтировал пересозданный
+  // (см. composerKey в handleSendText) DOM-узел — до этого момента
+  // textInputRef.current всё ещё указывает на старый, удаляемый узел.
+  useLayoutEffect(() => {
+    if (!composerRefocusRef.current) return;
+    composerRefocusRef.current = false;
+    textInputRef.current?.focus();
+  }, [composerKey]);
 
   const startReply = (message: ChatMessage) => {
     closeActionMenu();
@@ -1742,6 +1751,7 @@ export const ChatPage: React.FC = () => {
               </button>
 
               <div
+                key={composerKey}
                 ref={textInputRef}
                 className={`chat-text-input ${inputText.trim() ? '' : 'chat-text-input--empty'}`}
                 contentEditable
