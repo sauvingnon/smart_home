@@ -49,6 +49,38 @@ interface ChatContextType {
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 const HISTORY_PAGE_SIZE = 50;
+
+// Кеш последней страницы сообщений в localStorage — только тело истории, без
+// reads/presence/typing/unreadCount/pinnedMessage: те слишком волатильны, и
+// показ устаревшего "прочитано"/"онлайн"/закрепа будет откровенно врать, а не
+// просто на секунду отставать, как текст сообщений. Переживает холодный
+// старт PWA (тот же приём, что и кеш HomePage) — без него /chat при первом
+// заходе после перезапуска всегда открывался с пустой лентой на все ~500мс+
+// сети, пока не придёт реальная история.
+const CHAT_CACHE_KEY = 'chat_messages_cache_v1';
+
+function readChatMessagesCache(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(CHAT_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistChatMessagesCache(messages: ChatMessage[]) {
+  try {
+    // Срез до последней страницы — сколько бы истории юзер ни подгрузил
+    // скроллом наверх за сессию (loadMoreHistory), на диск идёт только хвост:
+    // кеш нужен для мгновенного первого кадра, а не как полная копия истории.
+    localStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(messages.slice(-HISTORY_PAGE_SIZE)));
+  } catch {
+    // приватный режим / забита квота — просто не кешируем на диск
+  }
+}
+
 const TOAST_DURATION_MS = 4000;
 // Разводим холодный старт чата по времени с HomePage (её запросы уже
 // разнесены на 0/150/300/450мс) — иначе история чата и WS-хендшейк всё
@@ -83,7 +115,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const location = useLocation();
   const isOnChatPage = location.pathname === '/chat';
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => readChatMessagesCache());
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [reads, setReads] = useState<ChatReadState[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -93,7 +125,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // раз на уровне App-шелла (см. комментарий у ChatProvider), а не заново
   // при каждом заходе на /chat, так что и плавное появление ленты должно
   // случиться один раз, а не при каждом возврате на страницу.
-  const [historyReady, setHistoryReady] = useState(false);
+  // Если из localStorage уже есть чем заполнить ленту — считаем её готовой
+  // сразу, не дожидаясь настоящего fetch: точно так же, как loading у
+  // HomePage стартует false, если homeCache уже не пуст.
+  const [historyReady, setHistoryReady] = useState(() => readChatMessagesCache().length > 0);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [toast, setToast] = useState<ChatMessage | null>(null);
   const [pinnedMessage, setPinnedMessage] = useState<ChatMessage | null>(null);
@@ -296,6 +331,15 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const timer = setTimeout(() => setToast(null), TOAST_DURATION_MS);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // Один эффект на все источники изменений messages (начальная загрузка, WS,
+  // отправка, правка, удаление, подгрузка истории) вместо ручного вызова в
+  // каждом из них — persistChatMessagesCache сам обрезает до последней
+  // страницы, так что это дёшево и не зависит от того, сколько истории
+  // подгружено скроллом.
+  useEffect(() => {
+    persistChatMessagesCache(messages);
+  }, [messages]);
 
   const loadMoreHistory = useCallback(async () => {
     if (loadingHistory || !hasMoreHistory || messages.length === 0) return;
