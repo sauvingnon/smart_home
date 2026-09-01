@@ -386,7 +386,7 @@ export default function SettingsPage() {
           </div>
         ) : loading || !settings ? (
           <div className="loading-container">
-            <div className="loading-card glass-card">
+            <div className="loading-card">
               <div className="spinner" />
               <p className="loading-text">Загрузка настроек...</p>
             </div>

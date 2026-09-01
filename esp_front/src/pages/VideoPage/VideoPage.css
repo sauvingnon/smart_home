@@ -775,13 +775,20 @@
   color: var(--text-tertiary);
 }
 
-/* Загрузка */
+/* Загрузка — оверлей на весь экран, а не блок в потоке под шапкой: так
+   плашка реально висит в центре видимой области, а не середины 200px-блока
+   сразу под хедером. pointer-events: none — сама плашка не кликабельна и не
+   должна перехватывать тапы по шапке/наву, даже если визуально перекрывает
+   их на низких экранах. z-index ниже BottomNavBar (100, см. его CSS). */
 .loading-container {
-  min-height: 200px;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  pointer-events: none;
 }
 
 .loading-card {
