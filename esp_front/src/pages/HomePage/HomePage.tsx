@@ -778,11 +778,12 @@ export default function HomePage() {
                   <p style={{ fontSize: '13px', color: 'var(--text-secondary)', textAlign: 'center', padding: '8px 0' }}>Нет активности</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {visitStats.map((user) => {
+                    {visitStats.map((user, idx) => {
                       const sortedDays = Object.entries(user.days).sort(([a], [b]) => b.localeCompare(a))
                       const totalVisits = Object.values(user.days).reduce((s, d) => s + d.length, 0)
+                      const isLast = idx === visitStats.length - 1
                       return (
-                        <div key={user.name} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '10px' }}>
+                        <div key={user.name} style={isLast ? {} : { borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '10px' }}>
                           <div className="stat-item" style={{ marginBottom: '6px' }}>
                             <div className="stat-icon" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
                               <User size={18} />
