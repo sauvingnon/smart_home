@@ -96,13 +96,16 @@ async def share_video(
     thumbnail_key = f"thumbnails/{payload.camera_id}/{payload.video_id}.jpg"
 
     names = await worker.video_service.get_recognized_names(payload.camera_id, payload.video_id)
-    text = ""
+    video_dt = parse_video_key_datetime(video_key)
+
+    lines = []
+    if video_dt:
+        lines.append(f"Фрагмент от {format_ru_datetime(video_dt)}")
     if names:
         users = await worker.cache.list_users()
         display_by_username = {u["username"]: u["display_name"] for u in users}
-        video_dt = parse_video_key_datetime(video_key)
-        date_line = f"Видео от {format_ru_datetime(video_dt)}\n" if video_dt else ""
-        text = date_line + "Распознаны лица: " + ", ".join(display_by_username.get(name, name) for name in names)
+        lines.append("Распознаны лица: " + ", ".join(display_by_username.get(name, name) for name in names))
+    text = "\n".join(lines)
 
     message = await worker.chat_service.share_video(
         user_id=user_id, video_key=video_key, thumbnail_key=thumbnail_key, text=text,
