@@ -11,6 +11,7 @@ import { useHideNavBar } from '../../context/NavBarContext';
 import { useChatPush } from '../../hooks/useChatPush';
 import { usePageVisit } from '../../hooks/usePageVisit';
 import { VoiceMessage } from './VoiceMessage';
+import { useChatListAnchor } from './useChatListAnchor';
 import './ChatPage.css';
 
 const MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024; // синхронно с CHAT_MEDIA_MAX_BYTES на бэке
@@ -170,19 +171,6 @@ export const ChatPage: React.FC = () => {
   // Ответ и правка взаимоисключающие — поле ввода одно, и занято либо тем, либо другим.
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
   const [editTarget, setEditTarget] = useState<ChatMessage | null>(null);
-  const [showScrollDown, setShowScrollDown] = useState(false);
-  const nearBottomRef = useRef(true);
-  // Палец сейчас на ленте — пока это так, ничего не пишем в scrollTop сами
-  // (см. ResizeObserver ниже): программная запись scrollTop поверх активного
-  // тач-жеста на iOS — известный триггер "заморозки" слоя скролла в WKWebView,
-  // тот же класс бага, что раньше ловили на backdrop-filter меню действий.
-  const isTouchingListRef = useRef(false);
-  const pendingBottomPinRef = useRef(false);
-  // До какого момента идёт наш собственный smooth-скролл к низу (см. эффект на
-  // новое сообщение ниже). Пока он не истёк, settleBottom не трогает scrollTop:
-  // жёсткая запись поверх плавной анимации обрывает её на полпути.
-  const smoothScrollUntilRef = useRef(0);
-
   const { notifStatus, busy: pushBusy, requestAccess: requestNotificationAccess } = useChatPush();
 
   // connectionState стартует как 'connecting' при каждом монтировании страницы
@@ -193,6 +181,26 @@ export const ChatPage: React.FC = () => {
 
   const listRef = useRef<HTMLDivElement>(null);
   const messagesContentRef = useRef<HTMLDivElement>(null);
+
+  // Единственный владелец scrollTop ленты — см. useChatListAnchor. Раньше в
+  // него писали четыре разных места, и они гонялись за один пиксель.
+  const listAnchor = useChatListAnchor(listRef, messagesContentRef);
+  // Разбираем на стабильные ссылки: сам объект хука новый на каждый рендер,
+  // и списком зависимостей эффектов он быть не может.
+  const {
+    settle: settleList,
+    isStuckNow,
+    scrollToBottom: scrollListToBottom,
+    handleScroll: listAnchorScroll,
+    preserveOnPrepend,
+    noteUserGesture,
+    handleTouchStart: handleMessagesTouchStart,
+    handleTouchEnd: handleMessagesTouchEnd,
+  } = listAnchor;
+  // Кнопка "вниз" — прямое следствие режима залипания, а не отдельный стейт,
+  // который надо не забыть погасить в каждой ветке.
+  const showScrollDown = !listAnchor.isStuck;
+
   const headerRef = useRef<HTMLDivElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
   const inputRowRef = useRef<HTMLDivElement>(null);
@@ -249,35 +257,50 @@ export const ChatPage: React.FC = () => {
     return () => clearTimeout(timer);
   }, [sendError]);
 
-  // Автоскролл вниз только когда добавилось НОВОЕ сообщение в конец (не при
-  // подгрузке истории вверх — там последний seq не меняется), и только если
-  // юзер и так был внизу ленты или сообщение своё — иначе, читая историю,
-  // его будет каждый раз выдёргивать к новому сообщению. В обратном случае
-  // просто показываем стрелку "вниз" вместо принудительного скролла.
+  // Мутации ленты — три ветки, и каждая заканчивается обращением к одному и
+  // тому же владельцу скролла, а не своей собственной записью scrollTop.
+  //
+  //   добавление  → scrollToBottom(), если сообщение своё или юзер и так внизу
+  //   правка      → settle(), высота пузыря могла измениться
+  //   удаление    → settle() (см. handleExitCollapseComplete ниже); кадры
+  //                 самого схлопывания держит ResizeObserver внутри хука
+  //
+  // Автоскролл на новое сообщение — только когда оно добавилось в КОНЕЦ (при
+  // подгрузке истории вверх последний seq не меняется) и только если юзер и
+  // так был внизу или сообщение своё: иначе, читая историю, его выдёргивало бы
+  // к каждому новому сообщению. В обратном случае показывается стрелка "вниз"
+  // (она следует из режима залипания сама, гасить её вручную больше не надо).
   useEffect(() => {
     const last = messages[messages.length - 1];
     if (!last) return;
     // Первое заполнение ленты при заходе на страницу — прыгаем вниз мгновенно
     // (как Telegram/WhatsApp), а не анимированно: 'smooth' на моментальном же
-    // requestAnimationFrame ещё и гонится с ResizeObserver-коррекцией ниже за
+    // requestAnimationFrame ещё и гонится с коррекцией по ResizeObserver за
     // тот же scrollTop, если картинки/видео в ленте досчитывают размеры чуть
     // позже первого рендера — smooth-анимация может "выиграть" гонку и
     // застрять на промежуточной, ещё не окончательной высоте контента.
     const isInitialLoad = lastSeqRef.current === null;
-    if (lastSeqRef.current !== last.seq) {
+    // Сравниваем по НАПРАВЛЕНИЮ, а не просто на неравенство. Удаление
+    // последнего сообщения тоже меняет last.seq — но на меньший, и по "!=="
+    // это неотличимо от прихода нового: лента уезжала в smooth-скролл прямо
+    // поверх схлопывания удаляемого пузыря, а окно smooth-скролла на это время
+    // глушит удержание низа. Вниз тянемся только когда лента реально выросла
+    // с конца.
+    const isAppend = isInitialLoad || last.seq > lastSeqRef.current!;
+    if (isAppend) {
       lastSeqRef.current = last.seq;
-      if (last.user_id === userId || nearBottomRef.current) {
-        // Отмечаем окно, пока скролл наш: settleBottom в это время молчит,
-        // чтобы не обрубить smooth-анимацию жёсткой записью scrollTop.
-        smoothScrollUntilRef.current = isInitialLoad ? 0 : Date.now() + 600;
-        requestAnimationFrame(() => {
-          listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: isInitialLoad ? 'auto' : 'smooth' });
-        });
-      } else {
-        setShowScrollDown(true);
+      if (last.user_id === userId || isStuckNow()) {
+        scrollListToBottom(isInitialLoad ? 'auto' : 'smooth');
       }
+      return;
     }
-  }, [messages, userId]);
+    // Всё остальное — правка, удаление, откат оптимистичной операции. Высота
+    // ленты могла поехать в любую сторону; сверяем инвариант, не трогая
+    // scrollTop без нужды. Правка до выделения этого хука не обрабатывалась
+    // вообще и держалась только на ResizeObserver.
+    lastSeqRef.current = last.seq;
+    settleList();
+  }, [messages, userId, isStuckNow, scrollListToBottom, settleList]);
 
   // Картинки/видео в ленте догружают реальные размеры позже первого рендера —
   // разовый scrollTo выше целится в scrollHeight на момент вызова и промахивается
@@ -360,70 +383,6 @@ export const ChatPage: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    const container = listRef.current;
-    const content = messagesContentRef.current;
-    if (!container || !content) return;
-    const ro = new ResizeObserver(() => {
-      if (!nearBottomRef.current) return;
-      // Палец на ленте (см. isTouchingListRef выше) — не пишем scrollTop
-      // прямо сейчас, запоминаем и дописываем по touchend.
-      if (isTouchingListRef.current) {
-        pendingBottomPinRef.current = true;
-        return;
-      }
-      container.scrollTop = container.scrollHeight;
-    });
-    ro.observe(content);
-    return () => ro.disconnect();
-  }, []);
-
-  const handleMessagesTouchStart = () => {
-    isTouchingListRef.current = true;
-  };
-
-  const handleMessagesTouchEnd = () => {
-    isTouchingListRef.current = false;
-    if (!pendingBottomPinRef.current) return;
-    pendingBottomPinRef.current = false;
-    // Кадр запаса — чтобы не столкнуться с ещё не отыгравшей нативной
-    // инерцией/отскоком у самого конца жеста.
-    requestAnimationFrame(() => {
-      if (listRef.current && nearBottomRef.current) {
-        listRef.current.scrollTop = listRef.current.scrollHeight;
-      }
-    });
-  };
-
-  // Проверка инварианта, а не ещё один автоскролл: "если мы считаем, что юзер
-  // внизу, то низ ленты обязан быть у поля ввода". Стоит один replace-кадр,
-  // ничего не делает в 99% случаев — и закрывает остаточную щель независимо от
-  // того, кто её оставил (недоигравшее схлопывание, правка, поменявшая высоту
-  // пузыря, дозагрузившееся медиа). ResizeObserver ниже ловит только изменения
-  // размера контента; случаи, когда контент тот же, а scrollTop разъехался, —
-  // мимо него.
-  const settleBottom = useCallback(() => {
-    const el = listRef.current;
-    if (!el) return;
-    if (!nearBottomRef.current) return;
-    // Палец на ленте — та же причина, что у ResizeObserver ниже: писать
-    // scrollTop поверх активного тач-жеста на iOS нельзя.
-    if (isTouchingListRef.current) return;
-    if (Date.now() < smoothScrollUntilRef.current) return;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight > 2) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, []);
-
-  // Любая мутация ленты (пришло, удалили, поправили) — после коммита сверяем
-  // инвариант. Правка высоты пузыря до этого не обрабатывалась вообще и
-  // держалась только на ResizeObserver.
-  useEffect(() => {
-    const raf = requestAnimationFrame(settleBottom);
-    return () => cancelAnimationFrame(raf);
-  }, [messages, settleBottom]);
-
-
   // Отпускаем камеру/микрофон при уходе со страницы
   useEffect(() => {
     return () => {
@@ -460,8 +419,6 @@ export const ChatPage: React.FC = () => {
     imgY.set(0);
   }, [lightbox?.src]);
 
-  const NEAR_BOTTOM_PX = 120;
-
   // Как в Telegram/WhatsApp — начали скроллить ленту, значит уже не печатают:
   // убираем фокус с поля, чтобы клавиатура не торчала поверх сообщений.
   //
@@ -472,37 +429,32 @@ export const ChatPage: React.FC = () => {
   // поле и снимает его. Клавиатура закрывалась ровно в момент открытия, и с
   // первого тапа поле не открывалось вообще. Жест пользователя такой петли не
   // создаёт: раскладка сама по себе touchmove не генерирует.
-  const dismissKeyboardOnUserScroll = useCallback(() => {
+  // Тот же жест открывает "окно жеста" у владельца скролла: только внутри него
+  // события scroll имеют право менять режим залипания. Ровно та же логика, что
+  // и у блюра ниже, и по той же причине — раскладка сама по себе touchmove не
+  // генерирует, а вот scroll генерирует сколько угодно.
+  const handleListUserScroll = useCallback(() => {
+    noteUserGesture();
     if (document.activeElement === textInputRef.current) {
       textInputRef.current?.blur();
     }
-  }, []);
+  }, [noteUserGesture]);
 
+  // Режим залипания и запись scrollTop — целиком на useChatListAnchor. Тут
+  // остаётся только доменная часть: докрутили до верха — грузим историю.
   const handleScroll = useCallback(() => {
+    listAnchorScroll();
+
     const el = listRef.current;
     if (!el) return;
-
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const near = distanceFromBottom < NEAR_BOTTOM_PX;
-    nearBottomRef.current = near;
-    setShowScrollDown(!near);
-
     if (el.scrollTop > 80 || !hasMoreHistory || loadingHistory) return;
     const prevHeight = el.scrollHeight;
     loadMoreHistory().then(() => {
-      requestAnimationFrame(() => {
-        if (listRef.current) {
-          listRef.current.scrollTop = listRef.current.scrollHeight - prevHeight;
-        }
-      });
+      // Контент вырос сверху — возвращаем взгляд на то же место. Коррекцию
+      // делает владелец скролла, а не мы напрямую.
+      requestAnimationFrame(() => preserveOnPrepend(prevHeight));
     });
-  }, [hasMoreHistory, loadingHistory, loadMoreHistory]);
-
-  const scrollToBottom = () => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
-    nearBottomRef.current = true;
-    setShowScrollDown(false);
-  };
+  }, [hasMoreHistory, loadingHistory, loadMoreHistory, listAnchorScroll, preserveOnPrepend]);
 
   // Поле ввода — contenteditable div, а не textarea: на iOS textarea/input
   // всегда тянет за собой системную панель над клавиатурой со стрелками
@@ -1305,7 +1257,11 @@ export const ChatPage: React.FC = () => {
   // схлопнут до нуля, так что структурное исчезновение из массива не видно.
   const handleExitCollapseComplete = useCallback((seq: number) => {
     setExitingMessages((prev) => (prev.some((m) => m.seq === seq) ? prev.filter((m) => m.seq !== seq) : prev));
-  }, []);
+    // Структурное исчезновение строки из массива — последнее изменение высоты
+    // в этой мутации, и единственное, которое ResizeObserver может застать уже
+    // после того, как отработали все кадры схлопывания. Сверяем инвариант.
+    requestAnimationFrame(settleList);
+  }, [settleList]);
   // Страховка к onAnimationComplete: это единственный выход из
   // exitingMessages, и полагаться на него одного нельзя. Лента в эти 220мс
   // перерисовывается от чего угодно (typing/presence/read-события, WS-эхо
@@ -1464,10 +1420,15 @@ export const ChatPage: React.FC = () => {
         ref={listRef}
         onScroll={handleScroll}
         onTouchStart={handleMessagesTouchStart}
-        onTouchMove={dismissKeyboardOnUserScroll}
+        onTouchMove={handleListUserScroll}
+        // Перетаскивание скроллбара мышью не даёт ни touchmove, ни wheel —
+        // без этого на десктопе режим залипания не переключался бы вообще
+        // (см. окно жеста в useChatListAnchor). На тач-устройствах mousedown
+        // приходит уже после touchmove, окно к тому моменту и так открыто.
+        onMouseDown={noteUserGesture}
         onTouchEnd={handleMessagesTouchEnd}
         onTouchCancel={handleMessagesTouchEnd}
-        onWheel={dismissKeyboardOnUserScroll}
+        onWheel={handleListUserScroll}
         // paddingTop, а не padding-top у страницы: лента занимает экран целиком
         // и проходит под шапкой, поэтому сообщения видно прямо за таблетками.
         // Отступ нужен только чтобы самое первое сообщение истории не залипало
@@ -1621,7 +1582,7 @@ export const ChatPage: React.FC = () => {
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 48, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            onClick={scrollToBottom}
+            onClick={() => scrollListToBottom('smooth')}
             title="К последним сообщениям"
           >
             <ChevronDown size={Math.round(scrollBtnSize * 0.5)} />
