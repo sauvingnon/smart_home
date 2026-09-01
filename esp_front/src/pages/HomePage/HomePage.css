@@ -276,6 +276,11 @@ body {
 .glass-card {
   position: relative;
   overflow: hidden;
+  /* overflow:hidden сам по себе не всегда клипует потомка с filter:blur()
+     по скруглённому контуру (особенно вместе с backdrop-filter на этом же
+     элементе) — угол блюра .card-glow остаётся квадратным и торчит поверх
+     скругления. clip-path клипует по контуру надёжно независимо от фильтров. */
+  clip-path: inset(0 round 2.5rem);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(12px);
