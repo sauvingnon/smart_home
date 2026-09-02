@@ -11,7 +11,24 @@
     <meta http-equiv="Expires" content="0">
     <link rel="manifest" href="/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Значение перетирается скриптом ниже и потом ThemeContext'ом; статикой
+         тут стоит светлая тема просто как разумный дефолт. -->
+    <meta name="theme-color" content="#e0f2fe">
     <title>Умный дом</title>
+
+    <!-- Тему ставим ДО первой отрисовки, а не когда смонтируется ThemeProvider:
+         иначе полоса под чёлкой и фон стартуют светлыми и перекрашиваются уже
+         на глазах у пользователя (ночью это заметная вспышка). Правило времени
+         суток обязано совпадать с getThemeByTime в src/context/ThemeContext.tsx. -->
+    <script>
+      (function () {
+        var hour = new Date().getHours();
+        var theme = hour >= 6 && hour < 18 ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', theme === 'dark' ? '#0f172a' : '#e0f2fe');
+      })();
+    </script>
 
     <!-- Страховка от «белого экрана»: живёт прямо здесь, а не в бандле, потому
          что ловит ровно тот случай, когда бандл не загрузился вовсе и никакой

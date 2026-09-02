@@ -34,15 +34,26 @@ html, body {
   overscroll-behavior-y: none;
 }
 
+/* Зону под чёлкой/Dynamic Island и область резинового отскока рисует не
+   какой-либо элемент страницы, а WebKit — сплошным "background color
+   документа". Берётся он именно как ЦВЕТ корневого фона: градиент там не
+   участвует, это background-image. Из-за этого `background: linear-gradient(…)`
+   на body (шорткат обнуляет background-color в transparent) оставлял документу
+   прозрачный, то есть белый, фон — полоса не темнела ни при каких плясках с
+   репейнтом fixed-слоя. Держим на html честный сплошной цвет темы. */
+html {
+  background-color: var(--bg-gradient-from);
+  transition: background-color 0.3s ease;
+}
+
 body {
   margin: 0;
   padding: 0;
   padding-top: env(safe-area-inset-top);
-  /* Не белый флэт, а тот же градиент, что у #app-background — иначе на iOS
-     резиновый скролл/баунс документа (там, где страница не изолирует его
-     сама, как чат через overflow:hidden) на мгновение показывает фон body,
-     и полоса под Dynamic Island красится в чужой белый цвет вместо темы. */
-  background: linear-gradient(135deg, var(--bg-gradient-from), var(--bg-gradient-to));
+  /* Тот же градиент, что у #app-background, но обязательно с цветом-подложкой
+     в шорткате: без него баунс документа на мгновение показывает transparent. */
+  background: linear-gradient(135deg, var(--bg-gradient-from), var(--bg-gradient-to))
+              var(--bg-gradient-from);
   color: #0f172a;
 }
 

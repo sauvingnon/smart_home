@@ -38,19 +38,14 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
 
-    // #app-background (position:fixed, вне React-дерева — см. index.html)
-    // красится только через CSS-переменные на :root[data-theme]. В WebKit/PWA
-    // такой fixed-слой под чёлкой/Dynamic Island не всегда перерисовывается
-    // от одной только смены custom property без соседнего layout-триггера —
-    // раньше "чинить" полосу приходилось случайно, заходя на страницу с
-    // подходящими viewport-юнитами. Вместо того чтобы зависеть от вёрстки
-    // текущей страницы, форсируем репейнт слоя явно и всегда, при каждой
-    // смене темы, независимо от того, что сейчас смонтировано.
-    const bg = document.getElementById('app-background')
-    if (bg) {
-      bg.style.transform = 'translateZ(0)'
-      void bg.offsetHeight
-      bg.style.transform = ''
+    // Полосу под чёлкой/Dynamic Island красит сам html (background-color,
+    // см. index.css) — никакой элемент страницы туда не дотягивается, пока в
+    // viewport-мете нет viewport-fit=cover. Плюс дублируем цвет в theme-color:
+    // на iOS 16.4+/Android им тонируется системная плашка статус-бара, а
+    // статикой в manifest.json он вечно белый.
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta) {
+      meta.setAttribute('content', theme === 'dark' ? '#0f172a' : '#e0f2fe')
     }
   }, [theme])
 
