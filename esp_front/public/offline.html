@@ -98,6 +98,10 @@
     button:active {
       opacity: .85;
     }
+    button:disabled {
+      opacity: .6;
+      cursor: default;
+    }
   </style>
 </head>
 <body>
@@ -115,25 +119,66 @@
     </svg>
     <h1>Ой, умный дом прилёг отдохнуть 😴</h1>
     <p id="status-text">Даже самым умным иногда нужен отдых — скоро проснётся сам, и всё снова заработает.</p>
-    <button onclick="location.reload()">Проверить ещё раз</button>
+    <button id="retry" type="button">Проверить ещё раз</button>
   </div>
 
   <script>
     (function () {
       var RETRY_INTERVAL = 5000;
+      // Держим «Проверяю…» хотя бы столько: в авиарежиме fetch отваливается
+      // почти мгновенно, и без этой паузы надпись мигнула бы на несколько
+      // миллисекунд — то есть тап снова выглядел бы как «ничего не произошло».
+      var MIN_FEEDBACK_MS = 600;
+      var FAIL_MESSAGE_MS = 2500;
 
-      function checkAndReload() {
-        fetch('/', { cache: 'no-store', mode: 'same-origin' })
-          .then(function (res) {
-            if (res && res.ok) location.reload();
-          })
-          .catch(function () {
-            // сервер всё ещё недоступен — пробуем на следующем тике
-          });
+      var button = document.getElementById('retry');
+      var idleLabel = button.textContent;
+      var resetTimer = null;
+
+      // Запрос на / намеренно не навигационный, поэтому service worker его не
+      // перехватывает (он отвечает только на mode === 'navigate') — до сети
+      // доходит настоящая проверка, а не отдача заглушки из кэша.
+      function probe() {
+        return fetch('/', { cache: 'no-store', mode: 'same-origin' })
+          .then(function (res) { return !!(res && res.ok); })
+          .catch(function () { return false; });
       }
 
-      setInterval(checkAndReload, RETRY_INTERVAL);
-      window.addEventListener('online', checkAndReload);
+      function autoCheck() {
+        probe().then(function (alive) {
+          if (alive) location.reload();
+        });
+      }
+
+      // Своя перезагрузка страницы тут не нужна: адрес остался исходным
+      // (/, /chat — куда шли), и её навигацию снова перехватит service worker.
+      // Поэтому сначала честно проверяем сеть и только потом перезагружаемся.
+      button.addEventListener('click', function () {
+        if (button.disabled) return;
+
+        clearTimeout(resetTimer);
+        button.disabled = true;
+        button.textContent = 'Проверяю…';
+
+        var held = new Promise(function (resolve) {
+          setTimeout(resolve, MIN_FEEDBACK_MS);
+        });
+
+        Promise.all([probe(), held]).then(function (result) {
+          if (result[0]) {
+            location.reload();
+            return;
+          }
+          button.textContent = 'Ещё спит…';
+          resetTimer = setTimeout(function () {
+            button.textContent = idleLabel;
+            button.disabled = false;
+          }, FAIL_MESSAGE_MS);
+        });
+      });
+
+      setInterval(autoCheck, RETRY_INTERVAL);
+      window.addEventListener('online', autoCheck);
     })();
   </script>
 </body>
