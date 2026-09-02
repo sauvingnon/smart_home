@@ -1632,7 +1632,7 @@ export const ChatPage: React.FC = () => {
                         onPointerMove={cancelLongPressIfMoved}
                         onPointerUp={cancelLongPress}
                         onPointerCancel={cancelLongPress}
-                        onClick={(e) => { if (!isMediaBubble && !suppressClickIfLongPress(e)) popBubble(message.seq); }}
+                        onClick={(e) => { if (!isMediaBubble && !suppressClickIfLongPress(e)) setActionTarget(message); }}
                         onContextMenu={(e) => { e.preventDefault(); setActionTarget(message); }}
                       >
                         {renderBubbleContent(message, isMine, isMediaBubble, readers)}
