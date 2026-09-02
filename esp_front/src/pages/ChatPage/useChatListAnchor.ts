@@ -17,6 +17,12 @@ const GESTURE_WINDOW_MS = 300;
 // — значит оборвать её на полпути.
 const SMOOTH_SCROLL_MS = 600;
 
+/** Точка привязки при подгрузке истории: сообщение и его позиция на экране. */
+export interface TopAnchor {
+  seq: string;
+  top: number;
+}
+
 /**
  * Единственный владелец scrollTop ленты сообщений.
  *
@@ -52,6 +58,13 @@ export function useChatListAnchor(
   const gestureUntilRef = useRef(0);
   const smoothUntilRef = useRef(0);
 
+  // Идёт подгрузка истории: позицию держит якорь (см. captureTopAnchor), и низ
+  // сейчас не наш. Флаг нужен потому, что на короткой ленте верх ещё попадает
+  // в NEAR_BOTTOM_PX, то есть режим залипания честно остаётся включённым — и
+  // pin() из ResizeObserver на вставленной странице увёл бы ленту вниз прямо
+  // поверх якоря.
+  const prependingRef = useRef(false);
+
   const setStick = useCallback((next: boolean) => {
     if (stickRef.current === next) return;
     stickRef.current = next;
@@ -68,6 +81,7 @@ export function useChatListAnchor(
     const el = containerRef.current;
     if (!el) return;
     if (!stickRef.current) return;
+    if (prependingRef.current) return;
     if (isTouchingRef.current) {
       pendingPinRef.current = true;
       return;
@@ -136,14 +150,39 @@ export function useChatListAnchor(
   }, [pin]);
 
   /**
-   * Подгрузка истории вверх: контент вырастает сверху, и без коррекции лента
-   * визуально прыгнула бы на высоту добавленного. Тоже проходит через этот
-   * модуль, чтобы запись scrollTop оставалась в одном месте.
+   * Подгрузка истории вверх: контент вырастает над текущей позицией, и без
+   * коррекции лента визуально прыгнула бы на высоту добавленного.
+   *
+   * Держимся не за высоту ленты, а за конкретное сообщение: запоминаем, где на
+   * экране стоит самое верхнее из уже загруженных, и после вставки страницы
+   * возвращаем его туда же. Разница высот "до/после" для этого не годится —
+   * между замером и вставкой лента успевает измениться сама по себе (пришло
+   * сообщение по WS, догрузилась картинка, пропала плашка "прокрутите вверх",
+   * когда история кончилась), и вся эта разница уехала бы в scrollTop ошибкой.
+   * Точке на экране всё это безразлично.
    */
-  const preserveOnPrepend = useCallback((prevScrollHeight: number) => {
+  const captureTopAnchor = useCallback((): TopAnchor | null => {
     const el = containerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight - prevScrollHeight;
+    const first = el?.querySelector<HTMLElement>('[data-seq]');
+    if (!el || !first?.dataset.seq) return null;
+    prependingRef.current = true;
+    return { seq: first.dataset.seq, top: first.getBoundingClientRect().top };
+  }, [containerRef]);
+
+  /** Догрузка кончилась (страница вставлена, запрос упал, история исчерпана) —
+      низ снова под обычными правилами. */
+  const releaseTopAnchor = useCallback(() => {
+    prependingRef.current = false;
+  }, []);
+
+  const restoreTopAnchor = useCallback((anchor: TopAnchor) => {
+    const el = containerRef.current;
+    // Сообщения-якоря нет — его удалили, пока грузилась страница. Вернуть
+    // взгляд не к чему, а промахнуться мимо хуже, чем не трогать вовсе.
+    const node = el?.querySelector<HTMLElement>(`[data-seq="${anchor.seq}"]`);
+    if (!el || !node) return;
+    const delta = node.getBoundingClientRect().top - anchor.top;
+    if (delta) el.scrollTop += delta;
   }, [containerRef]);
 
   /**
@@ -170,7 +209,9 @@ export function useChatListAnchor(
     isStuckNow: useCallback(() => stickRef.current, []),
     settle,
     scrollToBottom,
-    preserveOnPrepend,
+    captureTopAnchor,
+    restoreTopAnchor,
+    releaseTopAnchor,
     noteUserGesture,
     handleScroll,
     handleTouchStart,

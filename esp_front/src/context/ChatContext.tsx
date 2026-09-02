@@ -341,20 +341,37 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     persistChatMessagesCache(messages);
   }, [messages]);
 
+  // Замок именно ref-ом, а не стейтом loadingHistory. Догрузку дёргает
+  // обработчик scroll, а он на инерционной прокрутке к верху ленты срабатывает
+  // много раз подряд, быстрее чем React успевает перерисоваться с
+  // loadingHistory === true. Все эти вызовы видели в замыкании ещё старое
+  // false, проходили проверку и уходили за одной и той же страницей: история
+  // вставлялась дважды, а лента прыгала на её двойную высоту. Ref меняется в
+  // тот же миг, без ожидания рендера.
+  const loadingHistoryRef = useRef(false);
+
   const loadMoreHistory = useCallback(async () => {
-    if (loadingHistory || !hasMoreHistory || messages.length === 0) return;
+    if (loadingHistoryRef.current || !hasMoreHistory || messages.length === 0) return;
+    loadingHistoryRef.current = true;
     setLoadingHistory(true);
     try {
       const oldestSeq = messages[0].seq;
       const res = await apiClient.getChatMessages(oldestSeq);
-      setMessages((prev) => [...res.messages, ...prev]);
+      setMessages((prev) => {
+        // Страховка на случай пересечения страниц: одинаковые seq в ленте —
+        // это и дубли пузырей, и повторяющиеся ключи в React.
+        const known = new Set(prev.map((m) => m.seq));
+        const fresh = res.messages.filter((m) => !known.has(m.seq));
+        return fresh.length > 0 ? [...fresh, ...prev] : prev;
+      });
       setHasMoreHistory(res.messages.length >= HISTORY_PAGE_SIZE);
     } catch {
       // остаёмся с уже загруженным
     } finally {
+      loadingHistoryRef.current = false;
       setLoadingHistory(false);
     }
-  }, [loadingHistory, hasMoreHistory, messages]);
+  }, [hasMoreHistory, messages]);
 
   const pinMessage = useCallback(async (seq: number) => {
     const message = await apiClient.pinChatMessage(seq);

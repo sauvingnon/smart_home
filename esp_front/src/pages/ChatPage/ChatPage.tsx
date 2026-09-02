@@ -13,6 +13,7 @@ import { usePageVisit } from '../../hooks/usePageVisit';
 import { useOnTabReselect } from '../../context/NavBarContext';
 import { VoiceMessage } from './VoiceMessage';
 import { useChatListAnchor } from './useChatListAnchor';
+import type { TopAnchor } from './useChatListAnchor';
 import './ChatPage.css';
 
 const MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024; // синхронно с CHAT_MEDIA_MAX_BYTES на бэке
@@ -275,7 +276,9 @@ export const ChatPage: React.FC = () => {
     isStuckNow,
     scrollToBottom: scrollListToBottom,
     handleScroll: listAnchorScroll,
-    preserveOnPrepend,
+    captureTopAnchor,
+    restoreTopAnchor,
+    releaseTopAnchor,
     noteUserGesture,
     handleTouchStart: handleMessagesTouchStart,
     handleTouchEnd: handleMessagesTouchEnd,
@@ -557,19 +560,54 @@ export const ChatPage: React.FC = () => {
 
   // Режим залипания и запись scrollTop — целиком на useChatListAnchor. Тут
   // остаётся только доменная часть: докрутили до верха — грузим историю.
+  const prependAnchorRef = useRef<TopAnchor | null>(null);
+
   const handleScroll = useCallback(() => {
     listAnchorScroll();
 
     const el = listRef.current;
     if (!el) return;
-    if (el.scrollTop > 80 || !hasMoreHistory || loadingHistory) return;
-    const prevHeight = el.scrollHeight;
-    loadMoreHistory().then(() => {
-      // Контент вырос сверху — возвращаем взгляд на то же место. Коррекцию
-      // делает владелец скролла, а не мы напрямую.
-      requestAnimationFrame(() => preserveOnPrepend(prevHeight));
-    });
-  }, [hasMoreHistory, loadingHistory, loadMoreHistory, listAnchorScroll, preserveOnPrepend]);
+    if (!hasMoreHistory) return;
+    // Уехали от верха и ничего не грузится — делать нечего.
+    if (el.scrollTop > 80 && !loadingHistory) return;
+    // Точку привязки переснимаем на каждом событии скролла, пока мы у верха, а
+    // не один раз в момент запроса. Пока страница летит по сети, палец
+    // продолжает вести ленту (инерция на iOS живёт секундами), и снятый один
+    // раз якорь к моменту вставки успел бы устареть — коррекция отмотала бы
+    // ленту назад, к позиции на момент запроса.
+    prependAnchorRef.current = captureTopAnchor();
+    // Повторные вызовы гасит замок внутри loadMoreHistory.
+    loadMoreHistory();
+  }, [hasMoreHistory, loadingHistory, loadMoreHistory, listAnchorScroll, captureTopAnchor]);
+
+  // Возврат взгляда на место после вставки страницы.
+  //
+  // Раньше это делал requestAnimationFrame из .then() у loadMoreHistory — и
+  // ровно отсюда брался прыжок наверх. Промис резолвится, когда setMessages
+  // уже вызван, но React ещё НЕ отрисовал: коммит он планирует отдельной
+  // задачей, а rAF успевал выполниться раньше неё. Тогда замер высоты давал
+  // ленту в её старом размере, "прирост" выходил нулевым, и коррекция ставила
+  // scrollTop в 0 — то есть в самое начало истории. Гонка, отсюда и "почему-то
+  // иногда".
+  //
+  // useLayoutEffect от такой гонки свободен по определению: он выполняется
+  // после коммита и до отрисовки — сообщения уже в DOM, но кадр ещё не
+  // показан, так что коррекция не успевает мигнуть.
+  useLayoutEffect(() => {
+    const anchor = prependAnchorRef.current;
+    if (anchor) restoreTopAnchor(anchor);
+  }, [messages, restoreTopAnchor]);
+
+  // Якорь живёт ровно до конца загрузки. Снимаем его в обычном эффекте, а не в
+  // layout-эффекте выше: страница и сброс loadingHistory прилетают одним
+  // коммитом, а passive-эффекты идут после layout-эффектов — то есть после
+  // того, как якорь отработал. Отдельный эффект нужен и на случай, когда
+  // запрос упал или история кончилась и вставлять было нечего.
+  useEffect(() => {
+    if (loadingHistory) return;
+    prependAnchorRef.current = null;
+    releaseTopAnchor();
+  }, [loadingHistory, releaseTopAnchor]);
 
   // Поле ввода — contenteditable div, а не textarea: на iOS textarea/input
   // всегда тянет за собой системную панель над клавиатурой со стрелками
