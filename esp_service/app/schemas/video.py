@@ -24,7 +24,7 @@ class VideoNotifyPrefs(BaseModel):
     """Какие видео-события юзер хочет получать пушем. Один и тот же push-канал,
     что и у чата (см. /chat/push/*) — тут только предпочтения по темам."""
     visit_people: Dict[str, bool] = {}  # label -> уведомлять о его посещении
-    board_offline: bool = True  # центральная плата (камера) недоступна
+    board_offline: bool = False  # центральная плата (камера) недоступна
 
 
 class NotifyRecognizedIn(BaseModel):

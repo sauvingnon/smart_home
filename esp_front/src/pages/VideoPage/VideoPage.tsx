@@ -25,6 +25,7 @@ import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
 import { useOnTabReselect } from '../../context/NavBarContext'
+import { useAuth } from '../../context/AuthContext'
 
 interface VideoItem {
     key: string
@@ -69,6 +70,7 @@ export const VideosPage = () => {
   usePageVisit('video')
   useOnTabReselect(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
   const { theme } = useTheme()
+  const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const [videos, setVideos] = useState<VideoItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -328,9 +330,11 @@ export const VideosPage = () => {
             <h1>Видеозаписи</h1>
           </div>
           <div className="header-actions">
-            <button className="header-action-btn" onClick={() => navigate('/videos/settings')} title="Настройки">
-              <Settings size={20} />
-            </button>
+            {isAdmin && (
+              <button className="header-action-btn" onClick={() => navigate('/videos/settings')} title="Настройки">
+                <Settings size={20} />
+              </button>
+            )}
             <button className="header-action-btn" onClick={loadVideos} title="Обновить">
               <RefreshCw size={20} />
             </button>

@@ -18,7 +18,7 @@ const itemVar = {
   visible: { y: 0, opacity: 1 },
 };
 
-const DEFAULT_PREFS: VideoNotifyPrefs = { visit_people: {}, board_offline: true };
+const DEFAULT_PREFS: VideoNotifyPrefs = { visit_people: {}, board_offline: false };
 
 export const VideoSettingsPage: React.FC = () => {
   const { theme } = useTheme();
@@ -38,9 +38,9 @@ export const VideoSettingsPage: React.FC = () => {
       .catch((err) => console.error('Не удалось загрузить настройки уведомлений', err));
   }, []);
 
-  // Незнакомый человеку ключ (ещё не сохранённый) по умолчанию включён —
-  // так добавление нового лица в датасет не требует явного опта.
-  const isPersonNotified = (label: string) => prefs.visit_people[label] ?? true;
+  // Незнакомый человеку ключ (ещё не сохранённый) по умолчанию выключен —
+  // уведомления опт-ин, а не опт-аут.
+  const isPersonNotified = (label: string) => prefs.visit_people[label] ?? false;
 
   const savePrefs = (next: VideoNotifyPrefs) => {
     const prev = prefs;

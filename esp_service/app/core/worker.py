@@ -482,7 +482,7 @@ class BackgroundWorker:
         for user in users:
             uid = user["user_id"]
             prefs = await self.cache.get_video_notify_prefs(uid)
-            if prefs and not prefs.get("board_offline", True):
+            if not (prefs or {}).get("board_offline", False):
                 continue
             subscription = await self.cache.get_push_subscription(uid)
             if not subscription:
@@ -509,7 +509,7 @@ class BackgroundWorker:
             uid = user["user_id"]
             prefs = await self.cache.get_video_notify_prefs(uid)
             visit_prefs = (prefs or {}).get("visit_people", {})
-            wanted = [label for label in present if visit_prefs.get(label, True)]
+            wanted = [label for label in present if visit_prefs.get(label, False)]
             if not wanted:
                 continue
             subscription = await self.cache.get_push_subscription(uid)
