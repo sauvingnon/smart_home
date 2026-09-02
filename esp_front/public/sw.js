@@ -2,13 +2,32 @@
 // когда сервер целиком недоступен (упал бэкенд, значит не отдастся и сам
 // фронт — с точки зрения fetch() это неотличимо от отсутствия интернета).
 
-const CACHE_NAME = 'offline-fallback-v1';
+const CACHE_NAME = 'offline-fallback-v2';
 const OFFLINE_URL = '/offline.html';
+
+// Safari (и установленная PWA на iOS) отказывается принимать от service worker
+// ответ, доехавший через редирект, — падает с "Response served by service
+// worker has redirections". А редирект тут штатный: serve с дефолтным cleanUrls
+// отдаёт 301 с /offline.html на /offline, да и nginx впереди может добавить
+// свой. Флаг redirected переживает и запись в Cache Storage, поэтому ответ
+// пересобираем: у копии этого флага уже нет.
+async function withoutRedirect(response) {
+  if (!response.redirected) return response;
+  const body = await response.blob();
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.add(OFFLINE_URL))
+      .then(async (cache) => {
+        const response = await fetch(OFFLINE_URL, { cache: 'reload' });
+        await cache.put(OFFLINE_URL, await withoutRedirect(response));
+      })
       .catch(() => {})
   );
   self.skipWaiting();
@@ -30,7 +49,9 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.mode !== 'navigate') return;
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(OFFLINE_URL))
+    fetch(event.request)
+      .then(withoutRedirect)
+      .catch(() => caches.match(OFFLINE_URL))
   );
 });
 
