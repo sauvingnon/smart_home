@@ -949,7 +949,7 @@
 .chat-read-avatars {
   position: absolute;
   bottom: -14px;
-  left: -10px;
+  left: -2px;
   display: flex;
   pointer-events: none;
   z-index: 2;
@@ -972,7 +972,7 @@
 }
 
 .chat-read-avatar + .chat-read-avatar {
-  margin-left: -8px;
+  margin-left: -4px;
 }
 
 /* Пузырь "идёт загрузка" — как в Telegram/VK: затемнённый превью-кадр из
