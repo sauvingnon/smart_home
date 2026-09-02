@@ -972,7 +972,7 @@
 }
 
 .chat-read-avatar + .chat-read-avatar {
-  margin-left: -4px;
+  margin-left: -2px;
 }
 
 /* Пузырь "идёт загрузка" — как в Telegram/VK: затемнённый превью-кадр из
