@@ -277,20 +277,40 @@ body {
 }
 
 /* Карточки */
-.glass-card {
+/* .glass-card — не уникальное имя: тот же класс с другим border-radius (2rem)
+   объявлен в SettingsPage/CameraPage/VideoPage/ChatSettingsPage.css. Эти
+   страницы импортируются в App.tsx позже HomePage, их <style> вставляется в
+   <head> позже — при равной специфичности их border-radius побеждает и
+   реально отрисованное скругление уезжает на 2rem, хотя тут написано 2.5rem
+   (из-за этого клип у .card-glow-clip не совпадал с рамкой). Скопим под
+   .home-container, чтобы правило HomePage побеждало независимо от порядка
+   загрузки чужих стилей. */
+.home-container .glass-card {
   position: relative;
   overflow: hidden;
-  /* overflow:hidden сам по себе не всегда клипует потомка с filter:blur()
-     по скруглённому контуру (особенно вместе с backdrop-filter на этом же
-     элементе) — угол блюра .card-glow остаётся квадратным и торчит поверх
-     скругления. clip-path клипует по контуру надёжно независимо от фильтров. */
-  clip-path: inset(0 round 2.5rem);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-radius: 2.5rem;
   box-shadow: var(--glass-shadow);
+}
+
+/* overflow:hidden на .glass-card сам по себе не всегда клипует потомка с
+   filter:blur() по скруглённому контуру (особенно вместе с backdrop-filter
+   на самом .glass-card) — угол блюра .card-glow остаётся квадратным и торчит
+   поверх скругления. Клипуем через отдельную безрамочную обёртку: если
+   повесить clip-path прямо на .glass-card, кривая клипа не всегда совпадает
+   пиксель-в-пиксель с border-radius и скалывает саму рамку карточки. */
+.card-glow-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* inset:0 у абсолютного потомка позиционируется от padding-edge родителя,
+     то есть уже внутрь от рамки .glass-card на её толщину (1px) — радиус
+     клипа уменьшаем на ту же величину, иначе кривая уже видимого скругления. */
+  clip-path: inset(0 round calc(2.5rem - 1px));
+  pointer-events: none;
 }
 
 .card-glow {
@@ -569,11 +589,6 @@ body {
 .system-card {
   position: relative;
   overflow: hidden;
-  /* overflow:hidden сам по себе не всегда клипует потомка с filter:blur()
-     по скруглённому контуру (особенно вместе с backdrop-filter на этом же
-     элементе) — угол блюра остаётся квадратным и торчит поверх скругления.
-     clip-path клипует по контуру надёжно независимо от фильтров. */
-  clip-path: inset(0 round 1.8rem);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(8px);
@@ -586,6 +601,16 @@ body {
   aspect-ratio: 1 / 1;
   transition: all 0.2s;
   cursor: default;
+}
+
+/* см. комментарий у .card-glow-clip — тот же трюк для .tile-glow, чтобы
+   не сколоть рамку .system-card клипом по скруглению. */
+.tile-glow-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  clip-path: inset(0 round calc(1.8rem - 1px));
+  pointer-events: none;
 }
 
 .tile-glow {

@@ -504,7 +504,9 @@ export default function HomePage() {
             variants={itemVar}
             className="glass-card"
           >
-            <div className="card-glow" />
+            <div className="card-glow-clip">
+              <div className="card-glow" />
+            </div>
             
             <div className="card-content">
               <div className="hero-section">
@@ -604,7 +606,9 @@ export default function HomePage() {
 
             {/* System Stats */}
             <motion.div variants={itemVar} className="system-card">
-              <div className="tile-glow" style={{ background: 'rgba(96,165,250,0.2)' }} />
+              <div className="tile-glow-clip">
+                <div className="tile-glow" style={{ background: 'rgba(96,165,250,0.2)' }} />
+              </div>
               <div className="card-icon" style={
                 !data?.disk_usage ? {} :
                 data.disk_usage.free_gb <= DISK_CRITICAL_GB ? ALERT_ICON :
@@ -633,7 +637,9 @@ export default function HomePage() {
             </motion.div>
 
             <motion.div variants={itemVar} className="system-card">
-              <div className="tile-glow" style={{ background: 'rgba(129,140,248,0.2)' }} />
+              <div className="tile-glow-clip">
+                <div className="tile-glow" style={{ background: 'rgba(129,140,248,0.2)' }} />
+              </div>
               <div className="card-icon" style={
                 (weather?.wind_speed ?? 0) >= 12 ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' } :
                 (weather?.wind_speed ?? 0) >= 8  ? { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' } :
@@ -661,7 +667,9 @@ export default function HomePage() {
 
             {/* RAM */}
             <motion.div variants={itemVar} className="system-card">
-              <div className="tile-glow" style={{ background: 'rgba(52,211,153,0.2)' }} />
+              <div className="tile-glow-clip">
+                <div className="tile-glow" style={{ background: 'rgba(52,211,153,0.2)' }} />
+              </div>
               <div className="card-icon" style={loadIconStyle(data?.memory_usage?.used_percent, TILE_COLORS.memory)}>
                 <MemoryStick size={20} />
               </div>
@@ -686,7 +694,9 @@ export default function HomePage() {
 
             {/* CPU */}
             <motion.div variants={itemVar} className="system-card">
-              <div className="tile-glow" style={{ background: 'rgba(248,113,113,0.2)' }} />
+              <div className="tile-glow-clip">
+                <div className="tile-glow" style={{ background: 'rgba(248,113,113,0.2)' }} />
+              </div>
               <div className="card-icon" style={loadIconStyle(data?.cpu_usage?.used_percent, TILE_COLORS.cpu)}>
                 <Cpu size={20} />
               </div>
