@@ -36,6 +36,21 @@ CHAT_EDIT_WINDOW = timedelta(hours=1)
 # ответ на него всё равно должен показывать, на что отвечали.
 REPLY_PREVIEW_MAX_CHARS = 120
 
+# Превью фото для ленты кодирует клиент (тем же canvas, что и сам кадр —
+# сервер медиа не транскодирует). Потолок нужен только чтобы под видом превью
+# не заливали второй полноразмерный файл: 400px JPEG весит десятки килобайт.
+CHAT_THUMB_MAX_BYTES = 512 * 1024
+
+# Крошка-заглушка лежит в самом сообщении и уезжает по WS в каждую ленту и в
+# каждую страницу истории, поэтому она именно крошка: 16px JPEG в data-URI —
+# это меньше килобайта base64. Потолок — защита от клиента, решившего положить
+# в это поле целую картинку.
+CHAT_PREVIEW_MAX_CHARS = 2048
+
+# Разумный предел на присланные клиентом размеры кадра: числа идут в вёрстку
+# ленты, и мусор в них не должен её ломать.
+MEDIA_DIMENSION_MAX = 20000
+
 ALLOWED_MEDIA_TYPES = {
     "image/jpeg", "image/png", "image/webp",
     "audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4",  # audio/mp4 — дефолт MediaRecorder на iOS Safari
@@ -215,12 +230,19 @@ class ChatService:
         content_type: Optional[str] = None,
         media_kind: Optional[str] = None,
         reply_to: Optional[int] = None,
+        thumb_bytes: Optional[bytes] = None,
+        thumb_content_type: Optional[str] = None,
+        media_w: int = 0,
+        media_h: int = 0,
+        media_preview: str = "",
     ) -> dict:
         text = (text or "").strip()
         # Браузер иногда шлёт content-type с параметрами (audio/webm;codecs=opus) —
         # сверяем и сохраняем по чистому base type, коды кодеков не проверяем.
         if content_type:
             content_type = content_type.split(";")[0].strip()
+        if thumb_content_type:
+            thumb_content_type = thumb_content_type.split(";")[0].strip()
         if msg_type == "text" and not text:
             raise ValueError("Пустое текстовое сообщение")
         if msg_type != "text" and not media_bytes:
@@ -229,6 +251,20 @@ class ChatService:
             raise ValueError("Файл слишком большой")
         if media_bytes and content_type not in ALLOWED_MEDIA_TYPES:
             raise ValueError(f"Недопустимый тип файла: {content_type}")
+
+        # Пропорции и крошку-превью считает клиент — он и так держит картинку
+        # декодированной, а сервер её не открывает. Но раз числа и строка
+        # пришли снаружи, чиним их в разумные рамки: кривые размеры поехали бы
+        # прямо в вёрстку ленты, а раздутая строка осела бы в Redis и в каждой
+        # выдаче истории. Не отвергаем сообщение целиком — просто отбрасываем
+        # негодные поля, фронт для них и так держит запасной вариант.
+        if msg_type != "image":
+            media_w = media_h = 0
+            media_preview = ""
+        if not (0 < media_w <= MEDIA_DIMENSION_MAX and 0 < media_h <= MEDIA_DIMENSION_MAX):
+            media_w = media_h = 0
+        if not media_preview.startswith("data:image/") or len(media_preview) > CHAT_PREVIEW_MAX_CHARS:
+            media_preview = ""
 
         # Аплоад — до INCR seq: если save_chat_media упадёт, seq не тратится
         # впустую (ключ файла не зависит от seq, поэтому порядок можно
@@ -243,12 +279,30 @@ class ChatService:
                 raise RuntimeError("Не удалось сохранить медиафайл")
             if msg_type == "video":
                 thumbnail_key = await self._generate_video_thumbnail(media_bytes, ext)
+            elif msg_type == "image" and thumb_bytes:
+                thumbnail_key = await self._save_image_thumbnail(thumb_bytes, thumb_content_type)
 
         seq = await self.cache.chat_next_seq()
         return await self._finalize_message(
             seq, user_id, msg_type, text, media_key, media_kind,
             thumbnail_key=thumbnail_key, reply_to=reply_to,
+            media_w=media_w, media_h=media_h, media_preview=media_preview,
         )
+
+    async def _save_image_thumbnail(self, thumb_bytes: bytes, content_type: Optional[str]) -> str:
+        """Уменьшенная копия фото для ленты. В отличие от видео (там первый кадр
+        достаёт ffmpeg), её кодирует клиент — он уже держит картинку в canvas,
+        а сервер медиа не транскодирует. Не сохранилась — не беда: сообщение
+        останется без превью, и в ленту, как раньше, поедет сам оригинал."""
+        if content_type not in _EXT_BY_CONTENT_TYPE or not content_type.startswith("image/"):
+            logger.warning(f"⚠️ Превью фото с недопустимым типом {content_type} — пропускаем")
+            return ""
+        if len(thumb_bytes) > CHAT_THUMB_MAX_BYTES:
+            logger.warning(f"⚠️ Превью фото слишком большое ({len(thumb_bytes)} Б) — пропускаем")
+            return ""
+        thumb_key = f"chat/{uuid.uuid4().hex}_thumb.{_EXT_BY_CONTENT_TYPE[content_type]}"
+        ok = await self.s3.save_chat_media(thumb_key, thumb_bytes, content_type)
+        return thumb_key if ok else ""
 
     async def _generate_video_thumbnail(self, video_bytes: bytes, ext: str) -> str:
         """Первый кадр видео, загруженного юзером с телефона — тот же ffmpeg-подход,
@@ -333,6 +387,7 @@ class ChatService:
         self, seq: int, user_id: int, msg_type: str, text: str, media_key: str,
         media_kind: Optional[str], shared: bool = False, thumbnail_key: str = "",
         reply_to: Optional[int] = None,
+        media_w: int = 0, media_h: int = 0, media_preview: str = "",
     ) -> dict:
         user = await self.cache.get_user(user_id)
         message = {
@@ -344,6 +399,9 @@ class ChatService:
             "media_key": media_key,
             "media_kind": media_kind or "",
             "thumbnail_key": thumbnail_key,
+            "media_w": media_w,
+            "media_h": media_h,
+            "media_preview": media_preview,
             **await self._reply_snapshot(reply_to),
             # Проставляется только правкой — у нового сообщения его нет.
             "edited_at": None,
@@ -520,14 +578,7 @@ class ChatService:
 
         # Порядок тот же, что в trim_old_messages: сначала медиа в S3, потом
         # запись в Redis, потом снять закрепление, если удалили закреплённое.
-        media_key = message.get("media_key")
-        # shared-сообщения ссылаются на объект архива камеры — он не наш, его
-        # удалением распоряжается retention камеры (см. trim_old_messages).
-        if media_key and not message.get("shared"):
-            try:
-                await self.s3.delete_video(media_key)
-            except Exception as e:
-                logger.warning(f"⚠️ Не удалось удалить медиа чата {media_key}: {e}")
+        await self._delete_message_media(message)
 
         await self.cache.delete_chat_messages([seq])
 
@@ -536,6 +587,24 @@ class ChatService:
 
         await self.broadcast({"type": "deleted", "data": {"seq": seq}})
         logger.info(f"🗑 Чат: юзер {user_id} удалил своё сообщение {seq}")
+
+    async def _delete_message_media(self, message: dict) -> None:
+        """Всё, что сообщение занимает в S3: сам файл и превью к нему. Превью
+        раньше оставалось висеть — у видео их были единицы, а теперь своё
+        превью есть у каждого фото, и мусор копился бы с каждой картинкой.
+
+        shared-сообщение ссылается на запись архива камеры (и на её превью в
+        thumbnails/) — этими объектами распоряжается retention камеры, а не мы.
+        """
+        if message.get("shared"):
+            return
+        for key in (message.get("media_key"), message.get("thumbnail_key")):
+            if not key:
+                continue
+            try:
+                await self.s3.delete_video(key)
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось удалить медиа чата {key}: {e}")
 
     async def get_pinned_message(self) -> Optional[dict]:
         seq = await self.cache.get_chat_pinned_seq()
@@ -582,14 +651,7 @@ class ChatService:
         if not expired:
             return
         for msg in expired:
-            media_key = msg.get("media_key")
-            # shared-сообщения ссылаются на объект, которым владеет архив камеры —
-            # его удаление им не принадлежит, об этом заботится retention камеры.
-            if media_key and not msg.get("shared"):
-                try:
-                    await self.s3.delete_video(media_key)
-                except Exception as e:
-                    logger.warning(f"⚠️ Не удалось удалить медиа чата {media_key}: {e}")
+            await self._delete_message_media(msg)
         expired_seqs = [m["seq"] for m in expired]
         removed = await self.cache.delete_chat_messages(expired_seqs)
 

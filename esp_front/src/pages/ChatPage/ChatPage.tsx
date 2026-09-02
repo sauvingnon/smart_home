@@ -87,24 +87,82 @@ const formatDateDivider = (iso: string): string => {
     : { day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-// Пережимаем фото на клиенте перед аплоадом — сервер не транскодирует ничего,
-// вся тяжесть кодирования лежит на клиенте (см. обсуждение с пользователем).
-async function resizeImage(file: File, maxDim = 1600): Promise<Blob> {
+// В ленте кадр занимает 260px по ширине — превью в 400px хватает и на
+// 2x-экран, а весит десятки килобайт против пары мегабайт оригинала.
+const FEED_THUMB_MAX_DIM = 400;
+// Крошка-заглушка едет в самом сообщении (по WS и в каждой странице истории),
+// поэтому она именно крошка: 16px JPEG — меньше килобайта base64, растянутый
+// на всю рамку размытым пятном. Не влезли в потолок — отправляем без неё.
+const BLUR_PREVIEW_DIM = 16;
+const BLUR_PREVIEW_MAX_CHARS = 2048;
+
+// Границы, в которые зажимаются пропорции кадра в ленте (см. mediaAspect).
+const MEDIA_MIN_ASPECT = 0.7;  // вертикальные: не уже 7:10
+const MEDIA_MAX_ASPECT = 1.9;  // горизонтальные: не шире ~17:9
+
+/** Что клиент готовит из выбранного фото: сам кадр, превью для ленты, размеры
+    и крошка-заглушка. Всё здесь, а не на сервере — он медиа не транскодирует
+    (см. обсуждение с пользователем), а картинку клиент всё равно уже держит
+    декодированной, так что три кодирования вместо одного ничего не стоят. */
+interface PreparedImage {
+  full: Blob;
+  thumb: Blob | null;
+  width: number;
+  height: number;
+  preview: string;
+}
+
+/** Ужимает источник в бокс maxDim с сохранением пропорций. null — если 2d-контекст
+    недоступен (приватные режимы некоторых браузеров). */
+function drawScaled(source: ImageBitmap | HTMLCanvasElement, maxDim: number): HTMLCanvasElement | null {
+  const scale = Math.min(1, maxDim / Math.max(source.width, source.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(source.width * scale));
+  canvas.height = Math.max(1, Math.round(source.height * scale));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+const canvasToBlob = (canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> =>
+  new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+
+async function prepareImage(file: File, maxDim = 1600): Promise<PreparedImage> {
+  // Не получилось декодировать (HEIC без поддержки, битый файл) — шлём как
+  // есть и без превью: сервер и лента переживут, рамка просто останется
+  // прежнего фиксированного размера.
+  const asIs: PreparedImage = { full: file, thumb: null, width: 0, height: 0, preview: '' };
+  let bitmap: ImageBitmap | null = null;
   try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
-    const width = Math.round(bitmap.width * scale);
-    const height = Math.round(bitmap.height * scale);
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return file;
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
-    return blob ?? file;
+    bitmap = await createImageBitmap(file);
+    const fullCanvas = drawScaled(bitmap, maxDim);
+    if (!fullCanvas) return asIs;
+    const full = (await canvasToBlob(fullCanvas, 0.85)) ?? file;
+
+    // Снимок и так меньше превью (скриншот иконки, стикер) — второй файл был бы
+    // копией первого: в ленту тогда поедет сам кадр, он уже лёгкий.
+    const needsThumb = Math.max(fullCanvas.width, fullCanvas.height) > FEED_THUMB_MAX_DIM;
+    const thumbCanvas = needsThumb ? drawScaled(fullCanvas, FEED_THUMB_MAX_DIM) : fullCanvas;
+    const thumb = needsThumb && thumbCanvas ? await canvasToBlob(thumbCanvas, 0.8) : null;
+
+    // Крошку рисуем из превью, а не из оригинала: canvas ужимает в один проход,
+    // и прыжок 1600→16 дал бы кашу из случайно попавших пикселей вместо
+    // усреднённых цветов кадра.
+    const blurCanvas = thumbCanvas ? drawScaled(thumbCanvas, BLUR_PREVIEW_DIM) : null;
+    const preview = blurCanvas ? blurCanvas.toDataURL('image/jpeg', 0.4) : '';
+
+    return {
+      full,
+      thumb,
+      width: fullCanvas.width,
+      height: fullCanvas.height,
+      preview: preview.length <= BLUR_PREVIEW_MAX_CHARS ? preview : '',
+    };
   } catch {
-    return file;
+    return asIs;
+  } finally {
+    bitmap?.close();
   }
 }
 
@@ -159,7 +217,10 @@ export const ChatPage: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video'; seq?: number; mediaKey?: string } | null>(null);
+  // thumbSrc — превью из ленты: оно уже в кэше браузера и стоит в лайтбоксе
+  // вместо оригинала, пока тот едет из S3 (см. fullImageReady ниже).
+  const [lightbox, setLightbox] = useState<{ src: string; type: 'image' | 'video'; seq?: number; mediaKey?: string; thumbSrc?: string } | null>(null);
+  const [fullImageReady, setFullImageReady] = useState(false);
   const [downloadingMedia, setDownloadingMedia] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0); // -1 = подготовка, 0-100 = прогресс, как на странице "Видео"
   // Зум фото в лайтбоксе: scale — обычный стейт (щипок должен трекать палец 1:1,
@@ -458,6 +519,21 @@ export const ChatPage: React.FC = () => {
     imgY.set(0);
   }, [lightbox?.src]);
 
+  // В ленту грузится превью, а не оригинал — значит на открытии лайтбокса
+  // оригинала в кэше ещё нет и картинке неоткуда взяться мгновенно. Поэтому
+  // сначала показываем то же превью (оно точно загружено), а оригинал тянем
+  // фоном и подменяем им src, когда он готов: тот же кадр просто становится
+  // резким. Подменяем на месте, одним узлом, а не вторым элементом поверх —
+  // иначе зум и свайп-закрытие пришлось бы дублировать.
+  useEffect(() => {
+    setFullImageReady(false);
+    if (!lightbox || lightbox.type !== 'image' || !lightbox.thumbSrc) return;
+    const loader = new Image();
+    loader.onload = () => setFullImageReady(true);
+    loader.src = lightbox.src;
+    return () => { loader.onload = null; };
+  }, [lightbox]);
+
   // Как в Telegram/WhatsApp — начали скроллить ленту, значит уже не печатают:
   // убираем фокус с поля, чтобы клавиатура не торчала поверх сообщений.
   //
@@ -631,8 +707,17 @@ export const ChatPage: React.FC = () => {
         const videoFile = videoMime === file.type ? file : new Blob([file], { type: videoMime });
         await sendMessage({ type: 'video', file: videoFile, fileName: file.name || 'video.mp4', replyTo });
       } else {
-        const resized = await resizeImage(file);
-        await sendMessage({ type: 'image', file: resized, fileName: 'photo.jpg', replyTo });
+        const prepared = await prepareImage(file);
+        await sendMessage({
+          type: 'image',
+          file: prepared.full,
+          fileName: 'photo.jpg',
+          thumb: prepared.thumb,
+          width: prepared.width,
+          height: prepared.height,
+          preview: prepared.preview,
+          replyTo,
+        });
       }
       setReplyTarget(null);
       setSendError(null);
@@ -1258,31 +1343,72 @@ export const ChatPage: React.FC = () => {
   const isMediaMessage = (message: ChatMessage): boolean => !!message.media_key
     && (message.type === 'image' || message.type === 'video');
 
-  /** Кадр приехал: проявляем его поверх скелетона и гасим переливку рамки.
+  /** Пропорции рамки под фото. Зажимаем: скриншот телефона (9:19.5) иначе
+      растянул бы пузырь на пол-экрана, а панорама выродилась бы в полоску.
+      Такие кадры рамка чуть подрезает (object-fit: cover) — как в Telegram;
+      целиком их всё равно видно в лайтбоксе. null — размеров нет (сообщение
+      отправлено до появления полей либо картинка не декодировалась), тогда
+      рамка остаётся фиксированной, как раньше. */
+  const mediaAspect = (message: ChatMessage): number | null => {
+    if (!message.media_w || !message.media_h) return null;
+    const ratio = message.media_w / message.media_h;
+    if (!Number.isFinite(ratio) || ratio <= 0) return null;
+    return Math.min(MEDIA_MAX_ASPECT, Math.max(MEDIA_MIN_ASPECT, ratio));
+  };
+
+  /** Кадр приехал: проявляем его поверх заглушки и гасим переливку рамки.
       Напрямую по узлу, а не через state — загрузка одной картинки не повод
-      перерисовывать всю ленту (и тем более все остальные её медиа). */
+      перерисовывать всю ленту (и тем более все остальные её медиа).
+      Крошку под кадром гасим тем же движением: она своё отработала, а держать
+      под каждым фото в ленте живой слой с blur-фильтром незачем. */
   const revealMedia = (e: React.SyntheticEvent<HTMLImageElement>) => {
     e.currentTarget.style.opacity = '1';
-    e.currentTarget.parentElement?.classList.remove('chat-media-skeleton');
+    const frame = e.currentTarget.parentElement;
+    frame?.classList.remove('chat-media-skeleton');
+    frame?.querySelector<HTMLElement>('.chat-media-blur')?.style.setProperty('opacity', '0');
   };
 
   const renderMedia = (message: ChatMessage, isMine: boolean) => {
     const url = apiClient.getChatMediaSrc(message.media_key);
     if (message.type === 'image') {
-      // Рамка фиксированного размера (как у видео) стоит на месте ещё до того,
-      // как приедет тело картинки: сообщение прилетает по WS мгновенно, а байты
-      // идут из S3 через бэкенд и отстают. Раньше <img> без размеров занимал
-      // нулевую высоту и раскрывался в момент загрузки — лента дёргалась под
-      // пальцем на каждой догрузившейся картинке. Само фото проявляется поверх
-      // скелетона (opacity правим напрямую на узле, без state: перерисовывать
-      // всю ленту ради одной загрузившейся картинки незачем).
+      // Место под кадр занято ещё до того, как приедет его тело: сообщение
+      // прилетает по WS мгновенно, а байты идут из S3 через бэкенд и отстают.
+      // Раньше <img> без размеров занимал нулевую высоту и раскрывался в
+      // момент загрузки — лента дёргалась под пальцем на каждой догрузившейся
+      // картинке.
+      //
+      // Рамка встаёт в пропорциях самого снимка (media_w/media_h присланы
+      // клиентом при отправке), а не фиксированным прямоугольником, который
+      // резал каждое вертикальное фото. У сообщений без размеров — прежние
+      // 260×200 из CSS.
+      //
+      // В рамке сразу рисуется крошка-заглушка из самого сообщения; поверх
+      // проявляется превью (opacity правим прямо на узле, без state:
+      // перерисовывать всю ленту ради одной загрузившейся картинки незачем).
+      const feedUrl = message.thumbnail_key ? apiClient.getChatMediaSrc(message.thumbnail_key) : url;
+      const aspect = mediaAspect(message);
       return (
         <div
-          className="chat-media-thumb chat-media-skeleton"
-          onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'image', mediaKey: message.media_key }); }}
+          className={`chat-media-thumb ${message.media_preview ? '' : 'chat-media-skeleton'}`}
+          style={aspect ? { aspectRatio: String(aspect), height: 'auto' } : undefined}
+          onClick={(e) => {
+            if (suppressClickIfLongPress(e)) return;
+            // В лайтбокс отдаём и превью: оно уже в кэше браузера и подменяет
+            // собой оригинал, пока тот едет из S3. Если превью нет, в ленте и
+            // так висел сам оригинал — подменять нечем и незачем.
+            setLightbox({
+              src: url,
+              type: 'image',
+              mediaKey: message.media_key,
+              thumbSrc: message.thumbnail_key ? feedUrl : undefined,
+            });
+          }}
         >
+          {message.media_preview && (
+            <span className="chat-media-blur" style={{ backgroundImage: `url("${message.media_preview}")` }} />
+          )}
           <img
-            src={url}
+            src={feedUrl}
             alt=""
             className="chat-media-image"
             loading="lazy"
@@ -1877,7 +2003,7 @@ export const ChatPage: React.FC = () => {
                 пружинит обратно в 0 (dragConstraints top:0 bottom:0). */}
             {lightbox.type === 'image' ? (
               <motion.img
-                src={lightbox.src}
+                src={lightbox.thumbSrc && !fullImageReady ? lightbox.thumbSrc : lightbox.src}
                 alt=""
                 className={`chat-lightbox-image ${imgScale > 1 ? 'chat-lightbox-image--zoomed' : ''}`}
                 onClick={(e) => e.stopPropagation()}

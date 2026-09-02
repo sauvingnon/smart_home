@@ -530,6 +530,12 @@ class CacheManager:
         data["reply_to_username"] = data.get("reply_to_username", "")
         data["reply_to_preview"] = data.get("reply_to_preview", "")
         data["edited_at"] = data.get("edited_at") or None
+        # Геометрия и крошка-превью фото. 0/"" не только у старых записей, но и
+        # у любого сообщения, где клиент не смог декодировать картинку — фронт
+        # в обоих случаях откатывается на рамку фиксированного размера.
+        data["media_w"] = int(data.get("media_w") or 0)
+        data["media_h"] = int(data.get("media_h") or 0)
+        data["media_preview"] = data.get("media_preview", "")
         return data
 
     async def get_chat_messages(self, before_seq: Optional[int] = None, limit: int = 50) -> list:

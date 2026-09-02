@@ -18,7 +18,17 @@ export interface ChatMessage {
   text: string;
   media_key: string;
   media_kind: string; // '' | 'circle'
-  thumbnail_key: string; // только у video, расшаренных из архива камеры
+  // Превью для ленты: у video — первый кадр, у image — уменьшенная копия.
+  // Оригинал в ленту не тянем, он нужен только в лайтбоксе.
+  thumbnail_key: string;
+  // Геометрия кадра (только image) — пропорции пузыря известны до того, как
+  // приедут байты. 0 у сообщений, отправленных до появления полей: у них
+  // рамка остаётся прежнего фиксированного размера.
+  media_w: number;
+  media_h: number;
+  // Крошка-заглушка: 16px кадр data-URI'ем прямо в сообщении. Приезжает по WS
+  // вместе с ним и рисуется размытым пятном, пока из S3 едет превью.
+  media_preview: string;
   ts: string;
   // Ответ на сообщение. Автор и текст цитаты — снимком с момента ответа, а не
   // ссылкой: исходник может быть уже удалён или вне подгруженной истории.
@@ -282,6 +292,12 @@ class ApiClient {
     file?: Blob;
     fileName?: string;
     replyTo?: number | null;
+    // Всё, что клиент готовит из фото сам (см. prepareImage в ChatPage):
+    // уменьшенное превью в ленту, размеры кадра и крошка-заглушка.
+    thumb?: Blob | null;
+    width?: number;
+    height?: number;
+    preview?: string;
     onProgress?: (ratio: number) => void;
   }): Promise<ChatMessage> {
     const form = new FormData();
@@ -290,6 +306,12 @@ class ApiClient {
     if (payload.mediaKind) form.append('media_kind', payload.mediaKind);
     if (payload.replyTo) form.append('reply_to', String(payload.replyTo));
     if (payload.file) form.append('file', payload.file, payload.fileName ?? 'upload');
+    if (payload.thumb) form.append('thumb', payload.thumb, 'thumb.jpg');
+    if (payload.width && payload.height) {
+      form.append('media_w', String(payload.width));
+      form.append('media_h', String(payload.height));
+    }
+    if (payload.preview) form.append('media_preview', payload.preview);
 
     // fetch() не даёт событий прогресса загрузки (только скачивания, через
     // ReadableStream) — для полосы аплоада большого фото/видео нужен именно

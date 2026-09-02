@@ -50,15 +50,24 @@ async def send_message(
     text: Optional[str] = Form(None),
     media_kind: Optional[str] = Form(None),
     reply_to: Optional[int] = Form(None),
+    media_w: int = Form(0),
+    media_h: int = Form(0),
+    media_preview: str = Form(""),
     file: Optional[UploadFile] = File(None),
+    thumb: Optional[UploadFile] = File(None),
     user_id: int = Depends(get_current_user_id_dep),
 ):
     """Отправить сообщение (текст и/или медиафайл). Кодирование медиа — на клиенте,
-    сервер только сохраняет в Garage и рассылает по WS."""
+    сервер только сохраняет в Garage и рассылает по WS. У фото клиент кладёт
+    вторым файлом уменьшенное превью для ленты (`thumb`), а размеры кадра и
+    крошку-заглушку — обычными полями формы; всё это он считает тем же canvas,
+    которым ужимает сам снимок."""
     worker = BackgroundWorker.get_instance()
 
     media_bytes = await file.read() if file else None
     content_type = file.content_type if file else None
+    thumb_bytes = await thumb.read() if thumb else None
+    thumb_content_type = thumb.content_type if thumb else None
 
     try:
         message = await worker.chat_service.send_message(
@@ -69,6 +78,11 @@ async def send_message(
             content_type=content_type,
             media_kind=media_kind,
             reply_to=reply_to,
+            thumb_bytes=thumb_bytes,
+            thumb_content_type=thumb_content_type,
+            media_w=media_w,
+            media_h=media_h,
+            media_preview=media_preview,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
