@@ -37,6 +37,21 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   // Применяем тему к документу
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
+
+    // #app-background (position:fixed, вне React-дерева — см. index.html)
+    // красится только через CSS-переменные на :root[data-theme]. В WebKit/PWA
+    // такой fixed-слой под чёлкой/Dynamic Island не всегда перерисовывается
+    // от одной только смены custom property без соседнего layout-триггера —
+    // раньше "чинить" полосу приходилось случайно, заходя на страницу с
+    // подходящими viewport-юнитами. Вместо того чтобы зависеть от вёрстки
+    // текущей страницы, форсируем репейнт слоя явно и всегда, при каждой
+    // смене темы, независимо от того, что сейчас смонтировано.
+    const bg = document.getElementById('app-background')
+    if (bg) {
+      bg.style.transform = 'translateZ(0)'
+      void bg.offsetHeight
+      bg.style.transform = ''
+    }
   }, [theme])
 
   // Автоматически переключаем тему по времени суток каждую минуту, пока юзер
