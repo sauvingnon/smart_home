@@ -8,6 +8,7 @@ import { apiClient, AuthError } from './api/client';
 import SettingsPage from './pages/SettingsPage/SettingsPage';
 import { CameraPage } from './pages/CameraPage/CameraPage';
 import { VideosPage } from './pages/VideoPage/VideoPage';
+import { VideoSettingsPage } from './pages/VideoSettingsPage/VideoSettingsPage';
 import { ChatPage } from './pages/ChatPage/ChatPage';
 import { ChatSettingsPage } from './pages/ChatSettingsPage/ChatSettingsPage';
 import { ThemeProvider } from './context/ThemeContext';
@@ -89,6 +90,7 @@ function App() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/camera/:cameraId?" element={<CameraPage />} />
               <Route path="/videos" element={<VideosPage />} />
+              <Route path="/videos/settings" element={<VideoSettingsPage />} />
               <Route path="/chat" element={isAdmin ? <ChatPage /> : <Navigate to="/" replace />} />
               <Route path="/chat/settings" element={isAdmin ? <ChatSettingsPage /> : <Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />

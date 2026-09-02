@@ -14,9 +14,11 @@ from app.schemas.telemetry import TelemetryData, GeneralResponse, DiskUsage, Mem
 from app.schemas.weather_data import WeatherData
 from app.schemas.settings import SettingsData
 from app.schemas.device_status import DeviceStatus
+from app.schemas.camera import CameraMode
 from app.services.video_service.video_service import VideoService
 from app.services.chat_service.chat_service import ChatService
 from app.services.monitor_db.telemetry_storage import TelemetryStorage
+from app.services.push_service.push_service import send_push, PushSubscriptionExpired
 from app.utils.time import _get_izhevsk_time
 from app.core.auth import init_auth_manager, get_auth_manager
 
@@ -27,6 +29,11 @@ DEFAULT_HEARTBEAT_INTERVAL = 60
 DEFAULT_DEVICE_ID = "greenhouse_01"
 DEFAULT_SENSOR_ID = "sensor_door_pir"
 DEFAULT_TOILET_ID = "toilet_module"
+
+# Метки people-эталонов cv-пайплайна (recognition_worker/classifier.joblib) ->
+# отображаемое имя для пуша. Тот же список, что и RECOGNIZED_NAMES на фронте
+# (esp_front/src/constants/people.ts) — держать в синхроне при добавлении человека.
+RECOGNIZED_NAMES_RU = {"andrey": "Андрей", "liliya": "Лилия", "kamelia": "Камелия", "grisha": "Гриша"}
 
 # =================== ФОНОВЫЙ ВОРКЕР ===================
 class BackgroundWorker:
@@ -69,6 +76,9 @@ class BackgroundWorker:
         self.last_activity_timestamp_toilet: Optional[datetime] = startup_time
         self.toilet_status: DeviceStatus = DeviceStatus.ONLINE
         self.counter_for_telemetry = 0
+        # Уже слали алерт "дом обесточен" на текущий эпизод — чтобы не спамить
+        # им на каждый тик хартбита, пока все три устройства висят мёртвые.
+        self._house_powered_off = False
         init_auth_manager(cache_manager)
         self._initialization_complete = False  # Флаг: сервис полностью инициализирован
         
@@ -432,6 +442,89 @@ class BackgroundWorker:
         if activity_name:
             logger.debug(f"🚽 Активность туалета: {activity_name}. Статус {self.toilet_status.value}")
 
+    async def _check_house_power_status(self):
+        """Плата, датчик двери и камера мертвы одновременно — вероятнее, что дом
+        обесточен целиком, а не что у одного устройства барахлит своя связь.
+        У камеры нет отдельного DEAD (WS-разрыв — уже сам по себе жёсткий сигнал,
+        см. video_service._disconnect_camera), поэтому "не в активном
+        соединении" (не CONNECTED/STREAMING/RECORDING) — её эквивалент dead.
+        Шлём пуш строго на переходах (пропали → появились), не на каждый тик,
+        пока висит."""
+        camera = self.video_service.cameras.get("cam1")
+        camera_alive = camera is not None and camera.mode in (
+            CameraMode.CONNECTED, CameraMode.STREAMING, CameraMode.RECORDING
+        )
+        all_dead = (
+            self.device_status == DeviceStatus.DEAD
+            and self.sensor_status == DeviceStatus.DEAD
+            and not camera_alive
+        )
+
+        if all_dead and not self._house_powered_off:
+            self._house_powered_off = True
+            logger.error("🚨 Плата, датчик двери и камера мертвы одновременно — похоже, дом обесточен")
+            await self._notify_house_power(offline=True)
+        elif not all_dead and self._house_powered_off:
+            self._house_powered_off = False
+            logger.info("✅ Плата, датчик и камера снова на связи")
+            await self._notify_house_power(offline=False)
+
+    async def _notify_house_power(self, offline: bool):
+        """Пуш тем, у кого включено 'недоступность платы' в настройках видео.
+        Канал общий с чатом (см. video_notify_prefs vs push_sub) — сам
+        PushSubscription один на устройство."""
+        payload = (
+            {"title": "Похоже, дом обесточен", "body": "Плата, датчик двери и камера пропали одновременно", "url": "/videos/settings"}
+            if offline else
+            {"title": "Связь восстановлена", "body": "Плата, датчик и камера снова на связи", "url": "/videos/settings"}
+        )
+        users = await self.cache.list_users()
+        for user in users:
+            uid = user["user_id"]
+            prefs = await self.cache.get_video_notify_prefs(uid)
+            if prefs and not prefs.get("board_offline", True):
+                continue
+            subscription = await self.cache.get_push_subscription(uid)
+            if not subscription:
+                continue
+            try:
+                await send_push(subscription, payload)
+            except PushSubscriptionExpired:
+                await self.cache.delete_push_subscription(uid)
+                logger.info(f"🔕 Push-подписка юзера {uid} протухла, удалена")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось отправить пуш юзеру {uid} про обесточивание: {e}")
+
+    async def notify_video_recognized(self, present: List[str]):
+        """Пуш тем, у кого в video_notify_prefs.visit_people включено уведомление
+        хотя бы про одного из узнанных людей. Дёргается recognition_worker'ом
+        сразу после распознавания, через internal-эндпоинт (см.
+        POST /esp_service/internal/notify_recognized в stream.py) — весь доступ
+        к push_sub/video_notify_prefs остаётся в одном месте, recognition_worker
+        сам в Redis-ключи esp_service больше не лезет."""
+        if not present:
+            return
+        users = await self.cache.list_users()
+        for user in users:
+            uid = user["user_id"]
+            prefs = await self.cache.get_video_notify_prefs(uid)
+            visit_prefs = (prefs or {}).get("visit_people", {})
+            wanted = [label for label in present if visit_prefs.get(label, True)]
+            if not wanted:
+                continue
+            subscription = await self.cache.get_push_subscription(uid)
+            if not subscription:
+                continue
+            names = ", ".join(RECOGNIZED_NAMES_RU.get(label, label) for label in wanted)
+            payload = {"title": "Кто-то на камере", "body": f"{names}: заметили на видео", "url": "/videos"}
+            try:
+                await send_push(subscription, payload)
+            except PushSubscriptionExpired:
+                await self.cache.delete_push_subscription(uid)
+                logger.info(f"🔕 Push-подписка юзера {uid} протухла, удалена")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось отправить пуш юзеру {uid} про распознавание: {e}")
+
     async def _server_heartbeat_loop(self):
         """Раз в 5 минут пишем heartbeat сервера в Redis."""
         while self.is_running:
@@ -485,6 +578,10 @@ class BackgroundWorker:
                     await self.cache.record_downtime_start(self.sensor_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.sensor_id)
+
+                # Плата + датчик + камера разом мертвы — похоже на обесточку дома,
+                # а не сбой одного устройства. Проверяем после апдейта первых двух.
+                await self._check_house_power_status()
 
                 # Туалет
                 old_status = self.toilet_status

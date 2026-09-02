@@ -27,3 +27,8 @@ COOKIE_SECURE = ENVIRONMENT != "development"
 VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
 VAPID_CONTACT_EMAIL = os.getenv("VAPID_CONTACT_EMAIL", "admin@example.com")
+
+# Общий секрет для internal-эндпоинтов, которые дёргают другие контейнеры этого
+# же docker-compose (recognition_worker) по внутренней сети — не публичный API,
+# но сеть общая (esp_internal_network), поэтому не голое доверие по сетевой изоляции.
+RECOGNITION_WORKER_SECRET = os.getenv("RECOGNITION_WORKER_SECRET")

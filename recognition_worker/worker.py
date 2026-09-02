@@ -31,6 +31,7 @@ from pathlib import Path
 import boto3
 import joblib
 import redis
+import requests
 from insightface.app import FaceAnalysis
 
 # from direction_detector import process_video_direction  # временно отключено — сырое, грузит второй полный проход по видео
@@ -42,6 +43,24 @@ LOCK_KEY = "recognition:lock"
 LOCK_TTL_SECONDS = 900  # страховка на случай, если воркер зависнет/упадёт не освободив лок
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
 IZHEVSK_TZ = timezone(timedelta(hours=4))
+
+# recognition_worker — отдельный процесс без доступа к push_sub/video_notify_prefs
+# в Redis esp_service (раньше читал их напрямую — оказалось хрупко: дублировал
+# схему ключей вслепую). Вместо этого просто сообщаем esp_service, кто узнан,
+# он сам решает, кого и как пушить (см. app/api/endpoints/stream.py notify_recognized).
+ESP_SERVICE_INTERNAL_URL = os.environ.get("ESP_SERVICE_INTERNAL_URL", "http://esp_service:8005")
+RECOGNITION_WORKER_SECRET = os.environ.get("RECOGNITION_WORKER_SECRET")
+
+
+def notify_recognized(present: list) -> None:
+    if not present or not RECOGNITION_WORKER_SECRET:
+        return
+    requests.post(
+        f"{ESP_SERVICE_INTERNAL_URL}/esp_service/internal/notify_recognized",
+        json={"present": present},
+        headers={"X-Internal-Secret": RECOGNITION_WORKER_SECRET},
+        timeout=10,
+    ).raise_for_status()
 
 
 class PipelineArgs:
@@ -137,6 +156,13 @@ def process_queue(r: "redis.Redis") -> None:
                 # conf_note = " (low confidence)" if direction["low_confidence"] else ""
                 # print(f"[{video_id}] готово -> {result_key} | present: {present or '-'} | direction: {direction['verdict']}{conf_note}")
                 print(f"[{video_id}] готово -> {result_key} | present: {present or '-'}")
+
+                try:
+                    notify_recognized(present)
+                except Exception as e:
+                    # Пуш — best-effort уведомление, а не часть обработки видео: ошибка
+                    # здесь не должна ронять разбор очереди.
+                    print(f"⚠️ notify_recognized упал для [{video_id}]: {e}")
 
             except Exception as e:
                 print(f"⚠️ job {job!r} упал: {e}")

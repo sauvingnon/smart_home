@@ -698,6 +698,23 @@ class CacheManager:
         await self.redis_client.delete(f"{self.PUSH_SUB_PREFIX}{user_id}")
         return True
 
+    # По каким видео-темам юзер хочет пуш (посещение конкретных людей,
+    # недоступность платы) — сам PushSubscription общий с чатом, тут
+    # только предпочтения.
+    VIDEO_NOTIFY_PREFS_PREFIX = "video_notify_prefs:"
+
+    async def save_video_notify_prefs(self, user_id: int, prefs: dict) -> bool:
+        if not await self._ensure_connection():
+            return False
+        await self.redis_client.set(f"{self.VIDEO_NOTIFY_PREFS_PREFIX}{user_id}", json.dumps(prefs))
+        return True
+
+    async def get_video_notify_prefs(self, user_id: int) -> Optional[dict]:
+        if not await self._ensure_connection():
+            return None
+        raw = await self.redis_client.get(f"{self.VIDEO_NOTIFY_PREFS_PREFIX}{user_id}")
+        return json.loads(raw) if raw else None
+
     # Ключ раздела (шлёт сам фронт при реальном монтировании страницы) →
     # отображаемое название, для статистики "кто что открывал". Раньше это
     # был prefix-match по пути ЛЮБОГО запроса — ловил и фоновые фетчи

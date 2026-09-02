@@ -38,6 +38,11 @@ export interface ChatReadState {
   read_at: string | null;
 }
 
+export interface VideoNotifyPrefs {
+  visit_people: Record<string, boolean>;
+  board_offline: boolean;
+}
+
 export interface PushStatusEntry {
   user_id: number;
   display_name: string;
@@ -114,6 +119,17 @@ class ApiClient {
     if (camera_id) queryParams.append('camera_id', camera_id);
     const queryString = queryParams.toString();
     return this.fetch(`/esp_service/videos${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getVideoNotifyPrefs(): Promise<VideoNotifyPrefs> {
+    return this.fetch('/esp_service/videos/notify_prefs');
+  }
+
+  async saveVideoNotifyPrefs(prefs: VideoNotifyPrefs): Promise<{ status: string }> {
+    return this.fetch('/esp_service/videos/notify_prefs', {
+      method: 'POST',
+      body: JSON.stringify(prefs),
+    });
   }
 
   async shareVideoToChat(cameraId: string, videoId: string): Promise<ChatMessage> {

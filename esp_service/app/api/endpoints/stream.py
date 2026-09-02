@@ -1,13 +1,15 @@
 # app/api/esp_service.py
+import hmac
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, Depends, Header, UploadFile, File
 from fastapi.responses import StreamingResponse
 from app.core.worker import BackgroundWorker
 from app.core.auth import get_current_user_id_dep
-from app.schemas.video import VideoItem
+from app.schemas.video import VideoItem, VideoNotifyPrefs, NotifyRecognizedIn
 from pydantic import BaseModel
 from logger import logger
+from config import RECOGNITION_WORKER_SECRET
 
 router = APIRouter(prefix="/esp_service", tags=["esp_service"])
 
@@ -84,6 +86,37 @@ async def list_videos(
 
     # Получаем список видео
     return await worker.video_service.get_video_list(camera_id=camera_id)
+
+@router.get("/videos/notify_prefs", response_model=VideoNotifyPrefs)
+async def get_video_notify_prefs(user_id: int = Depends(get_current_user_id_dep)):
+    """Предпочтения юзера: о посещении кого уведомлять и хочет ли знать про
+    недоступность платы. Сам push — общая с чатом подписка (/chat/push/*)."""
+    worker = BackgroundWorker.get_instance()
+    prefs = await worker.cache.get_video_notify_prefs(user_id)
+    return prefs or VideoNotifyPrefs()
+
+@router.post("/videos/notify_prefs")
+async def save_video_notify_prefs(
+    prefs: VideoNotifyPrefs,
+    user_id: int = Depends(get_current_user_id_dep)
+):
+    worker = BackgroundWorker.get_instance()
+    await worker.cache.save_video_notify_prefs(user_id, prefs.model_dump())
+    return {"status": "ok"}
+
+@router.post("/internal/notify_recognized")
+async def notify_recognized(
+    body: NotifyRecognizedIn,
+    x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret"),
+):
+    """Дёргает recognition_worker (отдельный контейнер на той же internal-сети
+    docker-compose) сразу после того, как кто-то узнан на видео. Не пользовательский
+    эндпоинт — авторизация общим секретом, а не сессионной cookie."""
+    if not RECOGNITION_WORKER_SECRET or not x_internal_secret or not hmac.compare_digest(x_internal_secret, RECOGNITION_WORKER_SECRET):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    worker = BackgroundWorker.get_instance()
+    await worker.notify_video_recognized(body.present)
+    return {"status": "ok"}
 
 @router.get("/videos/stream")
 async def stream_video(

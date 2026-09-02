@@ -6,3 +6,4 @@ joblib
 numpy
 boto3
 redis
+requests

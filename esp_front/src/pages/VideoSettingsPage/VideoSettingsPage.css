@@ -1,0 +1,250 @@
+/* src/pages/VideoSettingsPage/VideoSettingsPage.css */
+
+:root, .light {
+  --glass-bg: rgba(255, 255, 255, 0.4);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+  --text-primary: #1e293b;
+  --text-secondary: #334155;
+  --text-tertiary: #64748b;
+  --accent-sky: #0ea5e9;
+  --accent-amber: #f97316;
+  --accent-blue: #3b82f6;
+}
+
+.dark {
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-tertiary: rgba(255, 255, 255, 0.3);
+  --accent-sky: #0ea5e9;
+  --accent-amber: #fbbf24;
+  --accent-blue: #3b82f6;
+}
+
+.video-settings-page {
+  min-height: 100dvh;
+  color: var(--text-primary);
+  position: relative;
+  overflow-x: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.background-spot {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.spot-1 {
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  width: 500px;
+  height: 500px;
+  background: rgba(249, 115, 22, 0.15);
+  border-radius: 50%;
+  filter: blur(120px);
+  mix-blend-mode: overlay;
+}
+
+.spot-2 {
+  position: absolute;
+  top: 20%;
+  right: -10%;
+  width: 400px;
+  height: 400px;
+  background: rgba(14, 165, 233, 0.15);
+  border-radius: 50%;
+  filter: blur(100px);
+  mix-blend-mode: overlay;
+}
+
+.spot-3 {
+  position: absolute;
+  bottom: -10%;
+  left: 20%;
+  width: 600px;
+  height: 600px;
+  background: rgba(139, 92, 246, 0.1);
+  border-radius: 50%;
+  filter: blur(130px);
+  mix-blend-mode: overlay;
+}
+
+.video-settings-container {
+  position: relative;
+  z-index: 10;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: calc(1.5rem + env(safe-area-inset-top)) 1.5rem 80px 1.5rem;
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 2rem;
+  box-shadow: var(--glass-shadow);
+}
+
+.video-settings-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.back-button {
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.back-button:hover {
+  transform: scale(1.1);
+  border-color: var(--accent-sky);
+  color: var(--accent-sky);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+}
+
+.video-settings-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.video-settings-title-row .title-icon {
+  color: var(--accent-sky);
+  flex: 0 0 auto;
+}
+
+.video-settings-title-row h1 {
+  font-size: 1.375rem;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(to right, var(--accent-sky), var(--accent-amber));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.video-settings-section {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.video-settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+
+.video-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 1.25rem;
+}
+
+.video-settings-row + .video-settings-row {
+  border-top: 1px solid var(--glass-border);
+}
+
+.video-settings-row-icon {
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(14, 165, 233, 0.15);
+  color: var(--accent-sky);
+}
+
+.video-settings-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.video-settings-row-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.video-settings-row-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.video-settings-switch {
+  flex: 0 0 auto;
+  width: 46px;
+  height: 26px;
+  border-radius: 9999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(127, 127, 127, 0.25);
+  padding: 2px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.video-settings-switch.on {
+  background: linear-gradient(to right, var(--accent-sky), var(--accent-blue));
+  border-color: transparent;
+}
+
+.video-settings-switch-knob {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+}
+
+.video-settings-switch.on .video-settings-switch-knob {
+  transform: translateX(20px);
+}
+
+.video-settings-spin {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  animation: video-settings-spin 0.9s linear infinite;
+}
+
+@keyframes video-settings-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

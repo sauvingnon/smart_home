@@ -16,9 +16,11 @@ import {
   LogOut,
   Loader2,
   MessageCircle,
-  Filter
+  Filter,
+  Settings
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
+import { recognizedDisplayName, PEOPLE_FILTERS } from '../../constants/people'
 import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
@@ -52,15 +54,6 @@ const isStuckProcessing = (video: VideoItem) => {
   return (Date.now() - started) / 60000 > PROCESSING_STUCK_MINUTES
 }
 
-// Метки people-эталонов (dataset/<label>/) -> отображаемое имя на фронте
-const RECOGNIZED_NAMES: Record<string, string> = {
-  andrey: 'Андрей',
-  liliya: 'Лилия',
-  kamelia: 'Камелия',
-  grisha: 'Гриша',
-}
-const recognizedDisplayName = (label: string) => RECOGNIZED_NAMES[label] ?? label
-const PEOPLE_FILTERS = ['andrey', 'liliya', 'kamelia', 'grisha']
 
 const containerVar = {
   hidden: { opacity: 0 },
@@ -335,6 +328,9 @@ export const VideosPage = () => {
             <h1>Видеозаписи</h1>
           </div>
           <div className="header-actions">
+            <button className="header-action-btn" onClick={() => navigate('/videos/settings')} title="Настройки">
+              <Settings size={20} />
+            </button>
             <button className="header-action-btn" onClick={loadVideos} title="Обновить">
               <RefreshCw size={20} />
             </button>
