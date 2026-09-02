@@ -10,6 +10,8 @@
   --accent-blue: #3b82f6;
   --accent-sky: #0ea5e9;
   --accent-orange: #f97316;
+  --accent-emerald: #059669;
+  --accent-red: #dc2626;
 }
 
 .dark {
@@ -22,6 +24,10 @@
   --accent-blue: #3b82f6;
   --accent-sky: #0ea5e9;
   --accent-orange: #fbbf24;
+  /* На тёмном фоне светлее, чем в светлой теме — иначе насыщенный цвет
+     проваливается и подпись перестаёт читаться. */
+  --accent-emerald: #34d399;
+  --accent-red: #f87171;
 }
 
 .chat-settings-page {
@@ -278,20 +284,32 @@
   box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
 }
 
+/* Раньше это был просто бледный колокольчик с title-подсказкой: понять,
+   доходят ли до человека пуши, можно было только наведением — на телефоне
+   никак. Теперь состояние читается без единого тапа: цветная пилюля с
+   подписью, зелёная у подписанных и красная у тех, кто уведомлений не
+   получает. */
 .chat-settings-notif-badge {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
+  gap: 5px;
+  padding: 5px 10px;
   border-radius: 9999px;
-  color: var(--text-tertiary);
-  opacity: 0.6;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .chat-settings-notif-badge.on {
-  color: var(--accent-sky);
-  background: rgba(14, 165, 233, 0.15);
-  opacity: 1;
+  color: var(--accent-emerald);
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.chat-settings-notif-badge.off {
+  color: var(--accent-red);
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.35);
 }

@@ -137,12 +137,15 @@ export const ChatSettingsPage: React.FC = () => {
                         {p.online ? 'в сети' : p.last_seen ? `был(а) в сети ${formatLastSeen(p.last_seen)}` : 'не в сети'}
                       </span>
                     </div>
-                    <span
-                      className={`chat-settings-notif-badge ${notifSubscribed ? 'on' : ''}`}
-                      title={notifSubscribed ? 'Уведомления включены' : 'Уведомления выключены'}
-                    >
-                      {notifSubscribed ? <Bell size={16} /> : <BellOff size={16} />}
-                    </span>
+                    {/* Пока статусы не приехали — бейджа нет вовсе: рисовать
+                        красное "без уведомлений" на всех подряд, пока грузится
+                        список, значило бы врать в самой заметной форме. */}
+                    {pushStatuses !== null && (
+                      <span className={`chat-settings-notif-badge ${notifSubscribed ? 'on' : 'off'}`}>
+                        {notifSubscribed ? <Bell size={14} /> : <BellOff size={14} />}
+                        <span>{notifSubscribed ? 'Уведомления' : 'Без уведомлений'}</span>
+                      </span>
+                    )}
                   </div>
                 );
               })
