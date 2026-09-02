@@ -304,7 +304,9 @@ export const ChatPage: React.FC = () => {
   const [scrollBtnSize, setScrollBtnSize] = useState(38);
   const [headerPadTop, setHeaderPadTop] = useState(76);
   const [messagesPadBottom, setMessagesPadBottom] = useState(78);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Последний созданный (см. openGalleryPicker) одноразовый файловый инпут —
+  // держим только чтобы убрать за собой, если пикер закрыли без выбора.
+  const filePickerRef = useRef<HTMLInputElement | null>(null);
   const textInputRef = useRef<HTMLDivElement>(null);
   // Ремаунтим contenteditable-поле после отправки (см. handleSendText) —
   // рост этого ключа форсирует React пересоздать DOM-узел с нуля.
@@ -523,6 +525,9 @@ export const ChatPage: React.FC = () => {
       if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
       if (meterRafRef.current) cancelAnimationFrame(meterRafRef.current);
       meterAudioCtxRef.current?.close().catch(() => {});
+      // Одноразовый файловый инпут (см. openGalleryPicker) висит на body, а не
+      // в поддереве страницы — сам он с ней не уйдёт.
+      filePickerRef.current?.remove();
     };
   }, []);
 
@@ -754,10 +759,37 @@ export const ChatPage: React.FC = () => {
 
   // Галерея — обычный файловый пикер (без capture), поэтому сюда прилетает
   // и фото, и видео из библиотеки, а не только снимки с камеры.
-  const handleGallerySelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || sending) return;
+  //
+  // Инпут создаётся заново на каждое открытие и живёт ровно один выбор. Один
+  // постоянный <input type="file"> тут переиспользовать нельзя: если пикер
+  // закрыть без выбора, change не приходит вообще, и мобильные вебвью
+  // (Android WebView, обёртки PWA) оставляют запрос файла на этом самом узле
+  // незакрытым — следующий .click() по нему они молча игнорируют. Ровно та
+  // самая последовательность "закрыл пикер → второй тап без реакции → третий
+  // снова работает". У свежего узла такого хвоста нет.
+  const openGalleryPicker = () => {
+    if (sending) return;
+    // Прошлый инпут остаётся в DOM, если выбор отменили (change не пришёл) —
+    // убираем его тут, а не по таймеру: к этому моменту он точно не нужен.
+    filePickerRef.current?.remove();
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,video/*';
+    input.hidden = true;
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      input.remove();
+      if (filePickerRef.current === input) filePickerRef.current = null;
+      if (file) void sendGalleryFile(file);
+    }, { once: true });
+    document.body.appendChild(input);
+    filePickerRef.current = input;
+    input.click();
+  };
+
+  const sendGalleryFile = async (file: File) => {
+    if (sending) return;
     if (file.size > MAX_CHAT_FILE_BYTES) {
       alert(`Файл слишком большой (${(file.size / (1024 * 1024)).toFixed(1)} МБ). Максимум — 50 МБ.`);
       return;
@@ -2072,19 +2104,20 @@ export const ChatPage: React.FC = () => {
         )}
 
         <div className="chat-input-row" ref={inputRowRef}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,video/*"
-            hidden
-            onChange={handleGallerySelected}
-          />
-
           {!recording && (
             <button
               className="chat-icon-button"
               disabled={sending}
-              onClick={() => fileInputRef.current?.click()}
+              // Тот же приём, что у кнопок отправки и микрофона ниже: гасим
+              // дефолт pointerdown, чтобы тап не уводил фокус с поля. Иначе
+              // поле теряло фокус, класс .chat-page--composing слетал, и
+              // .chat-input-bar вместе с этой кнопкой уезжал вниз на 84px
+              // (transition: bottom 0.2s, см. ChatPage.css) — как раз пока
+              // палец идёт ко второму тапу. Отменённый pointerdown не мешает
+              // click: он гасит только совместимостные mouse-события и фокус.
+              onPointerDown={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={openGalleryPicker}
               title="Галерея"
             >
               <Paperclip size={20} />
