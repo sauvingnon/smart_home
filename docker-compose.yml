@@ -79,7 +79,13 @@ services:
     command: ["sh", "-c", "chmod +x /init-mosquitto.sh && sh /init-mosquitto.sh"]
     healthcheck:
       test: timeout 5 mosquitto_sub -t '$$SYS/broker/uptime' -u $${MQTT_USERNAME} -P $${MQTT_PASSWORD} -C 1
-      interval: 30s
+      # 5s, а не 30s: на этом healthcheck висит depends_on у esp_service, а
+      # первую проверку Docker делает через целый interval после старта — с
+      # тридцатью секундами брокер не мог стать healthy раньше 30-й секунды,
+      # даже будучи готовым на второй, и ровно столько же простаивал весь
+      # бэкенд. start_period тут не ускоряет ничего, он лишь не даёт ранним
+      # провалам считаться за отказ.
+      interval: 5s
       timeout: 10s
       retries: 3
       start_period: 20s

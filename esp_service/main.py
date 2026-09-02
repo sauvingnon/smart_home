@@ -53,20 +53,33 @@ async def lifespan(app: FastAPI):
             bucket_name="video-bucket"
         )
 
-        s3_started = await s3_manager.connect()
-        if not s3_started:
-            logger.warning("Не удалось запустить s3 хранилище, продолжаем без него.")
-        else:
-            logger.info("✅ S3 хранилище запущено.")
         app.state.s3_manager = s3_manager
-        
-        # Запускаем MQTT (подключение + прослушивание)
-        mqtt_started = await mqtt_service.start()
-        if not mqtt_started:
-            logger.warning("⚠️ MQTT не удалось запустить, продолжаем без него")
-        else:
-            logger.info("✅ MQTT сервис запущен")
         app.state.mqtt_service = mqtt_service
+
+        # Подключения к garage и брокеру уезжают в фон, а не держат lifespan.
+        # До yield uvicorn не отвечает вообще ни на что — ни /health, ни
+        # /auth/me, — а nginx всё это время отдаёт наружу 502. Раньше сюда
+        # закладывалось до 75 секунд одного только S3: healthcheck garage
+        # проверяет открытый TCP-порт, а head_bucket на ещё не применившем
+        # layout хранилище падает, и connect() штатно уходил в свой backoff
+        # 5+10+20+40. Ждать этого API не обязан: все операции S3 идут через
+        # _ensure_connection (s3_manager.py) и поднимут соединение сами, когда
+        # оно реально понадобится, а MQTT нужен платам, а не фронту.
+        async def warmup_external():
+            if await s3_manager.connect():
+                logger.info("✅ S3 хранилище запущено.")
+            else:
+                logger.warning("Не удалось запустить s3 хранилище, продолжаем без него.")
+
+            # Порядок сохранён (сначала S3, потом MQTT) — VideoService кладёт
+            # в хранилище то, что приезжает по MQTT.
+            if await mqtt_service.start():
+                logger.info("✅ MQTT сервис запущен")
+            else:
+                logger.warning("⚠️ MQTT не удалось запустить, продолжаем без него")
+
+        warmup_task = asyncio.create_task(warmup_external())
+        tasks.append(warmup_task)
 
         video_service = VideoService(s3_manager, cache_manager)
         chat_service = ChatService(cache_manager, s3_manager)
