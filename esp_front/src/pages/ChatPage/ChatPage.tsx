@@ -1258,17 +1258,37 @@ export const ChatPage: React.FC = () => {
   const isMediaMessage = (message: ChatMessage): boolean => !!message.media_key
     && (message.type === 'image' || message.type === 'video');
 
+  /** Кадр приехал: проявляем его поверх скелетона и гасим переливку рамки.
+      Напрямую по узлу, а не через state — загрузка одной картинки не повод
+      перерисовывать всю ленту (и тем более все остальные её медиа). */
+  const revealMedia = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    e.currentTarget.style.opacity = '1';
+    e.currentTarget.parentElement?.classList.remove('chat-media-skeleton');
+  };
+
   const renderMedia = (message: ChatMessage, isMine: boolean) => {
     const url = apiClient.getChatMediaSrc(message.media_key);
     if (message.type === 'image') {
+      // Рамка фиксированного размера (как у видео) стоит на месте ещё до того,
+      // как приедет тело картинки: сообщение прилетает по WS мгновенно, а байты
+      // идут из S3 через бэкенд и отстают. Раньше <img> без размеров занимал
+      // нулевую высоту и раскрывался в момент загрузки — лента дёргалась под
+      // пальцем на каждой догрузившейся картинке. Само фото проявляется поверх
+      // скелетона (opacity правим напрямую на узле, без state: перерисовывать
+      // всю ленту ради одной загрузившейся картинки незачем).
       return (
-        <img
-          src={url}
-          alt=""
-          className="chat-media-image"
-          loading="lazy"
+        <div
+          className="chat-media-thumb chat-media-skeleton"
           onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'image', mediaKey: message.media_key }); }}
-        />
+        >
+          <img
+            src={url}
+            alt=""
+            className="chat-media-image"
+            loading="lazy"
+            onLoad={revealMedia}
+          />
+        </div>
       );
     }
     if (message.type === 'audio') {
@@ -1295,7 +1315,7 @@ export const ChatPage: React.FC = () => {
       // лайтбоксе по клику.
       return (
         <div
-          className={`chat-video-thumb ${message.media_kind === 'circle' ? 'circle' : ''}`}
+          className={`chat-video-thumb ${message.media_kind === 'circle' ? 'circle' : ''} ${message.thumbnail_key ? 'chat-media-skeleton' : ''}`}
           onClick={(e) => { if (suppressClickIfLongPress(e)) return; setLightbox({ src: url, type: 'video', seq: message.seq, mediaKey: message.media_key }); }}
         >
           {message.thumbnail_key && (
@@ -1304,7 +1324,8 @@ export const ChatPage: React.FC = () => {
               alt=""
               loading="lazy"
               className="chat-video-thumb-el"
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              onLoad={revealMedia}
+              onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.classList.remove('chat-media-skeleton'); }}
             />
           )}
           <span className="chat-video-play-overlay">

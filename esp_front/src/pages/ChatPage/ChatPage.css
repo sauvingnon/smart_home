@@ -904,7 +904,7 @@
 }
 
 /* Собственные отступы медиа внутри такого пузыря лишние — рамку задаёт он сам. */
-.chat-media-frame .chat-media-image,
+.chat-media-frame .chat-media-thumb,
 .chat-media-frame .chat-video-thumb,
 .chat-media-frame .chat-video-error {
   margin: 0;
@@ -1058,13 +1058,54 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
-.chat-media-image {
-  max-width: 260px;
-  max-height: 320px;
+/* Рамка под фото — того же размера, что и у видео: место под медиа занято
+   сразу при появлении сообщения, ещё до того как из S3 приедут байты. Пока их
+   нет, в рамке переливается скелетон, поверх которого потом проявляется сам
+   кадр. */
+.chat-media-thumb {
+  position: relative;
+  width: 260px;
+  height: 200px;
   border-radius: 12px;
-  display: block;
+  overflow: hidden;
   margin: 2px 0;
   cursor: pointer;
+  background: var(--glass-bg);
+}
+
+/* Переливка живёт только пока кадра нет: onLoad снимает класс с рамки, чтобы
+   в ленте не крутилась анимация под каждой уже загруженной картинкой. Классом,
+   а не состоянием React: перерисовывать ленту ради этого нечего. */
+.chat-media-skeleton::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.09) 50%,
+    transparent 80%
+  );
+  background-size: 220% 100%;
+  animation: chat-media-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes chat-media-shimmer {
+  from { background-position: 140% 0; }
+  to { background-position: -40% 0; }
+}
+
+.chat-media-image {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  /* Проявляем из нуля: скелетон под кадром не должен просвечивать сквозь него
+     и не должен моргать сменой картинки на переливку. opacity ставит onLoad
+     в ChatPage.tsx. */
+  opacity: 0;
+  transition: opacity 0.28s ease;
 }
 
 .chat-lightbox-backdrop {
@@ -1240,11 +1281,14 @@
 }
 
 .chat-video-thumb-el {
+  position: relative;
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s ease;
 }
 
 .chat-video-error {
