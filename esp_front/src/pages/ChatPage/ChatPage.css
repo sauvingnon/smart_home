@@ -1479,6 +1479,9 @@
   display: flex;
   align-items: flex-end; /* растущий textarea тянет высоту строки — иконки якорим по низу, как в Telegram */
   gap: 8px;
+  /* Прогресс свайпа-отмены (0..1) — пишется из handleMicPointerMove сюда, а
+     читают его и оверлей записи, и сама кнопка микрофона ниже. */
+  --cancel-progress: 0;
   padding: 6px 8px;
   border-radius: 24px;
   background: var(--glass-bg);
@@ -1586,18 +1589,27 @@
 
 /* Пока идёт запись, поле ввода никуда не девается (см. ChatPage.tsx) — так
    клавиатура, если была открыта, и не думает закрываться. Оверлей просто
-   визуально прикрывает поле таймером/крестиком поверх, непрозрачным фоном:
-   под ним по-прежнему живой, сфокусированный contentEditable, просто
-   невидимый. Фон не завязан на :focus-within (белеет только пока печатают)
-   — во время записи поле остаётся сфокусированным всегда, вне зависимости
-   от темы, так что этот белый тут даём напрямую, а не наследуем. */
+   ложится поверх него таймером, волной и подсказкой.
+
+   Фон намеренно прозрачный. Раньше тут стоял хардкодный #ffffff — в тёмной
+   теме он рисовал белую полосу, на которой белый же таймер
+   (var(--text-primary) в .dark == #ffffff) не был виден вообще: ровно то, что
+   выглядело как "полоска вместо времени записи". Прятать под оверлеем нечего:
+   кнопка микрофона показывается только при пустом поле, а ввод на время
+   записи заблокирован (onBeforeInput), так что под ним гарантированно пусто —
+   остаётся погасить один плейсхолдер, правилом ниже. */
 .chat-recording-overlay {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #ffffff;
+  background: transparent;
+}
+
+/* Единственное, что могло бы просвечивать сквозь прозрачный оверлей. */
+.chat-composer-slot--recording .chat-text-input--empty::before {
+  content: none;
 }
 
 .chat-send-button {
@@ -1649,6 +1661,80 @@
   line-height: 1;
 }
 
+/* Пока печатают, строка ввода белеет независимо от темы (см. :focus-within
+   выше), а во время записи поле специально остаётся в фокусе — значит на
+   белом фоне окажется и содержимое оверлея. Тот же приём, что уже сделан
+   для текста поля и иконок. */
+.chat-input-row:focus-within .chat-recording-timer {
+  color: #1e293b;
+}
+
+/* Переменной, а не готовым color: сам цвет подсказки собирается ниже из этой
+   базы и красного по прогрессу свайпа — прямое переопределение color тут
+   перебило бы всю эту сборку своей большей специфичностью. */
+.chat-input-row:focus-within .chat-recording-hint {
+  --hint-base: #64748b;
+}
+
+/* Чем ближе свайп к порогу отмены, тем сильнее гаснет то, что записалось —
+   визуальный ответ "запись сейчас улетит в мусорку". */
+.chat-recording-dot,
+.chat-recording-timer,
+.chat-recording-wave {
+  opacity: calc(1 - var(--cancel-progress) * 0.75);
+}
+
+/* Живая волна — та же настоящая амплитуда, что и у кольца громкости на
+   кнопке (общий analyser, см. startLevelMeter): столбик = пик за 90 мс.
+   justify-content: flex-end + overflow: hidden дают ровно поведение ленты в
+   Telegram — новое приходит справа, старое срезается слева краем контейнера,
+   и оно же само подстраивается, когда справа появляется подсказка отмены. */
+.chat-recording-wave {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 20px;
+  align-self: center;
+}
+
+.chat-recording-wave-bar {
+  flex: 0 0 3px;
+  width: 3px;
+  height: 0;       /* реальную высоту пишет applyWave() в ChatPage.tsx */
+  min-height: 3px; /* тишина — не пустота, а точка, как в Telegram */
+  border-radius: 2px;
+  background: var(--accent-blue);
+  /* Ровно шаг ленты: следующий кадр приходит через WAVE_STEP_MS, так что
+     столбик доезжает точно к его приходу — лента течёт, а не мигает. */
+  transition: height 0.09s linear;
+}
+
+.chat-recording-hint {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  align-self: center;
+  padding-right: 2px;
+  font-size: 13px;
+  white-space: nowrap;
+  /* Подсказка едет за пальцем влево и по мере свайпа наливается красным.
+     Первое объявление color — фолбэк для движков без color-mix: они просто
+     отбросят второе как невалидное и оставят подсказку нейтральной. */
+  transform: translateX(calc(var(--cancel-progress) * -20px));
+  --hint-base: var(--text-tertiary);
+  color: var(--hint-base);
+  color: color-mix(in srgb, #ef4444 calc(var(--cancel-progress) * 100%), var(--hint-base));
+}
+
+.chat-recording-hint > svg {
+  flex: 0 0 auto;
+}
+
 .chat-recording-cancel {
   display: flex;
   align-items: center;
@@ -1670,7 +1756,6 @@
 }
 
 .chat-mic-button {
-  position: relative; /* якорь для пульсирующего кольца громкости (::before) */
   margin-left: auto;
   --mic-level: 0; /* живой уровень с микрофона, пишется напрямую в style — см. startLevelMeter в ChatPage.tsx */
   /* Кнопка — самая правая в пилюле, у самого края экрана. Дефолтный
@@ -1696,28 +1781,29 @@
    "безопасная зона", чтобы отпускание не читалось как случайность, даже
    если палец слегка съехал (сама отправка на самом деле уже защищена через
    setPointerCapture, это чисто про ощущение) — и вокруг неё пульсирует
-   кольцо настоящей громкости с микрофона. */
+   кольцо настоящей громкости с микрофона. Свайп влево к отмене её обратно
+   поджимает: жест видно ещё до того, как он сработает.
+
+   Кольцо — два расходящихся ореола на box-shadow, а не ::before с
+   z-index: -1, как было раньше: у кнопки во время записи есть собственный
+   transform, а он создаёт stacking context, внутри которого отрицательный
+   z-index уводит псевдоэлемент не ПОД кнопку, а лишь под её иконку — поверх
+   фона той же самой accent-blue заливки, то есть в ничто. Плюс при уровне 0
+   scale(1) ровно повторял габарит кнопки и не был виден вовсе. box-shadow
+   рисуется наружу от border-box, на stacking context ему плевать, и в поток
+   он тоже не попадает — горизонтального скролла от вылезающего за край
+   экрана ореола не будет (та же беда, ради которой выше задан
+   transform-origin).
+
+   transition у box-shadow короткий и линейный: это не UI-анимация под жест,
+   а прямое отображение звука, ему нужна отзывчивость, а не плавность.
+   Масштаб кнопки, наоборот, ease — он реагирует на палец. */
 .chat-mic-button.recording {
-  transform: scale(1.25);
+  transform: scale(calc(1.25 - var(--cancel-progress) * 0.3));
   background: var(--accent-blue);
   color: #ffffff;
-}
-
-/* Кольцо громкости — то же accent-blue, что и сама кнопка, растущее и
-   гаснущее вслед за --mic-level (0..1). z-index: -1, а не отдельный элемент
-   после кнопки в разметке — так оно не перехватывает поинтер-события и
-   не мешает setPointerCapture на самой кнопке. transition короткий и
-   линейный: это не UI-анимация под пользовательский жест, а прямое
-   отображение звука, ему нужна отзывчивость, а не плавность. */
-.chat-mic-button.recording::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: var(--accent-blue);
-  opacity: calc(0.12 + var(--mic-level) * 0.28);
-  transform: scale(calc(1 + var(--mic-level) * 1.3));
-  transition: transform 0.08s linear, opacity 0.08s linear;
-  z-index: -1;
-  pointer-events: none;
+  box-shadow:
+    0 0 0 calc(var(--mic-level) * 9px) rgba(59, 130, 246, 0.3),
+    0 0 0 calc(var(--mic-level) * 17px) rgba(59, 130, 246, 0.14);
+  transition: transform 0.15s ease, box-shadow 0.08s linear;
 }

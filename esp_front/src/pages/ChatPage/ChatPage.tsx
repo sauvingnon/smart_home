@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, Sun, Moon, Settings, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Sun, Moon, Settings, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -20,6 +20,13 @@ const MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024; // синхронно с CHAT_MEDI
 const MAX_RECORD_MS = 60_000;
 const MIN_RECORD_MS = 2_000; // короче — считаем случайным тапом, не отправляем
 const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "держит", отпустил — отправить сразу
+// Живая волна записи, как в Telegram: лента столбиков, бегущая справа налево.
+const WAVE_BAR_COUNT = 28;
+// Шаг ленты. Кадр (~16 мс) дал бы не речь, а шум: слог просто не успевает
+// проявиться. 90 мс — примерно длительность слога, лента читается как речь.
+const WAVE_STEP_MS = 90;
+// Насколько нужно увести палец влево от кнопки, чтобы запись отменилась.
+const CANCEL_SWIPE_PX = 90;
 // Окно на удаление своего сообщения. Синхронно с CHAT_DELETE_WINDOW на бэке —
 // там же оно и проверяется по-настоящему, тут только чтобы не показывать
 // заведомо мёртвый пункт меню.
@@ -312,8 +319,16 @@ export const ChatPage: React.FC = () => {
   const pressWasSecondTapRef = useRef(false);
 
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  // Палец физически на кнопке (между pointerdown и pointerup) — от этого
+  // зависит, что показываем в оверлее: подсказку "проведите для отмены"
+  // (свайпать есть чем) или кнопку-мусорку (палец уже отпущен, режим
+  // ожидания второго тапа).
+  const [micHeld, setMicHeld] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  // Синхронный двойник recording для обработчиков, которые не могут ждать
+  // ре-рендер (beforeinput поля ввода, rAF-тик метра).
+  const recordingRef = useRef(false);
   const recordedChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const recordStartRef = useRef(0);
@@ -327,6 +342,21 @@ export const ChatPage: React.FC = () => {
   const meterAudioCtxRef = useRef<AudioContext | null>(null);
   const meterAnalyserRef = useRef<AnalyserNode | null>(null);
   const meterRafRef = useRef<number | null>(null);
+  // Волна записи живёт по той же схеме, что и кольцо громкости: значения в
+  // ref, высоты столбиков пишутся прямо в DOM. React-state тут означал бы
+  // ре-рендер всей страницы чата 11 раз в секунду ради 28 чисел.
+  const waveBarsRef = useRef<(HTMLSpanElement | null)[]>([]);
+  const waveLevelsRef = useRef<number[]>(new Array(WAVE_BAR_COUNT).fill(0));
+  const wavePeakRef = useRef(0);
+  const waveLastPushRef = useRef(0);
+  // Свайп влево по кнопке = отмена. Прогресс жеста (0..1) уходит в CSS-
+  // переменную на строке ввода, а не в state — он идёт под пальцем.
+  const swipeStartXRef = useRef(0);
+  const swipeCancelledRef = useRef(false);
+  // Ставится синхронно в pointerdown по микрофону: пока он поднят, blur
+  // поля ввода не считается настоящим уходом из режима "печатают".
+  // См. handleMicPointerDown.
+  const suppressComposerBlurRef = useRef(false);
 
   // Фейд-ин страницы завязан на этот флаг, а не на historyReady из
   // ChatContext напрямую: historyReady грузится фоном ещё в ChatProvider на
@@ -767,21 +797,50 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // Живой уровень громкости для пульсирующего кольца вокруг кнопки —
-  // настоящий RMS по временной области сигнала (как и амплитудная огибающая
-  // в VoiceMessage — см. её комментарий, тот же принцип: не подделка и не
-  // спектр), а не декоративная анимация. requestAnimationFrame, а не
+  // Кольцо вокруг кнопки и бегущая волна в оверлее питаются с одного
+  // analyser'а: настоящий RMS по временной области сигнала (как и амплитудная
+  // огибающая в VoiceMessage — см. её комментарий, тот же принцип: не подделка
+  // и не спектр), а не декоративная анимация. requestAnimationFrame, а не
   // setInterval — синхронизируется с отрисовкой и сам встаёт на паузу на
   // фоновой вкладке.
+
+  // AudioContext обязан родиться внутри пользовательского жеста и быть явно
+  // resume()-нут. Раньше он создавался уже ПОСЛЕ await getUserMedia — жест к
+  // тому моменту израсходован (а на первом разе там ещё и системный запрос
+  // разрешения), контекст оставался в состоянии suspended, и analyser отдавал
+  // ровную тишину: и кольцо, и волна честно показывали ноль всю запись.
+  // Поэтому вызывается синхронно из pointerdown, до всяких await.
+  const ensureAudioContext = () => {
+    if (!meterAudioCtxRef.current) {
+      const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      meterAudioCtxRef.current = new AudioContextCtor();
+    }
+    const ctx = meterAudioCtxRef.current;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    return ctx;
+  };
+
+  const applyWave = () => {
+    const levels = waveLevelsRef.current;
+    waveBarsRef.current.forEach((bar, i) => {
+      if (bar) bar.style.height = `${Math.round(levels[i] * 100)}%`;
+    });
+  };
+
+  const resetWave = () => {
+    waveLevelsRef.current = new Array(WAVE_BAR_COUNT).fill(0);
+    wavePeakRef.current = 0;
+    waveLastPushRef.current = 0;
+    applyWave();
+  };
+
   const startLevelMeter = (stream: MediaStream) => {
     try {
-      const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const audioCtx = new AudioContextCtor();
+      const audioCtx = ensureAudioContext();
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       source.connect(analyser);
-      meterAudioCtxRef.current = audioCtx;
       meterAnalyserRef.current = analyser;
 
       const data = new Uint8Array(analyser.fftSize);
@@ -799,11 +858,24 @@ export const ChatPage: React.FC = () => {
         // почти не двигалось бы, *5 выводит его в заметный диапазон.
         const level = Math.min(1, rms * 5);
         micButtonRef.current?.style.setProperty('--mic-level', level.toFixed(3));
+
+        // Волна берёт не мгновенный уровень кадра, а пик за окно WAVE_STEP_MS:
+        // так столбик — это слог, а не случайная выборка шума.
+        if (level > wavePeakRef.current) wavePeakRef.current = level;
+        const now = performance.now();
+        if (now - waveLastPushRef.current >= WAVE_STEP_MS) {
+          waveLastPushRef.current = now;
+          waveLevelsRef.current.shift();
+          waveLevelsRef.current.push(wavePeakRef.current);
+          wavePeakRef.current = 0;
+          applyWave();
+        }
+
         meterRafRef.current = requestAnimationFrame(tick);
       };
       meterRafRef.current = requestAnimationFrame(tick);
     } catch (err) {
-      // Кольцо — чисто декоративный слой поверх уже идущей записи: если
+      // Кольцо и волна — чисто визуальный слой поверх уже идущей записи: если
       // AudioContext недоступен, просто не пульсируем, саму запись это
       // ронять не должно.
       console.error('Не удалось запустить измеритель громкости', err);
@@ -823,12 +895,28 @@ export const ChatPage: React.FC = () => {
     micButtonRef.current?.style.setProperty('--mic-level', '0');
   };
 
+  // Свайп-отмена и подсказка живут на CSS-переменной строки ввода: её читают
+  // и оверлей, и сама кнопка микрофона.
+  const setCancelProgress = (value: number) => {
+    inputRowRef.current?.style.setProperty('--cancel-progress', value.toFixed(3));
+  };
+
+  // Общий хвост для всех выходов из записи. Главное тут — снять "щит" с blur
+  // поля ввода и, если фокус всё-таки уехал, привести состояние в соответствие
+  // реальности: иначе UI застрял бы в режиме "печатают" (поднятый инпут-бар,
+  // спрятанный таб-бар) уже без клавиатуры.
+  const releaseComposerFocusGuard = () => {
+    suppressComposerBlurRef.current = false;
+    if (document.activeElement !== textInputRef.current) setInputFocused(false);
+  };
+
   const startRecording = async () => {
     if (recording || sending) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       recordedChunksRef.current = [];
+      resetWave();
       startLevelMeter(stream);
 
       const mimeType = AUDIO_MIME_CANDIDATES.find((t) => MediaRecorder.isTypeSupported(t));
@@ -839,6 +927,7 @@ export const ChatPage: React.FC = () => {
       mediaRecorderRef.current = recorder;
       recorder.start();
       recordStartRef.current = Date.now();
+      recordingRef.current = true;
       setRecording(true);
       setRecordingSeconds(0);
       recordingIntervalRef.current = setInterval(() => {
@@ -848,6 +937,11 @@ export const ChatPage: React.FC = () => {
       recordTimeoutRef.current = setTimeout(() => stopRecording(), MAX_RECORD_MS);
     } catch (err) {
       console.error('Нет доступа к микрофону', err);
+      // Записи не будет — снимаем щит с blur сразу, иначе поле ввода навсегда
+      // осталось бы "в фокусе" с точки зрения раскладки.
+      stopLevelMeter();
+      setMicHeld(false);
+      releaseComposerFocusGuard();
     }
   };
 
@@ -881,7 +975,11 @@ export const ChatPage: React.FC = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     mediaRecorderRef.current = null;
+    recordingRef.current = false;
     setRecording(false);
+    setMicHeld(false);
+    setCancelProgress(0);
+    releaseComposerFocusGuard();
 
     const blob = new Blob(recordedChunksRef.current, { type: actualMimeType });
     recordedChunksRef.current = [];
@@ -925,8 +1023,12 @@ export const ChatPage: React.FC = () => {
     streamRef.current = null;
     mediaRecorderRef.current = null;
     recordedChunksRef.current = [];
+    recordingRef.current = false;
     setRecording(false);
     setRecordingSeconds(0);
+    setMicHeld(false);
+    setCancelProgress(0);
+    releaseComposerFocusGuard();
   };
 
   // Одна и та же кнопка обслуживает оба сценария записи:
@@ -939,7 +1041,31 @@ export const ChatPage: React.FC = () => {
   // расширять hit-area, отпускание/движение всё равно долетит до нас.
   const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (sending) return;
+    // Ключевой момент: гасим дефолт pointerdown, чтобы браузер не увёл фокус с
+    // поля ввода на эту кнопку. Раньше уводил — и от этого шёл весь букет:
+    // клавиатура закрывалась, blur снимал .chat-page--composing (инпут-бар
+    // ехал вниз, таб-бар возвращался, лента пересчитывала паддинги — всё
+    // одновременно), а :focus-within при этом оставался true, потому что фокус
+    // никуда не делся из строки, и вся пилюля залипала белой. setPointerCapture
+    // ниже отмену дефолта переживает, жест не ломается.
+    e.preventDefault();
+    // Подстраховка на случай, если браузер всё же снимет фокус (не все движки
+    // одинаково честны с отменой pointerdown): пока идёт запись, blur поля не
+    // считаем уходом из режима "печатают", раскладка остаётся как была.
+    suppressComposerBlurRef.current = true;
+    // AudioContext — синхронно, внутри жеста: см. ensureAudioContext.
+    try {
+      ensureAudioContext();
+    } catch (err) {
+      console.error('Не удалось подготовить аудио-контекст', err);
+    }
+
     e.currentTarget.setPointerCapture(e.pointerId);
+    swipeStartXRef.current = e.clientX;
+    swipeCancelledRef.current = false;
+    setCancelProgress(0);
+    setMicHeld(true);
+
     const wasAlreadyRecording = recording;
     pressWasSecondTapRef.current = wasAlreadyRecording;
     if (!wasAlreadyRecording) {
@@ -951,11 +1077,33 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  // Свайп влево по кнопке — отмена, как в Telegram. Тянуть отдельный слушатель
+  // на документ не нужно: pointer capture из pointerdown уже держит все
+  // движения на самой кнопке, даже когда палец уехал далеко за её границы.
+  const handleMicPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    // micHeld обязателен: pointermove прилетает и от простого наведения мышью,
+    // а в режиме "ждём второго тапа" (палец уже отпущен) курсор, проехавший
+    // над кнопкой влево, иначе молча отменил бы запись.
+    if (!micHeld || !recording || swipeCancelledRef.current) return;
+    const dx = Math.min(0, e.clientX - swipeStartXRef.current);
+    const progress = Math.min(1, -dx / CANCEL_SWIPE_PX);
+    setCancelProgress(progress);
+    if (progress >= 1) {
+      swipeCancelledRef.current = true;
+      cancelRecording();
+    }
+  };
+
   const handleMicPointerUp = () => {
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
     }
+    setMicHeld(false);
+    setCancelProgress(0);
+    // Свайп уже отменил запись — отпускание пальца после этого ничего не
+    // отправляет.
+    if (swipeCancelledRef.current) return;
     // Отправляем, если это было удержание (успело сработать heldLongEnoughRef)
     // ИЛИ это уже второй тап поверх идущей записи. Короткий первый тап —
     // просто остаёмся в режиме ожидания.
@@ -966,12 +1114,15 @@ export const ChatPage: React.FC = () => {
 
   // pointercancel (система прервала жест — например распознала скролл) —
   // намеренно ничего не отменяем и не отправляем: реальный звук мог уже
-  // записаться, юзер сам решит через крестик или повторный тап.
+  // записаться, юзер сам решит через мусорку или повторный тап. Но палец с
+  // кнопки фактически снят, так что в оверлей возвращаем мусорку.
   const handleMicPointerCancel = () => {
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
     }
+    setMicHeld(false);
+    setCancelProgress(0);
   };
 
   const formatDuration = (totalSeconds: number) => {
@@ -1947,7 +2098,7 @@ export const ChatPage: React.FC = () => {
               не отменить её после факта). Вместо этого во время записи поле
               просто визуально прикрывается непрозрачным оверлеем с таймером —
               фокус и клавиатура остаются как были. */}
-          <div className="chat-composer-slot">
+          <div className={`chat-composer-slot ${recording ? 'chat-composer-slot--recording' : ''}`}>
             <div
               key={composerKey}
               ref={textInputRef}
@@ -1961,21 +2112,57 @@ export const ChatPage: React.FC = () => {
               data-placeholder="Сообщение…"
               onInput={syncComposerState}
               onFocus={() => setInputFocused(true)}
-              onBlur={() => setInputFocused(false)}
+              // Поле специально остаётся в фокусе на время записи (иначе
+              // закроется клавиатура), но печатать в него вслепую из-под
+              // оверлея нельзя: набранный текст переключил бы кнопку записи
+              // на "отправить" — остановить запись стало бы нечем.
+              onBeforeInput={(e) => { if (recordingRef.current) e.preventDefault(); }}
+              onBlur={() => { if (!suppressComposerBlurRef.current) setInputFocused(false); }}
               onKeyDown={handleComposerKeyDown}
               onPaste={handleComposerPaste}
               enterKeyHint="send"
             />
 
-            {recording && (
-              <div className="chat-recording-overlay">
-                <button className="chat-recording-cancel" onClick={cancelRecording} title="Отменить">
-                  <Trash2 size={18} />
-                </button>
-                <span className="chat-recording-dot" />
-                <span className="chat-recording-timer">{formatDuration(recordingSeconds)}</span>
-              </div>
-            )}
+            <AnimatePresence>
+              {recording && (
+                <motion.div
+                  className="chat-recording-overlay"
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  transition={{ duration: 0.16, ease: 'easeOut' }}
+                >
+                  {/* Пока палец на кнопке — отменяют свайпом влево, мусорка не
+                      нужна и только отъедала бы место у волны. Отпустили (режим
+                      ожидания второго тапа) — свайпать нечем, показываем её. */}
+                  {!micHeld && (
+                    <button className="chat-recording-cancel" onClick={cancelRecording} title="Отменить">
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                  <span className="chat-recording-dot" />
+                  <span className="chat-recording-timer">{formatDuration(recordingSeconds)}</span>
+                  {/* Живая волна: столбики добавляются справа и убегают влево,
+                      старые срезает overflow контейнера. Высоты пишет
+                      startLevelMeter напрямую в DOM. */}
+                  <div className="chat-recording-wave" aria-hidden="true">
+                    {Array.from({ length: WAVE_BAR_COUNT }, (_, i) => (
+                      <span
+                        key={i}
+                        className="chat-recording-wave-bar"
+                        ref={(el) => { waveBarsRef.current[i] = el; }}
+                      />
+                    ))}
+                  </div>
+                  {micHeld && (
+                    <span className="chat-recording-hint">
+                      <ChevronLeft size={14} />
+                      Отмена
+                    </span>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Одна и та же кнопка живёт и как "начать голосовое", и как "тап/отпускание
@@ -2000,9 +2187,15 @@ export const ChatPage: React.FC = () => {
               className={`chat-icon-button chat-mic-button ${recording ? 'recording' : ''}`}
               disabled={sending}
               onPointerDown={handleMicPointerDown}
+              onPointerMove={handleMicPointerMove}
               onPointerUp={handleMicPointerUp}
               onPointerCancel={handleMicPointerCancel}
-              title={recording ? 'Отпустите, чтобы отправить, или тапните ещё раз' : 'Голосовое: тап — начать, ещё тап — отправить; или удержите и отпустите'}
+              // Дубль preventDefault из pointerdown — на десктопных движках,
+              // где mousedown приходит своим путём, а не как compatibility-
+              // событие. Ровно тем же способом бережёт фокус поля кнопка
+              // отправки выше.
+              onMouseDown={(e) => e.preventDefault()}
+              title={recording ? 'Отпустите, чтобы отправить, или тапните ещё раз; свайп влево — отмена' : 'Голосовое: тап — начать, ещё тап — отправить; или удержите и отпустите'}
             >
               {recording ? <Send size={18} /> : <Mic size={20} />}
             </button>
