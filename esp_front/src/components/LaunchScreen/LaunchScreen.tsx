@@ -2,6 +2,11 @@ import { motion } from 'framer-motion'
 import styles from './LaunchScreen.module.css'
 import logo from '../../assets/logo.png'
 
+// Анимации идут цепочкой, а не пачкой: логотип 0–0.35s, затем пульсация
+// ореола (её задержка живёт в CSS) и заголовок 0.35–0.75s. Раньше всё
+// стартовало внахлёст в первые 350 мс — на телефоне это давало рваный вход.
+// Вся цепочка укладывается в 0.75s, то есть внутрь минимального времени показа
+// самого экрана (1s, см. App.tsx), иначе хвост анимации срезало бы переходом.
 export const LaunchScreen = () => {
   return (
     <div className={styles.container}>
@@ -27,19 +32,10 @@ export const LaunchScreen = () => {
           className={styles.title}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.5 }}
+          transition={{ delay: 0.35, duration: 0.4 }}
         >
           Умный дом
         </motion.h1>
-
-        <motion.p
-          className={styles.subtitle}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35, duration: 0.5 }}
-        >
-          SMART LIVING
-        </motion.p>
       </div>
     </div>
   );
