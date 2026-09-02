@@ -67,14 +67,17 @@ export const CameraPage: React.FC = () => {
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [isChangingResolution, setIsChangingResolution] = useState(false)
+  const [resolutionError, setResolutionError] = useState(false)
   // 👇 Добавляем локальный стейт для разрешения
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('VGA')
 
   const [fanMode, setFanMode] = useState<0 | 1 | 2>(1)
   const [isChangingFan, setIsChangingFan] = useState(false)
+  const [fanError, setFanError] = useState(false)
 
   const [isBlinkingLight, setIsBlinkingLight] = useState(false)
   const [lightSkipped, setLightSkipped] = useState(false)
+  const [lightError, setLightError] = useState(false)
 
   // Состояние для имитации fullscreen на iOS
   const [simulatedFullscreen, setSimulatedFullscreen] = useState(false)
@@ -170,6 +173,7 @@ export const CameraPage: React.FC = () => {
   const handleFanMode = async (mode: 0 | 1 | 2) => {
     if (isChangingFan || !cameraId) return
     setIsChangingFan(true)
+    setFanError(false)
     try {
       await apiClient.setCameraFan(cameraId, mode)
       setFanMode(mode)
@@ -179,6 +183,8 @@ export const CameraPage: React.FC = () => {
       }
     } catch (e) {
       console.error('Failed to set fan mode:', e)
+      setFanError(true)
+      setTimeout(() => setFanError(false), 3000)
     } finally {
       setIsChangingFan(false)
     }
@@ -188,6 +194,7 @@ export const CameraPage: React.FC = () => {
     if (isBlinkingLight) return
     setIsBlinkingLight(true)
     setLightSkipped(false)
+    setLightError(false)
     try {
       const original = await apiClient.getSettings()
 
@@ -213,6 +220,8 @@ export const CameraPage: React.FC = () => {
       await apiClient.updateSettings(original)
     } catch (e) {
       console.error('Failed to blink light:', e)
+      setLightError(true)
+      setTimeout(() => setLightError(false), 3000)
     } finally {
       setIsBlinkingLight(false)
     }
@@ -222,6 +231,7 @@ export const CameraPage: React.FC = () => {
     if (isChangingResolution || !cameraId) return
     
     setIsChangingResolution(true)
+    setResolutionError(false)
     const previousResolution = selectedResolution
     setSelectedResolution(resolution)
     
@@ -254,6 +264,8 @@ export const CameraPage: React.FC = () => {
       console.error('Failed to change resolution:', e)
       setSelectedResolution(previousResolution)
       setIsChangingResolution(false)
+      setResolutionError(true)
+      setTimeout(() => setResolutionError(false), 3000)
     }
   }
 
@@ -421,7 +433,7 @@ export const CameraPage: React.FC = () => {
               whileTap={{ scale: 0.98 }}
             >
               <Lightbulb size={20} />
-              {isBlinkingLight ? 'Включаю...' : 'Посветить'}
+              {isBlinkingLight ? 'Включаю...' : 'Подсветить'}
             </motion.button>
 
             <AnimatePresence>
@@ -447,6 +459,18 @@ export const CameraPage: React.FC = () => {
                   exit={{ opacity: 0, y: -10 }}
                 >
                   <span>Свет выключен вручную — не трогаю</span>
+                </motion.div>
+              )}
+
+              {lightError && (
+                <motion.div
+                  key="light-error"
+                  className="changing-indicator error"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <span>Не удалось подсветить — попробуйте ещё раз</span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -535,6 +559,18 @@ export const CameraPage: React.FC = () => {
                     <span>Переключение вентилятора...</span>
                   </motion.div>
                 )}
+
+                {fanError && (
+                  <motion.div
+                    key="fan-error"
+                    className="changing-indicator error"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <span>Не удалось переключить вентилятор — попробуйте ещё раз</span>
+                  </motion.div>
+                )}
               </AnimatePresence>
             </div>
 
@@ -549,6 +585,18 @@ export const CameraPage: React.FC = () => {
                 >
                   <div className="spinner-small" />
                   <span>Смена разрешения...</span>
+                </motion.div>
+              )}
+
+              {resolutionError && (
+                <motion.div
+                  key="resolution-error"
+                  className="changing-indicator error"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <span>Не удалось сменить разрешение — попробуйте ещё раз</span>
                 </motion.div>
               )}
             </AnimatePresence>
