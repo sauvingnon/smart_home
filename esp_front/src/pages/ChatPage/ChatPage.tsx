@@ -170,6 +170,10 @@ export const ChatPage: React.FC = () => {
   const imgX = useMotionValue(0);
   const imgY = useMotionValue(0);
   const pinchStartRef = useRef<{ dist: number; scale: number } | null>(null);
+  // Момент окончания последнего щипка (в т.ч. быстрого анзума) — пока недавний,
+  // свайп вниз не закрывает лайтбокс, чтобы резкий анзум не путался с жестом
+  // закрытия (см. onDragEnd на <motion.img> ниже).
+  const pinchEndedAtRef = useRef(0);
   const lastTapRef = useRef(0);
   const [sendError, setSendError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
@@ -1072,6 +1076,7 @@ export const ChatPage: React.FC = () => {
 
   const handleImageTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length < 2) {
+      if (pinchStartRef.current) pinchEndedAtRef.current = Date.now();
       pinchStartRef.current = null;
       if (imgScale <= ZOOM_SNAP_BACK) resetImageZoom();
     }
@@ -1873,6 +1878,11 @@ export const ChatPage: React.FC = () => {
                   // При зуме drag только панорамирует фото, закрытие свайпом
                   // вниз работает только пока оно в исходном размере.
                   if (imgScale > 1) return;
+                  // Резкий анзум (быстрый пинч обратно к 1x) на тач-устройствах
+                  // рождает фантомный drag-жест той же рукой — без этой паузы
+                  // он тут же трактовался бы как свайп-закрытие. Закрыть можно
+                  // только отдельным, уже не пинчевым свайпом одним пальцем.
+                  if (pinchStartRef.current || Date.now() - pinchEndedAtRef.current < 400) return;
                   if (Math.abs(info.offset.y) > 100 || Math.abs(info.velocity.y) > 500) setLightbox(null);
                 }}
               />
