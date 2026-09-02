@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Умный дом — нет связи</title>
+  <style>
+    :root {
+      --bg-from: #e0f2fe;
+      --bg-to: #f0f9ff;
+      --card-bg: #ffffff;
+      --text-primary: #0f172a;
+      --text-secondary: #64748b;
+      --icon-color: #3b82f6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-from: #0f172a;
+        --bg-to: #1e1b4b;
+        --card-bg: #1e293b;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --icon-color: #60a5fa;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      min-height: 100dvh;
+      background: linear-gradient(135deg, var(--bg-from), var(--bg-to));
+      font: 400 15px/1.5 -apple-system, system-ui, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      max-width: 28rem;
+      width: 100%;
+      background: var(--card-bg);
+      border-radius: 1.75rem;
+      padding: 2.5rem 2rem;
+      text-align: center;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, .1), 0 10px 10px -5px rgba(0, 0, 0, .04);
+    }
+    .icon {
+      width: 9rem;
+      height: 9rem;
+      margin: 0 auto 1.5rem;
+      color: var(--icon-color);
+      animation: bob 3s ease-in-out infinite;
+    }
+    @keyframes bob {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-6px) rotate(-2deg); }
+    }
+    .zzz {
+      font-weight: 700;
+      fill: var(--icon-color);
+      opacity: 0;
+    }
+    .zzz.z1 { animation: floatz 3s ease-in infinite; }
+    .zzz.z2 { animation: floatz 3s ease-in infinite .6s; }
+    .zzz.z3 { animation: floatz 3s ease-in infinite 1.2s; }
+    @keyframes floatz {
+      0% { opacity: 0; transform: translate(0, 0) scale(.6); }
+      15% { opacity: .9; }
+      80% { opacity: 0; }
+      100% { opacity: 0; transform: translate(6px, -14px) scale(1); }
+    }
+    h1 {
+      margin: 0 0 .75rem;
+      font-size: 1.625rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    p {
+      margin: 0;
+      font-size: 1.0625rem;
+      color: var(--text-secondary);
+    }
+    button {
+      margin-top: 2rem;
+      width: 100%;
+      padding: 1rem;
+      border: none;
+      border-radius: .75rem;
+      font-size: 1.0625rem;
+      font-weight: 500;
+      color: #fff;
+      cursor: pointer;
+      background: linear-gradient(90deg, #2563eb, #3b82f6);
+    }
+    button:active {
+      opacity: .85;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 28 32 8l24 20" />
+      <path d="M13 25v27a2 2 0 0 0 2 2h34a2 2 0 0 0 2-2V25" />
+      <path d="M40 16v-6h7v10" />
+      <path d="M25 34c1.5 1.5 3.5 1.5 5 0" />
+      <path d="M34 34c1.5 1.5 3.5 1.5 5 0" />
+      <path d="M26 46c3-2 9-2 12 0" />
+      <text x="44" y="15" class="zzz z1" font-size="9" stroke="none">z</text>
+      <text x="48" y="10" class="zzz z2" font-size="7" stroke="none">z</text>
+      <text x="51" y="6" class="zzz z3" font-size="5" stroke="none">z</text>
+    </svg>
+    <h1>Ой, умный дом прилёг отдохнуть 😴</h1>
+    <p id="status-text">Даже самым умным иногда нужен отдых — скоро проснётся сам, и всё снова заработает.</p>
+    <button onclick="location.reload()">Проверить ещё раз</button>
+  </div>
+
+  <script>
+    (function () {
+      var RETRY_INTERVAL = 5000;
+
+      function checkAndReload() {
+        fetch('/', { cache: 'no-store', mode: 'same-origin' })
+          .then(function (res) {
+            if (res && res.ok) location.reload();
+          })
+          .catch(function () {
+            // сервер всё ещё недоступен — пробуем на следующем тике
+          });
+      }
+
+      setInterval(checkAndReload, RETRY_INTERVAL);
+      window.addEventListener('online', checkAndReload);
+    })();
+  </script>
+</body>
+</html>

@@ -1,12 +1,37 @@
-// Минимальный service worker — только для Web Push уведомлений чата.
-// Никакого офлайн-кэширования/precache тут нет, это не нужно для этой задачи.
+// Service worker для Web Push уведомлений чата + офлайн-заглушка на случай,
+// когда сервер целиком недоступен (упал бэкенд, значит не отдастся и сам
+// фронт — с точки зрения fetch() это неотличимо от отсутствия интернета).
 
-self.addEventListener('install', () => {
+const CACHE_NAME = 'offline-fallback-v1';
+const OFFLINE_URL = '/offline.html';
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.add(OFFLINE_URL))
+      .catch(() => {})
+  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(
+        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+      ))
+      .then(() => self.clients.claim())
+  );
+});
+
+// Ловим только навигацию (переход/перезагрузку страницы), не трогаем
+// API-запросы и WS — те как обрабатывались каждой страницей сами, так и
+// продолжают.
+self.addEventListener('fetch', (event) => {
+  if (event.request.mode !== 'navigate') return;
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(OFFLINE_URL))
+  );
 });
 
 self.addEventListener('push', (event) => {
