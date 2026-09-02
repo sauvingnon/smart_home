@@ -14,6 +14,11 @@ const formatDuration = (seconds: number) => {
 interface VoiceMessageProps {
   src: string;
   mine: boolean;
+  // Тап по голосовому принадлежит плееру, а не меню сообщения: клик наружу к
+  // пузырю не выпускаем (иначе на каждое play открывалось бы меню), но долгое
+  // нажатие — это по-прежнему меню, и завершающий его click надо проглотить,
+  // чтобы звук не стартовал вместе с меню.
+  suppressClick?: (e: React.MouseEvent) => boolean;
 }
 
 // Как в Telegram/WhatsApp — играет только одно голосовое одновременно.
@@ -25,7 +30,7 @@ let activePlayer: { audio: HTMLAudioElement; stop: () => void } | null = null;
 // анализ спектра — просто пик громкости по срезам семплов. Декодируется через
 // Web Audio API один раз при монтировании, много дешевле, чем кажется: минутный
 // голосовой — это доли МБ, decodeAudioData отрабатывает за миллисекунды.
-export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
+export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine, suppressClick }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [peaks, setPeaks] = useState<number[] | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -199,7 +204,21 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
     }
   };
 
+  // Клик по любой части голосового не должен всплывать до пузыря — там он
+  // открыл бы меню сообщения. Меню у голосового живёт только на удержании
+  // (pointer-события всплывают своим ходом, их мы не трогаем).
+  const claimClick = (e: React.MouseEvent): boolean => {
+    e.stopPropagation();
+    return !suppressClick?.(e);
+  };
+
+  const handleSurfaceClick = (e: React.MouseEvent) => {
+    if (!claimClick(e)) return;
+    void togglePlay();
+  };
+
   const seekTo = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!claimClick(e)) return;
     const audio = audioRef.current;
     if (!audio || !audio.duration) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -212,7 +231,10 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
   const activeBars = Math.round(progress * bars.length);
 
   return (
-    <div className={`voice-message ${mine ? 'mine' : ''} ${!objectUrl ? 'voice-message--loading' : ''}`}>
+    <div
+      className={`voice-message ${mine ? 'mine' : ''} ${!objectUrl ? 'voice-message--loading' : ''}`}
+      onClick={handleSurfaceClick}
+    >
       {/* auto, не metadata — байты уже полностью в памяти (тот же fetch, что
           строил waveform выше), так что "auto" ничего лишнего не качает, а
           просто даёт WebKit задекодировать их сразу, не откладывая на первый
@@ -220,7 +242,7 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine }) => {
       {objectUrl && <audio ref={audioRef} src={objectUrl} preload="auto" />}
       <button
         className="voice-play-button"
-        onClick={togglePlay}
+        onClick={handleSurfaceClick}
         disabled={!objectUrl}
         title={!objectUrl ? 'Загрузка…' : isPlaying ? 'Пауза' : 'Слушать'}
       >

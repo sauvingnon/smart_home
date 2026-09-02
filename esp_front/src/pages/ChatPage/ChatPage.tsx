@@ -1580,6 +1580,14 @@ export const ChatPage: React.FC = () => {
   const isMediaMessage = (message: ChatMessage): boolean => !!message.media_key
     && (message.type === 'image' || message.type === 'video');
 
+  // У голосового тап принадлежит плееру (play/pause, перемотка по волне) и
+  // ничего больше не делает — меню такого сообщения открывается только
+  // удержанием. Сам VoiceMessage клики наружу не выпускает, но пузырь шире
+  // плеера (автор сверху, время снизу, паддинги) — по этим полям тап тоже не
+  // должен открывать меню, иначе жест был бы "то меню, то нет".
+  const isVoiceMessage = (message: ChatMessage): boolean => !!message.media_key
+    && message.type === 'audio';
+
   /** Пропорции рамки под фото. Зажимаем: скриншот телефона (9:19.5) иначе
       растянул бы пузырь на пол-экрана, а панорама выродилась бы в полоску.
       Такие кадры рамка чуть подрезает (object-fit: cover) — как в Telegram;
@@ -1655,7 +1663,7 @@ export const ChatPage: React.FC = () => {
       );
     }
     if (message.type === 'audio') {
-      return <VoiceMessage src={url} mine={isMine} />;
+      return <VoiceMessage src={url} mine={isMine} suppressClick={suppressClickIfLongPress} />;
     }
     if (message.type === 'video') {
       // Видео с камеры не копируется при пересылке в чат — если камера уже
@@ -1981,6 +1989,7 @@ export const ChatPage: React.FC = () => {
                 // ложится сверху кадра тем же тесным пузырём. У голосовых
                 // остаётся обычная раскладка со временем снизу.
                 const isMediaBubble = isMediaMessage(message);
+                const isVoiceBubble = isVoiceMessage(message);
                 // См. exitingSeqs выше: сообщение уже удалено из messages,
                 // но ещё доигрывает collapse — height/margin едут в 0 своим
                 // ходом, вместо мгновенного исчезновения через exit
@@ -2016,7 +2025,7 @@ export const ChatPage: React.FC = () => {
                         onPointerMove={cancelLongPressIfMoved}
                         onPointerUp={cancelLongPress}
                         onPointerCancel={cancelLongPress}
-                        onClick={(e) => { if (!isMediaBubble && !suppressClickIfLongPress(e)) setActionTarget(message); }}
+                        onClick={(e) => { if (!isMediaBubble && !isVoiceBubble && !suppressClickIfLongPress(e)) setActionTarget(message); }}
                         onContextMenu={(e) => { e.preventDefault(); setActionTarget(message); }}
                       >
                         {renderBubbleContent(message, isMine, isMediaBubble, readers)}
