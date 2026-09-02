@@ -2,7 +2,7 @@
 // когда сервер целиком недоступен (упал бэкенд, значит не отдастся и сам
 // фронт — с точки зрения fetch() это неотличимо от отсутствия интернета).
 
-const CACHE_NAME = 'offline-fallback-v2';
+const CACHE_NAME = 'offline-fallback-v3';
 const OFFLINE_URL = '/offline.html';
 
 // Safari (и установленная PWA на iOS) отказывается принимать от service worker
@@ -26,6 +26,10 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then(async (cache) => {
         const response = await fetch(OFFLINE_URL, { cache: 'reload' });
+        // Ставить в кэш что попало нельзя: если обновление SW совпало с
+        // недоступным бэкендом, сюда доедет страница ошибки от nginx — и
+        // заглушкой на все будущие падения станет она.
+        if (!response.ok) return;
         await cache.put(OFFLINE_URL, await withoutRedirect(response));
       })
       .catch(() => {})
@@ -43,16 +47,43 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Недоступность сервера выглядит для fetch() двумя совершенно разными
+// способами, и заглушку надо показать в обоих.
+//
+// 1. Ответить некому: нет сети, машина выключена, nginx не поднят. fetch
+//    отклоняется исключением — это ветка catch.
+// 2. Отвечает nginx, но не отвечает контейнер за ним (упал, пересобирается).
+//    Тогда fetch штатно резолвится страницей 502/503/504, ошибки для него
+//    тут нет никакой, и без явной проверки статуса пользователь получает в
+//    окно «502 Bad Gateway» от nginx вместо нашей заглушки.
+//
+// Разбираем именно 5xx: 404 и прочие 4xx — осмысленный ответ живого сервера,
+// его подменять нечем и незачем.
+async function navigate(request) {
+  let response;
+  try {
+    response = await fetch(request);
+  } catch (error) {
+    const fallback = await caches.match(OFFLINE_URL);
+    // Заглушки может не быть — например, SW встал первый раз уже при мёртвом
+    // сервере. Тогда отдаём браузеру его собственную ошибку, как без SW.
+    if (!fallback) throw error;
+    return fallback;
+  }
+
+  if (response.status >= 500) {
+    const fallback = await caches.match(OFFLINE_URL);
+    if (fallback) return fallback;
+  }
+  return withoutRedirect(response);
+}
+
 // Ловим только навигацию (переход/перезагрузку страницы), не трогаем
 // API-запросы и WS — те как обрабатывались каждой страницей сами, так и
 // продолжают.
 self.addEventListener('fetch', (event) => {
   if (event.request.mode !== 'navigate') return;
-  event.respondWith(
-    fetch(event.request)
-      .then(withoutRedirect)
-      .catch(() => caches.match(OFFLINE_URL))
-  );
+  event.respondWith(navigate(event.request));
 });
 
 self.addEventListener('push', (event) => {
