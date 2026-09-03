@@ -2609,11 +2609,29 @@ export const ChatPage: React.FC = () => {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+              /* Свайп вниз закрывает — как в любом iOS-шите. Вверх не тянется
+                 (dragConstraints.top = 0), иначе шит отлипал бы от нижнего края.
+                 Порог по расстоянию ИЛИ по скорости: короткий резкий флик тоже
+                 должен закрывать, а медленное подтягивание на 40px — нет. */
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0, bottom: 0.4 }}
+              onDragEnd={(_, info) => {
+                if (info.offset.y > 90 || info.velocity.y > 600) setShowParticipants(false);
+              }}
             >
               <div className="chat-sheet-grabber" />
               <div className="chat-sheet-title">
                 <Users size={18} />
                 <span>Участники</span>
+                <button
+                  className="chat-sheet-close"
+                  onClick={() => setShowParticipants(false)}
+                  title="Закрыть"
+                  aria-label="Закрыть"
+                >
+                  <X size={18} />
+                </button>
               </div>
 
               {participants.length === 0 ? (

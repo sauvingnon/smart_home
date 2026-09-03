@@ -83,7 +83,9 @@
   z-index: 10;
   max-width: 40rem;
   margin: 0 auto;
-  padding: calc(1.5rem + env(safe-area-inset-top)) 1.5rem 80px 1.5rem;
+  /* Снизу с запасом: нав-бар занимает ~84px плюс жестовую полосу, а последним
+     элементом идёт «Выйти» — под баром он читался как обрезанный. */
+  padding: calc(1.5rem + env(safe-area-inset-top)) 1.5rem calc(124px + env(safe-area-inset-bottom, 0px)) 1.5rem;
 }
 
 .glass-card {
