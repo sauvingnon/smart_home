@@ -285,9 +285,31 @@
   color: var(--accent-blue);
 }
 
-.chat-pinned-text {
+/* Колонка "автор + текст" внутри таблетки. Растягивается и режется она, а не
+   сам текст: иконка и крестик по краям остаются на месте. */
+.chat-pinned-body {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+
+/* Как .chat-reply-quote-author — тот же приём "чьё это сообщение". Акцентным
+   цветом, чтобы имя читалось меткой, а не началом самого текста. */
+.chat-pinned-author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-pinned-text {
+  font-size: 13px;
+  opacity: 0.8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

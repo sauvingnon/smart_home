@@ -1883,7 +1883,15 @@ export const ChatPage: React.FC = () => {
         {pinnedMessage && (
           <div className="chat-pinned-banner" onClick={() => scrollToMessage(pinnedMessage.seq)}>
             <Pin size={18} />
-            <span className="chat-pinned-text">{previewForMessage(pinnedMessage)}</span>
+            {/* Автор — отдельной строкой над текстом, как в цитате ответа:
+                по одному обрывку текста не понять, кто закрепил, а из ленты
+                пин уже уехал. */}
+            <div className="chat-pinned-body">
+              {pinnedMessage.username && (
+                <span className="chat-pinned-author">{pinnedMessage.username}</span>
+              )}
+              <span className="chat-pinned-text">{previewForMessage(pinnedMessage)}</span>
+            </div>
             <button onClick={(e) => { e.stopPropagation(); unpinMessage(); }} title="Открепить">
               <X size={20} />
             </button>
