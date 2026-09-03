@@ -20,11 +20,17 @@ class VideoItem(BaseModel):
     direction_low_confidence: Optional[bool] = None  # True = вердикт вблизи порога, не доверять слепо
 
 
-class VideoNotifyPrefs(BaseModel):
-    """Какие видео-события юзер хочет получать пушем. Один и тот же push-канал,
-    что и у чата (см. /chat/push/*) — тут только предпочтения по темам."""
+class NotifyPrefs(BaseModel):
+    """По каким темам юзер хочет пуш. Push-подписка на устройство одна общая
+    (см. /chat/push/*) — она и есть мастер-выключатель; здесь только темы под
+    ним. Раньше звалось VideoNotifyPrefs, но чат сюда тоже приехал: в UI это
+    один экран, и разделение на "видео-темы" и "чат-темы" было выдумкой.
+
+    chat_messages по умолчанию True: у тех, кто подписался до появления поля,
+    в Redis его нет, и опт-аут по умолчанию молча выключил бы им чат."""
     visit_people: Dict[str, bool] = {}  # label -> уведомлять о его посещении
     board_offline: bool = False  # центральная плата (камера) недоступна
+    chat_messages: bool = True  # новые сообщения в чате
 
 
 class NotifyRecognizedIn(BaseModel):

@@ -432,6 +432,14 @@ class ChatService:
             uid = user["user_id"]
             if uid == message["user_id"] or uid in connected:
                 continue
+            # Тема "сообщения чата" выключается отдельно от самой подписки:
+            # подписка на устройство одна на все уведомления, и снимать её
+            # целиком ради тишины в чате значило бы заодно убить приходы людей
+            # и алерт о плате. Дефолт True — у подписавшихся до появления поля
+            # его в Redis нет (см. NotifyPrefs).
+            prefs = await self.cache.get_video_notify_prefs(uid)
+            if not (prefs or {}).get("chat_messages", True):
+                continue
             subscription = await self.cache.get_push_subscription(uid)
             if not subscription:
                 continue
