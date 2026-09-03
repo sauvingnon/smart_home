@@ -54,6 +54,23 @@
   cursor: default;
 }
 
+/* Файл почищен ретеншеном — та же ширина/высота строки, что у обычного
+   плеера (иначе лента под пузырём прыгнет), просто приглушённая и без волны:
+   нечего слушать, незачем притворяться рабочим плеером. */
+.voice-message--gone {
+  color: var(--text-tertiary, currentColor);
+  opacity: 0.65;
+  cursor: default;
+}
+
+.voice-message--gone svg {
+  flex: 0 0 auto;
+}
+
+.voice-gone-text {
+  font-size: 14px;
+}
+
 .voice-waveform {
   flex: 1 1 auto;
   min-width: 0;

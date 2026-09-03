@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, Loader2 } from 'lucide-react';
+import { Play, Pause, Loader2, MicOff } from 'lucide-react';
 import './VoiceMessage.css';
 
 const BAR_COUNT = 20;
@@ -38,6 +38,12 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine, suppressC
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  // Файл почищен ретеншеном (или удалён вручную) — 404 на сам src, а не сбой
+  // декодирования waveform. Отдельно от него: decodeAudioData иногда падает
+  // на живом файле по формату, который Web Audio не разбирает, а обычный
+  // <audio> — играет; это не "недоступно", это уже обрабатывает catch ниже
+  // молчаливым фолбэком на src напрямую.
+  const [gone, setGone] = useState(false);
 
   // Раньше файл качался дважды: один раз тут ради waveform, второй раз
   // браузером через <audio src>, когда жмут play — и на время второй
@@ -52,6 +58,14 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine, suppressC
     (async () => {
       try {
         const response = await fetch(src);
+        // fetch не бросает на 404/403 сам по себе — тело ответа (страница
+        // ошибки) улетело бы дальше в decodeAudioData и там же упало бы с
+        // тем же результатом, что и настоящий сбой декодирования. Проверяем
+        // явно, чтобы не перепутать "файла нет" с "формат не разобрать".
+        if (!response.ok) {
+          if (!cancelled) setGone(true);
+          return;
+        }
         const contentType = response.headers.get('content-type') || 'audio/webm';
         const arrayBuffer = await response.arrayBuffer();
 
@@ -229,6 +243,15 @@ export const VoiceMessage: React.FC<VoiceMessageProps> = ({ src, mine, suppressC
 
   const bars = peaks ?? Array(BAR_COUNT).fill(0.15);
   const activeBars = Math.round(progress * bars.length);
+
+  if (gone) {
+    return (
+      <div className={`voice-message voice-message--gone ${mine ? 'mine' : ''}`}>
+        <MicOff size={20} />
+        <span className="voice-gone-text">Голосовое недоступно</span>
+      </div>
+    );
+  }
 
   return (
     <div

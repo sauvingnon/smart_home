@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Users, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, ImageOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Users, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -587,8 +587,15 @@ export const ChatPage: React.FC = () => {
     if (!lightbox || lightbox.type !== 'image' || !lightbox.thumbSrc) return;
     const loader = new Image();
     loader.onload = () => setFullImageReady(true);
+    // Без этого оригинал, почищенный ретеншеном, просто никогда не грузился
+    // бы — лайтбокс молча висел на превью навсегда, будто оно всё ещё
+    // догружается. Как и у видео: явно фиксируем, что медиа нет, и закрываем.
+    loader.onerror = () => {
+      if (lightbox.seq !== undefined) setMediaErrors((prev) => new Set(prev).add(lightbox.seq!));
+      setLightbox(null);
+    };
     loader.src = lightbox.src;
-    return () => { loader.onload = null; };
+    return () => { loader.onload = null; loader.onerror = null; };
   }, [lightbox]);
 
   // Как в Telegram/WhatsApp — начали скроллить ленту, значит уже не печатают:
@@ -1649,6 +1656,17 @@ export const ChatPage: React.FC = () => {
       // В рамке сразу рисуется крошка-заглушка из самого сообщения; поверх
       // проявляется превью (opacity правим прямо на узле, без state:
       // перерисовывать всю ленту ради одной загрузившейся картинки незачем).
+      // Как у видео: файл почищен ретеншеном (или thumbnail_key указывает на
+      // уже удалённое медиа) — явное "недоступно" вместо вечного скелетона,
+      // который выглядел бы как зависшая загрузка.
+      if (mediaErrors.has(message.seq)) {
+        return (
+          <div className="chat-media-error">
+            <ImageOff size={22} />
+            <span>Фото недоступно</span>
+          </div>
+        );
+      }
       const feedUrl = message.thumbnail_key ? apiClient.getChatMediaSrc(message.thumbnail_key) : url;
       const aspect = mediaAspect(message);
       return (
@@ -1663,6 +1681,7 @@ export const ChatPage: React.FC = () => {
             setLightbox({
               src: url,
               type: 'image',
+              seq: message.seq,
               mediaKey: message.media_key,
               thumbSrc: message.thumbnail_key ? feedUrl : undefined,
             });
@@ -1677,6 +1696,7 @@ export const ChatPage: React.FC = () => {
             className="chat-media-image"
             loading="lazy"
             onLoad={revealMedia}
+            onError={() => setMediaErrors((prev) => new Set(prev).add(message.seq))}
           />
         </div>
       );
@@ -1690,7 +1710,7 @@ export const ChatPage: React.FC = () => {
       // явно, а не битый плеер.
       if (mediaErrors.has(message.seq)) {
         return (
-          <div className="chat-video-error">
+          <div className="chat-media-error">
             <VideoOff size={22} />
             <span>Видео недоступно</span>
           </div>
@@ -2349,6 +2369,15 @@ export const ChatPage: React.FC = () => {
                 onTouchStart={handleImageTouchStart}
                 onTouchMove={handleImageTouchMove}
                 onTouchEnd={handleImageTouchEnd}
+                // Срабатывает только когда thumbSrc нет вообще (элемент сразу
+                // грузит src напрямую) — иначе за оригинал отвечает фоновый
+                // прелоадер выше, у него свой onerror.
+                onError={() => {
+                  if (!lightbox.thumbSrc && lightbox.seq !== undefined) {
+                    setMediaErrors((prev) => new Set(prev).add(lightbox.seq!));
+                    setLightbox(null);
+                  }
+                }}
                 style={{ x: imgX, y: imgY, scale: imgScale }}
                 drag={imgScale > 1 ? true : 'y'}
                 dragConstraints={imgScale > 1

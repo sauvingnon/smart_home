@@ -935,7 +935,7 @@
 /* Собственные отступы медиа внутри такого пузыря лишние — рамку задаёт он сам. */
 .chat-media-frame .chat-media-thumb,
 .chat-media-frame .chat-video-thumb,
-.chat-media-frame .chat-video-error {
+.chat-media-frame .chat-media-error {
   margin: 0;
 }
 
@@ -1344,7 +1344,7 @@
   transition: opacity 0.28s ease;
 }
 
-.chat-video-error {
+.chat-media-error {
   display: flex;
   flex-direction: column;
   align-items: center;
