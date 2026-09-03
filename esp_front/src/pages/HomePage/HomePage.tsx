@@ -265,27 +265,6 @@ export default function HomePage() {
     return () => cancelAnimationFrame(id)
   }, [selectedDowntimeDevice, selectedDowntimeDate])
 
-  const fetchData = async () => {
-    try {
-      setLoading(true)
-      const res = await apiClient.fetch('/esp_service/telemetry')
-      setData(res)
-      homeCache.data = res
-      persistHomeCache()
-      setDataStale(false)
-    } catch { setDataStale(true) } finally { setLoading(false) }
-  }
-
-  const fetchWeather = async () => {
-    try {
-      const res = await apiClient.fetch('/esp_service/weather');
-      setWeather(res);
-      homeCache.weather = res
-      persistHomeCache()
-      setDataStale(false)
-    } catch { setDataStale(true) }
-  }
-
   const activateSilentMode = async () => {
     if (silentLoading) return
     setSilentLoading(true)
@@ -344,6 +323,21 @@ export default function HomePage() {
     fetchBootstrap()
   }, [isAdmin])
 
+  // Кнопки «обновить» в шапке больше нет: PWA живёт короткими заходами, и
+  // свежесть нужна именно в момент открытия, а не по отдельному тапу. Интервал
+  // не заводим — телеметрия меняется медленно, а держать поллинг ради минуты
+  // просмотра значит долбить сервер вхолостую всё остальное время.
+  const bootstrapRef = useRef(fetchBootstrap)
+  bootstrapRef.current = fetchBootstrap
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') bootstrapRef.current()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+
   const animatedTemp = useAnimatedNumber(data?.telemetry?.temperature, 1)
   const animatedHumidity = useAnimatedNumber(data?.telemetry?.humidity, 0)
   const animatedWeatherTemp = useAnimatedNumber(weather?.current_temp, 0)
@@ -352,7 +346,7 @@ export default function HomePage() {
   // всех). dataStale стоит первым: если сервер вообще недоступен, это самая
   // фундаментальная проблема — остальные баннеры опираются на данные, которым
   // в этот момент нельзя доверять.
-  type AlertItem = { key: string; icon: JSX.Element; title: string; text: string; style?: Record<string, string> }
+  type AlertItem = { key: string; icon: JSX.Element; title: string; text: string; style?: Record<string, string>; retry?: boolean }
   const activeAlerts: AlertItem[] = []
   if (dataStale) {
     activeAlerts.push({
@@ -361,6 +355,10 @@ export default function HomePage() {
       title: 'Нет связи с сервером',
       text: 'Не удалось обновить данные — показаны последние сохранённые.',
       style: { background: 'rgba(251,191,36,0.15)', borderColor: '#fbbf24' },
+      // Единственное место, где ручное обновление осмысленно: связь порвалась
+      // и ждать следующего открытия приложения незачем. Общая кнопка в шапке
+      // была тем же самым, но горела всегда.
+      retry: true,
     })
   }
   if (data?.central_board_status !== 'online' && !loading) {
@@ -476,18 +474,6 @@ export default function HomePage() {
                   </motion.span>
                 )}
               </AnimatePresence>
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              animate={{ rotate: loading ? 360 : 0 }}
-              transition={{ repeat: loading ? Infinity : 0, duration: 0.8, ease: 'linear' }}
-              onClick={() => { fetchData(); fetchWeather(); }}
-              className="theme-button"
-              title="Обновить данные"
-              disabled={loading}
-            >
-              <RefreshCw size={20} />
             </motion.button>
           </div>
         </header>
@@ -920,6 +906,17 @@ export default function HomePage() {
               <p className="alert-title">{alert.title}</p>
               <p className="alert-text">{alert.text}</p>
             </div>
+            {alert.retry && (
+              <button
+                className="alert-retry"
+                onClick={fetchBootstrap}
+                disabled={loading}
+                title="Попробовать ещё раз"
+              >
+                <RefreshCw size={16} className={loading ? 'spin' : ''} />
+                <span>Повторить</span>
+              </button>
+            )}
           </motion.div>
         ))}
       </AnimatePresence>

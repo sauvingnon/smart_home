@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
-  Settings, Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw, LogOut
+  SlidersHorizontal, Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw,
+  Camera as CameraIcon, Wifi, WifiOff, Activity, Users, Check
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './SettingsPage.css'
@@ -10,6 +12,21 @@ import { useTheme } from '../../context/ThemeContext'
 import { useAuth } from '../../context/AuthContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
 import { useOnTabReselect } from '../../context/NavBarContext'
+
+// Камера в доме одна; id живёт константой, а не в роуте, с тех пор как
+// отдельная страница /camera переехала сюда (сервис) и в Видео (живой поток).
+const CAMERA_ID = 'cam1'
+const CAMERA_STATUS_INTERVAL = 5000
+
+type CameraStatus = {
+  mode: 'never_connected' | 'connected' | 'streaming' | 'recording' | 'offline'
+  viewers: number
+  metrics: {
+    fps: number
+    temperature: number
+    fan_mode: number
+  }
+}
 
 type Settings = {
   displayMode: number
@@ -223,7 +240,8 @@ export default function SettingsPage() {
   usePageVisit('settings')
   useOnTabReselect(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
   const { theme } = useTheme()
-  const { logout } = useAuth()
+  const { displayName, username } = useAuth()
+  const navigate = useNavigate()
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -232,9 +250,19 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<{ greenhouse: string; toilet: string } | null>(null)
-  const [loggingOut, setLoggingOut] = useState(false)
-  const [logoutError, setLogoutError] = useState<string | null>(null)
   const tilesRef = useRef<HTMLDivElement>(null)
+
+  // Снимок последнего сохранённого состояния. Кнопка "Сохранить" раньше висела
+  // в шапке всегда — горела даже когда ничего не трогали, и уплывала со
+  // скроллом на длинных вкладках. Теперь она внизу и появляется только когда
+  // есть что сохранять; сравниваем со снимком. Settings плоский, JSON хватает.
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
+  const dirty = settings !== null && savedSnapshot !== null && JSON.stringify(settings) !== savedSnapshot
+
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null)
+  const [fanMode, setFanMode] = useState<0 | 1 | 2>(1)
+  const [isChangingFan, setIsChangingFan] = useState(false)
+  const [fanError, setFanError] = useState(false)
 
   // Панели вкладок сильно разной высоты («Расписание» — пять секций, «Вентилятор»
   // — две). Прокрутившись вниз по длинной и переключившись на короткую, юзер
@@ -254,6 +282,7 @@ export default function SettingsPage() {
         const data = await apiClient.fetch('/esp_service/settings')
         if (mounted) {
           setSettings(data)
+          setSavedSnapshot(JSON.stringify(data))
           setError(null)
         }
       } catch (e) {
@@ -290,30 +319,19 @@ export default function SettingsPage() {
     }
   }
 
-  // Выход ждём ответа сервера: если запрос не дошёл, cookie осталась, и показать
-  // экран логина было бы обманом — перезагрузка вернула бы юзера в аккаунт.
-  const handleLogout = async () => {
-    if (!window.confirm('Выйти из аккаунта?')) return
-    setLoggingOut(true)
-    setLogoutError(null)
-    try {
-      await logout()
-    } catch (e) {
-      console.error('Logout failed:', e)
-      setLogoutError('Не удалось выйти — нет связи с сервером.')
-    } finally {
-      setLoggingOut(false)
-    }
-  }
-
   const saveSettings = async () => {
     if (!settings) return
     setSaving(true)
+    const payload = JSON.stringify(settings)
     try {
       await apiClient.fetch('/esp_service/settings', {
         method: 'POST',
-        body: JSON.stringify(settings)
+        body: payload
       })
+      // Снимок двигаем на то, что реально ушло на сервер, а не на текущий
+      // settings: пока летел запрос, юзер мог успеть покрутить ещё что-то —
+      // эти правки обязаны остаться несохранёнными.
+      setSavedSnapshot(payload)
       setShowSuccess(true)
       setTimeout(() => setShowSuccess(false), 3000)
     } catch (e) {
@@ -324,15 +342,59 @@ export default function SettingsPage() {
     }
   }
 
+  // Статус камеры нужен только на своей вкладке — на остальных незачем долбить
+  // сервер раз в пять секунд.
+  useEffect(() => {
+    if (activeTab !== 'camera') return
+    let mounted = true
+    const fetchStatus = async () => {
+      try {
+        const status = await apiClient.getCameraStatus(CAMERA_ID)
+        if (!mounted) return
+        setCameraStatus(status)
+        const mode = status?.metrics?.fan_mode
+        if (mode === 0 || mode === 1 || mode === 2) setFanMode(mode)
+      } catch (e) {
+        console.error('Camera status failed:', e)
+      }
+    }
+    fetchStatus()
+    const interval = setInterval(fetchStatus, CAMERA_STATUS_INTERVAL)
+    return () => { mounted = false; clearInterval(interval) }
+  }, [activeTab])
+
+  // Режим вентилятора — команда железу, а не настройка: применяется сразу и в
+  // "Сохранить" внизу не участвует.
+  const handleFanMode = async (mode: 0 | 1 | 2) => {
+    if (isChangingFan || mode === fanMode) return
+    const prev = fanMode
+    setIsChangingFan(true)
+    setFanError(false)
+    setFanMode(mode)
+    try {
+      await apiClient.setCameraFan(CAMERA_ID, mode)
+    } catch (e) {
+      console.error('Fan mode failed:', e)
+      setFanMode(prev)
+      setFanError(true)
+      setTimeout(() => setFanError(false), 4000)
+    } finally {
+      setIsChangingFan(false)
+    }
+  }
+
   const tabs = [
     { id: 'schedule', label: 'Расписание', icon: Calendar },
     { id: 'relay', label: 'Реле', icon: Power },
     { id: 'display', label: 'Экран', icon: Monitor },
     { id: 'fan', label: 'Вентилятор', icon: Fan },
+    { id: 'camera', label: 'Камера', icon: CameraIcon },
   ]
 
+  const avatarInitial = (displayName || username || '?').trim().charAt(0).toUpperCase()
+
   return (
-    <div className={`settings-page ${theme}`}>
+    <div className={`settings-page ${theme} ${dirty ? 'has-save-bar' : ''}`}>
       
       {/* Фоновые пятна */}
       <div className="background-spot">
@@ -351,24 +413,24 @@ export default function SettingsPage() {
         >
           
           <div className="settings-title-row">
-            <Settings size={24} className="title-icon" />
+            <SlidersHorizontal size={24} className="title-icon" />
             <h1 className="settings-title">
-              Настройки
+              Управление
             </h1>
           </div>
 
-          {!error && !loading && settings && (
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={saveSettings}
-              disabled={saving}
-              className="save-button"
-            >
-              <Save size={18} />
-              <span>{saving ? 'Сохранение...' : 'Сохранить'}</span>
-            </motion.button>
-          )}
+          {/* Слева крутишь дом, справа — себя. Уведомления и выход живут в
+              профиле, а не растаскиваются по шестерёнкам отдельных экранов. */}
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => navigate('/profile')}
+            className="profile-avatar-button"
+            title="Профиль и уведомления"
+            aria-label="Профиль и уведомления"
+          >
+            {avatarInitial}
+          </motion.button>
         </motion.div>
 
         {error ? (
@@ -573,32 +635,6 @@ export default function SettingsPage() {
                       animate={{ opacity: 1, y: 0 }}
                     >
                       Центральная плата: {syncResult.greenhouse === 'ok' ? '✓' : syncResult.greenhouse} &nbsp;·&nbsp; Уборная: {syncResult.toilet === 'ok' ? '✓' : syncResult.toilet}
-                    </motion.p>
-                  )}
-                </div>
-
-                <div className="section">
-                  <div className="section-header">
-                    <LogOut className="section-icon red" />
-                    <h2>Аккаунт</h2>
-                  </div>
-                  <motion.button
-                    className="silent-button danger"
-                    onClick={handleLogout}
-                    disabled={loggingOut}
-                    whileHover={{ scale: loggingOut ? 1 : 1.02 }}
-                    whileTap={{ scale: loggingOut ? 1 : 0.98 }}
-                  >
-                    <LogOut size={18} />
-                    {loggingOut ? 'Выходим…' : 'Выйти из аккаунта'}
-                  </motion.button>
-                  {logoutError && (
-                    <motion.p
-                      className="mode-description error"
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                    >
-                      {logoutError}
                     </motion.p>
                   )}
                 </div>
@@ -931,7 +967,7 @@ export default function SettingsPage() {
 
                   <div className="setting-row">
                     <span className="setting-label">Длительность работы</span>
-                    <Counter 
+                    <Counter
                       value={settings.fanDuration}
                       onChange={val => update('fanDuration', val)}
                       min={1}
@@ -944,11 +980,141 @@ export default function SettingsPage() {
               </div>
             )}
 
+            {/* Камера — сервисная часть бывшей вкладки /camera. Живой поток
+                уехал в Видео, сюда приехало то, за чем лезут раз в месяц:
+                охлаждение и диагностика. */}
+            {activeTab === 'camera' && (
+              <div className="tab-pane">
+
+                <div className="section">
+                  <div className="section-header">
+                    <Fan className="section-icon purple" />
+                    <h2>Вентилятор охлаждения</h2>
+                  </div>
+
+                  <div className="mode-buttons">
+                    {([
+                      { mode: 1, label: 'С камерой' },
+                      { mode: 2, label: 'Авто' },
+                      { mode: 0, label: 'Выключен' },
+                    ] as const).map(({ mode, label }) => (
+                      <motion.button
+                        key={mode}
+                        className={`mode-btn ${fanMode === mode ? 'active' : ''}`}
+                        onClick={() => handleFanMode(mode)}
+                        disabled={isChangingFan}
+                        whileHover={{ scale: isChangingFan ? 1 : 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        {fanMode === mode && <Check size={14} className="mode-btn-check" />}
+                        {label}
+                      </motion.button>
+                    ))}
+                  </div>
+
+                  <motion.p
+                    className="mode-description"
+                    key={fanMode}
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {fanMode === 1 && '🎥 Крутится, пока работает камера'}
+                    {fanMode === 2 && '🌡️ Включается сам при нагреве выше 60 °C'}
+                    {fanMode === 0 && '🔇 Не включается никогда'}
+                  </motion.p>
+
+                  {fanError && (
+                    <motion.p
+                      className="mode-description error"
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                    >
+                      Не удалось переключить вентилятор — попробуйте ещё раз
+                    </motion.p>
+                  )}
+                </div>
+
+                <div className="section">
+                  <div className="section-header">
+                    <Activity className="section-icon blue" />
+                    <h2>Диагностика</h2>
+                  </div>
+
+                  <div className="camera-diag-grid">
+                    <div className="camera-diag-item">
+                      <div className="camera-diag-icon">
+                        {cameraStatus?.mode === 'offline' || cameraStatus?.mode === 'never_connected'
+                          ? <WifiOff size={20} /> : <Wifi size={20} />}
+                      </div>
+                      <span className="camera-diag-label">Статус</span>
+                      <span className="camera-diag-value">
+                        {cameraStatus?.mode === 'streaming' && 'Стрим'}
+                        {cameraStatus?.mode === 'recording' && 'Запись'}
+                        {cameraStatus?.mode === 'connected' && 'В сети'}
+                        {cameraStatus?.mode === 'offline' && 'Офлайн'}
+                        {cameraStatus?.mode === 'never_connected' && 'Не подключена'}
+                        {!cameraStatus && '—'}
+                      </span>
+                    </div>
+
+                    <div className="camera-diag-item">
+                      <div className="camera-diag-icon"><Activity size={20} /></div>
+                      <span className="camera-diag-label">FPS</span>
+                      <span className="camera-diag-value">{cameraStatus?.metrics?.fps ?? '—'}</span>
+                    </div>
+
+                    <div className="camera-diag-item">
+                      <div className="camera-diag-icon"><Thermometer size={20} /></div>
+                      <span className="camera-diag-label">Температура</span>
+                      <span className="camera-diag-value">
+                        {cameraStatus?.metrics?.temperature != null
+                          ? `${cameraStatus.metrics.temperature.toFixed(1)}°C` : '—'}
+                      </span>
+                    </div>
+
+                    <div className="camera-diag-item">
+                      <div className="camera-diag-icon"><Users size={20} /></div>
+                      <span className="camera-diag-label">Зрители</span>
+                      <span className="camera-diag-value">{cameraStatus?.viewers ?? '—'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="info-box">
+                  <AlertCircle size={20} />
+                  <p>Живой поток и качество картинки — во вкладке «Видео», в карточке «Сейчас».</p>
+                </div>
+
+              </div>
+            )}
+
           </motion.div>
           </AnimatePresence>
         </motion.div>
         )}
       </div>
+
+      {/* Полоса сохранения: выезжает только когда есть несохранённое. В шапке
+          она уплывала со скроллом на длинных вкладках, а гореть успевала и
+          тогда, когда сохранять было нечего. */}
+      <AnimatePresence>
+        {dirty && (
+          <motion.div
+            className="save-bar"
+            initial={{ y: '120%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '120%' }}
+            transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+          >
+            <span className="save-bar-text">Есть несохранённые изменения</span>
+            <button className="save-button" onClick={saveSettings} disabled={saving}>
+              <Save size={18} />
+              <span>{saving ? 'Сохранение...' : 'Сохранить'}</span>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
 
   )

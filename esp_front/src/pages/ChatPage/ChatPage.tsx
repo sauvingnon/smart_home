@@ -1,12 +1,11 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Sun, Moon, Settings, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Users, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
 import { apiClient } from '../../api/client';
-import type { ChatMessage, ChatReadState } from '../../api/client';
+import type { ChatMessage, ChatReadState, PushStatusEntry } from '../../api/client';
 import { useHideNavBar } from '../../context/NavBarContext';
 import { useChatPush } from '../../hooks/useChatPush';
 import { usePageVisit } from '../../hooks/usePageVisit';
@@ -216,14 +215,22 @@ const guessVideoMimeType = (file: File): string | null => {
   return ext ? EXT_TO_VIDEO_MIME[ext] ?? null : null;
 };
 
+const formatLastSeen = (iso: string): string => {
+  const diffMin = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (diffMin < 1) return 'только что';
+  if (diffMin < 60) return `${diffMin} мин назад`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours} ч назад`;
+  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+};
+
 const errorMessage = (err: unknown): string =>
   err instanceof Error ? err.message : 'Не удалось отправить сообщение';
 
 export const ChatPage: React.FC = () => {
   usePageVisit('chat');
-  const { theme, toggleTheme } = useTheme();
+  const { theme } = useTheme();
   const { userId } = useAuth();
-  const navigate = useNavigate();
   const {
     messages, pendingUploads, reads, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
     pinnedMessage, pinMessage, unpinMessage, deleteMessage, editMessage, presence, typingUsers, notifyTyping,
@@ -252,6 +259,11 @@ export const ChatPage: React.FC = () => {
   const pinchEndedAtRef = useRef(0);
   const lastTapRef = useRef(0);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [showParticipants, setShowParticipants] = useState(false);
+  // Статусы подписок тянем только при открытии шита: на самом экране чата они
+  // не нужны, а лишний запрос в маунт чата — это лишнее соединение в холодный
+  // старт, ровно то, от чего уходили на home_bootstrap.
+  const [pushStatuses, setPushStatuses] = useState<PushStatusEntry[] | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   // Клавиатура iOS открыта — убираем нав-бар с экрана (сам он живёт в App.tsx).
   useHideNavBar(inputFocused);
@@ -1853,6 +1865,30 @@ export const ChatPage: React.FC = () => {
   // в "Подключение…" при любом обычном открытии страницы.
   const showReconnectTitle = connectionState !== 'connected' && hasConnectedOnceRef.current;
 
+  // Себя в список не включаем: свой статус уведомлений человек видит в профиле,
+  // а «в сети» про самого себя — бесполезная строка.
+  const participants = presence
+    .filter((p) => p.user_id !== userId)
+    .slice()
+    .sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      const aTime = a.last_seen ? new Date(a.last_seen).getTime() : 0;
+      const bTime = b.last_seen ? new Date(b.last_seen).getTime() : 0;
+      return bTime - aTime;
+    });
+
+  const subscribedByUser = new Map((pushStatuses ?? []).map((st) => [st.user_id, st.subscribed]));
+
+  useEffect(() => {
+    if (!showParticipants) return;
+    let mounted = true;
+    apiClient.getChatPushStatus()
+      .then((res) => { if (mounted) setPushStatuses(res.statuses); })
+      .catch(() => { if (mounted) setPushStatuses([]); });
+    return () => { mounted = false; };
+  }, [showParticipants]);
+
+
   return (
     <div className={`chat-page ${theme} ${inputFocused ? 'chat-page--composing' : ''} ${actionTarget ? 'chat-page--menu-open' : ''} ${pageEntered ? 'chat-page--entered' : ''}`}>
       <div className="chat-header" ref={headerRef}>
@@ -1869,16 +1905,19 @@ export const ChatPage: React.FC = () => {
             ) : null}
           </div>
 
+          {/* Осталась одна кнопка. Шестерёнка вела на экран, который на девять
+              десятых был настройками уведомлений — они уехали в профиль, а
+              единственное, что тут действительно про чат (кто в сети), стало
+              шитом. Переключатель темы убран: тема и так меняется по времени
+              суток, см. ThemeContext. */}
           <div className="header-actions">
-            <button className="header-action-btn" onClick={() => navigate('/chat/settings')} title="Настройки">
-              <Settings size={20} />
-            </button>
             <button
               className="header-action-btn"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+              onClick={() => setShowParticipants(true)}
+              title="Участники"
+              aria-label="Участники"
             >
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+              <Users size={20} />
             </button>
           </div>
         </div>
@@ -2542,6 +2581,67 @@ export const ChatPage: React.FC = () => {
                   </button>
                 )}
               </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Участники: кто в сети и у кого включены уведомления. Раньше это был
+          отдельный экран /chat/settings, где на девять десятых лежали настройки
+          уведомлений — они уехали в профиль, а вот это осталось и стало шитом. */}
+      <AnimatePresence>
+        {showParticipants && (
+          <>
+            <motion.div
+              key="participants-backdrop"
+              className="chat-sheet-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowParticipants(false)}
+            />
+            <motion.div
+              key="participants-sheet"
+              className="chat-sheet"
+              role="dialog"
+              aria-label="Участники"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+            >
+              <div className="chat-sheet-grabber" />
+              <div className="chat-sheet-title">
+                <Users size={18} />
+                <span>Участники</span>
+              </div>
+
+              {participants.length === 0 ? (
+                <div className="chat-sheet-empty">Больше никого нет</div>
+              ) : (
+                participants.map((p) => {
+                  const notifSubscribed = subscribedByUser.get(p.user_id);
+                  return (
+                    <div className="chat-sheet-row" key={p.user_id}>
+                      <span className={`chat-sheet-dot ${p.online ? 'online' : ''}`} />
+                      <div className="chat-sheet-row-text">
+                        <span className="chat-sheet-row-title">{p.display_name}</span>
+                        <span className="chat-sheet-row-desc">
+                          {p.online ? 'в сети' : p.last_seen ? `был(а) в сети ${formatLastSeen(p.last_seen)}` : 'не в сети'}
+                        </span>
+                      </div>
+                      {/* Пока статусы не приехали — бейджа нет вовсе: рисовать
+                          «без уведомлений» на всех подряд, пока грузится список,
+                          значило бы врать в самой заметной форме. */}
+                      {pushStatuses !== null && (
+                        <span className={`chat-sheet-badge ${notifSubscribed ? 'on' : 'off'}`}>
+                          {notifSubscribed ? <Bell size={14} /> : <BellOff size={14} />}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </motion.div>
           </>
         )}

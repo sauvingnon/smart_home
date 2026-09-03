@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocke
 from fastapi.responses import StreamingResponse
 from app.core.worker import BackgroundWorker
 from app.core.auth import get_current_user_id_dep
-from app.schemas.video import VideoItem, VideoNotifyPrefs, NotifyRecognizedIn
+from app.schemas.video import VideoItem, NotifyPrefs, NotifyRecognizedIn
 from pydantic import BaseModel
 from logger import logger
 from config import RECOGNITION_WORKER_SECRET
@@ -87,17 +87,19 @@ async def list_videos(
     # Получаем список видео
     return await worker.video_service.get_video_list(camera_id=camera_id)
 
-@router.get("/videos/notify_prefs", response_model=VideoNotifyPrefs)
+@router.get("/videos/notify_prefs", response_model=NotifyPrefs)
 async def get_video_notify_prefs(user_id: int = Depends(get_current_user_id_dep)):
-    """Предпочтения юзера: о посещении кого уведомлять и хочет ли знать про
-    недоступность платы. Сам push — общая с чатом подписка (/chat/push/*)."""
+    """Темы уведомлений юзера: о посещении кого уведомлять, хочет ли знать про
+    недоступность платы, слать ли сообщения чата. Сама push-подписка на
+    устройство — одна общая (/chat/push/*), она мастер-выключатель над этим.
+    Путь исторический (/videos/...), темы давно не только видео."""
     worker = BackgroundWorker.get_instance()
     prefs = await worker.cache.get_video_notify_prefs(user_id)
-    return prefs or VideoNotifyPrefs()
+    return prefs or NotifyPrefs()
 
 @router.post("/videos/notify_prefs")
 async def save_video_notify_prefs(
-    prefs: VideoNotifyPrefs,
+    prefs: NotifyPrefs,
     user_id: int = Depends(get_current_user_id_dep)
 ):
     worker = BackgroundWorker.get_instance()

@@ -48,9 +48,13 @@ export interface ChatReadState {
   read_at: string | null;
 }
 
-export interface VideoNotifyPrefs {
+// Темы уведомлений. Push-подписка на устройство одна общая (см. useChatPush) —
+// она мастер-выключатель, а это темы под ним. Путь эндпоинта исторический
+// (/videos/notify_prefs), содержимое давно шире видео.
+export interface NotifyPrefs {
   visit_people: Record<string, boolean>;
   board_offline: boolean;
+  chat_messages: boolean;
 }
 
 export interface PushStatusEntry {
@@ -131,11 +135,11 @@ class ApiClient {
     return this.fetch(`/esp_service/videos${queryString ? `?${queryString}` : ''}`);
   }
 
-  async getVideoNotifyPrefs(): Promise<VideoNotifyPrefs> {
+  async getNotifyPrefs(): Promise<NotifyPrefs> {
     return this.fetch('/esp_service/videos/notify_prefs');
   }
 
-  async saveVideoNotifyPrefs(prefs: VideoNotifyPrefs): Promise<{ status: string }> {
+  async saveNotifyPrefs(prefs: NotifyPrefs): Promise<{ status: string }> {
     return this.fetch('/esp_service/videos/notify_prefs', {
       method: 'POST',
       body: JSON.stringify(prefs),

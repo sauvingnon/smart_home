@@ -6,11 +6,9 @@ import { LaunchScreen } from './components/LaunchScreen/LaunchScreen';
 import { useEffect, useState } from 'react';
 import { apiClient, AuthError } from './api/client';
 import SettingsPage from './pages/SettingsPage/SettingsPage';
-import { CameraPage } from './pages/CameraPage/CameraPage';
+import ProfilePage from './pages/ProfilePage/ProfilePage';
 import { VideosPage } from './pages/VideoPage/VideoPage';
-import { VideoSettingsPage } from './pages/VideoSettingsPage/VideoSettingsPage';
 import { ChatPage } from './pages/ChatPage/ChatPage';
-import { ChatSettingsPage } from './pages/ChatSettingsPage/ChatSettingsPage';
 import { ThemeProvider } from './context/ThemeContext';
 import { ChatProvider } from './context/ChatContext';
 import { NavBarProvider } from './context/NavBarContext';
@@ -88,11 +86,13 @@ function App() {
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/camera/:cameraId?" element={<CameraPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
               <Route path="/videos" element={<VideosPage />} />
-              <Route path="/videos/settings" element={<VideoSettingsPage />} />
               <Route path="/chat" element={isAdmin ? <ChatPage /> : <Navigate to="/" replace />} />
-              <Route path="/chat/settings" element={isAdmin ? <ChatSettingsPage /> : <Navigate to="/" replace />} />
+              {/* /camera, /chat/settings и /videos/settings больше нет: живой
+                  поток переехал в /videos, сервисные настройки камеры — в
+                  /settings, а уведомления из обоих «настроек» — в /profile.
+                  Старые ссылки ловит catch-all ниже. */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             {/* Один экземпляр на всё приложение, а не по копии внутри каждой

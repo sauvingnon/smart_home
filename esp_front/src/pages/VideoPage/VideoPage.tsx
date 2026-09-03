@@ -16,16 +16,15 @@ import {
   LogOut,
   Loader2,
   MessageCircle,
-  Filter,
-  Settings
+  Filter
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import { recognizedDisplayName, PEOPLE_FILTERS } from '../../constants/people'
+import { LiveCamera } from './LiveCamera'
 import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
 import { useOnTabReselect } from '../../context/NavBarContext'
-import { useAuth } from '../../context/AuthContext'
 
 interface VideoItem {
     key: string
@@ -70,7 +69,6 @@ export const VideosPage = () => {
   usePageVisit('video')
   useOnTabReselect(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
   const { theme } = useTheme()
-  const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const [videos, setVideos] = useState<VideoItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -119,6 +117,17 @@ export const VideosPage = () => {
 
   useEffect(() => {
     loadVideos()
+  }, [])
+
+  // Кнопки «обновить» в шапке больше нет — как и на Доме. Список освежается
+  // при возврате в приложение: новая запись появляется, пока PWA закрыта, и
+  // увидеть её надо именно в момент открытия.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadVideos()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
 
   const loadVideos = async () => {
@@ -329,16 +338,6 @@ export const VideosPage = () => {
             <Video size={24} className="title-icon" />
             <h1>Видеозаписи</h1>
           </div>
-          <div className="header-actions">
-            {isAdmin && (
-              <button className="header-action-btn" onClick={() => navigate('/videos/settings')} title="Настройки">
-                <Settings size={20} />
-              </button>
-            )}
-            <button className="header-action-btn" onClick={loadVideos} title="Обновить">
-              <RefreshCw size={20} />
-            </button>
-          </div>
         </motion.div>
 
         {loading ? (
@@ -355,6 +354,13 @@ export const VideosPage = () => {
           initial="hidden"
           animate="visible"
         >
+          {/* Живой поток от той же камеры, что пишет эти записи. Отдельной
+              вкладки под него больше нет: там он соседствовал с сервисными
+              настройками платы, которые уехали в Управление → Камера. */}
+          <motion.div variants={itemVar}>
+            <LiveCamera />
+          </motion.div>
+
           <motion.div variants={itemVar} className="videos-section glass-card">
             <div className="section-header">
               <Video size={20} className="section-icon" />

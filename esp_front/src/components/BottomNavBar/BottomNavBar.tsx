@@ -4,15 +4,17 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
 import { useNavBarHidden, useTriggerTabReselect } from '../../context/NavBarContext';
-import { Home, Camera, MessageCircle, Video, Settings } from 'lucide-react';
+import { Home, MessageCircle, Video, SlidersHorizontal } from 'lucide-react';
 import './BottomNavBar.css';
 
+// Четыре вкладки по задачам, а не по устройствам. Камеры среди них нет
+// намеренно: живой поток лежит в «Видео», рядом с записями той же камеры, а
+// сервисные настройки платы — в «Управлении».
 const navItems = [
-  { path: '/', icon: Home, label: 'Главная' },
-  { path: '/camera/cam1', icon: Camera, label: 'Камера' },
+  { path: '/', icon: Home, label: 'Дом' },
   { path: '/chat', icon: MessageCircle, label: 'Чат', adminOnly: true },
   { path: '/videos', icon: Video, label: 'Видео' },
-  { path: '/settings', icon: Settings, label: 'Настройки' },
+  { path: '/settings', icon: SlidersHorizontal, label: 'Управление' },
 ];
 
 export const BottomNavBar = () => {

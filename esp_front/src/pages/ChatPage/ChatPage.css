@@ -1835,3 +1835,128 @@
     0 0 0 calc(var(--mic-level) * 17px) rgba(59, 130, 246, 0.14);
   transition: transform 0.15s ease, box-shadow 0.08s linear;
 }
+
+/* ============================================================
+   Шит «Участники»
+   Пришёл на замену экрану /chat/settings: настройки уведомлений оттуда
+   уехали в профиль, а «кто в сети» — единственное, что было про сам чат,
+   и ради одной секции держать отдельный роут незачем.
+   ============================================================ */
+
+.chat-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.chat-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 301;
+  max-height: 70dvh;
+  overflow-y: auto;
+  padding: 0.5rem 1rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  border-radius: 1.5rem 1.5rem 0 0;
+  background: var(--chat-sheet-bg, rgba(28, 32, 44, 0.96));
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.chat-page.light .chat-sheet {
+  --chat-sheet-bg: rgba(255, 255, 255, 0.97);
+}
+
+.chat-sheet-grabber {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(127, 127, 127, 0.5);
+  margin: 0.5rem auto 0.75rem;
+}
+
+.chat-sheet-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0.5rem 0.5rem;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+}
+
+.chat-sheet-empty {
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+  font-size: 14px;
+  opacity: 0.55;
+}
+
+.chat-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0.5rem;
+}
+
+.chat-sheet-row + .chat-sheet-row {
+  border-top: 1px solid rgba(127, 127, 127, 0.18);
+}
+
+.chat-sheet-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(127, 127, 127, 0.45);
+}
+
+.chat-sheet-dot.online {
+  background: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.2);
+}
+
+.chat-sheet-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chat-sheet-row-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.chat-sheet-row-desc {
+  font-size: 12px;
+  opacity: 0.55;
+}
+
+.chat-sheet-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+}
+
+.chat-sheet-badge.on {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.15);
+}
+
+.chat-sheet-badge.off {
+  color: rgba(127, 127, 127, 0.9);
+  background: rgba(127, 127, 127, 0.15);
+}

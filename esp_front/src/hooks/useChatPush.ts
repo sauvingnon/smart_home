@@ -36,11 +36,13 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
-// Общая Web Push логика чата — общая для баннера в ChatPage ("включить
-// уведомления") и переключателя в ChatSettingsPage ("выключить"). Состояние
-// не расшарено между инстансами хука: каждый маунт заново читает
+// Web Push на устройстве: подписка одна на все темы (сообщения чата, приходы
+// людей, недоступность платы), поэтому и мастер-выключатель у неё один — в
+// ProfilePage. Здесь же живёт баннер "включить уведомления" из ChatPage.
+// Сами темы под мастером — это NotifyPrefs, отдельный запрос.
+// Состояние не расшарено между инстансами хука: каждый маунт заново читает
 // Notification.permission и реальную PushSubscription, этого достаточно —
-// между шапкой чата и настройками всегда происходит переход по роуту.
+// между чатом и профилем всегда происходит переход по роуту.
 export function useChatPush() {
   const [notifStatus, setNotifStatus] = useState<NotifStatus>(getInitialNotifStatus);
   const [subscribed, setSubscribed] = useState(false);
