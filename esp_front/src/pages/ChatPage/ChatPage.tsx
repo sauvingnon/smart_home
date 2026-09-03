@@ -1968,7 +1968,7 @@ export const ChatPage: React.FC = () => {
           <div className={`chat-notif-banner chat-notif-banner--${notifStatus}`}>
             {notifStatus === 'default' && (
               <>
-                <Bell size={16} />
+                <Bell size={20} />
                 <span>Получать уведомления о новых сообщениях, когда чат закрыт?</span>
                 <button className="chat-notif-banner-action" onClick={requestNotificationAccess} disabled={pushBusy}>
                   {pushBusy ? <Loader2 size={14} className="spin" /> : 'Включить'}
@@ -1977,19 +1977,19 @@ export const ChatPage: React.FC = () => {
             )}
             {notifStatus === 'denied' && (
               <>
-                <BellOff size={16} />
+                <BellOff size={20} />
                 <span>Уведомления заблокированы браузером — включить можно только вручную, в настройках сайта.</span>
               </>
             )}
             {notifStatus === 'ios-not-installed' && (
               <>
-                <BellOff size={16} />
+                <BellOff size={20} />
                 <span>Чтобы получать уведомления, добавь приложение на экран «Домой» (Поделиться → На экран «Домой»).</span>
               </>
             )}
             {notifStatus === 'unsupported' && (
               <>
-                <BellOff size={16} />
+                <BellOff size={20} />
                 <span>Этот браузер не поддерживает уведомления.</span>
               </>
             )}
@@ -2025,6 +2025,13 @@ export const ChatPage: React.FC = () => {
             {loadingHistory ? 'Загружаем историю…' : 'Прокрутите вверх для истории'}
           </div>
         )}
+        {historyReady && !loadingHistory && messages.length === 0 && (
+          <div className="chat-empty-state">
+            <MessageCircle size={36} className="chat-empty-state-icon" />
+            <p>В чате пока нет сообщений</p>
+            <span>Напишите первое!</span>
+          </div>
+        )}
 
         <div
           className={`chat-messages-content ${pageEntered && historyReady ? 'chat-messages-content--ready' : ''}`}
@@ -2047,7 +2054,7 @@ export const ChatPage: React.FC = () => {
                       role={message.reply_to !== null ? 'button' : undefined}
                       onClick={() => { if (message.reply_to !== null) scrollToMessage(message.reply_to); }}
                     >
-                      {isPinned ? <Pin size={13} /> : <PinOff size={13} />}
+                      {isPinned ? <Pin size={16} /> : <PinOff size={16} />}
                       <span>
                         <b>{message.username}</b> {isPinned ? 'закрепил(а)' : 'открепил(а)'} сообщение
                         {message.reply_to_preview && <>: «{message.reply_to_preview}»</>}
