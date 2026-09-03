@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Video,
+  Camera,
   Clock,
   FileVideo,
   Download,
@@ -20,7 +21,6 @@ import {
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import { recognizedDisplayName, PEOPLE_FILTERS } from '../../constants/people'
-import { LiveCamera } from './LiveCamera'
 import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
@@ -340,6 +340,11 @@ export const VideosPage = () => {
             <Video size={24} className="title-icon" />
             <h1>Видеозаписи</h1>
           </div>
+          <div className="header-actions">
+            <button className="header-action-btn" onClick={() => navigate('/videos/camera')} title="Камера">
+              <Camera size={20} />
+            </button>
+          </div>
         </motion.div>
 
         {loading ? (
@@ -356,13 +361,6 @@ export const VideosPage = () => {
           initial="hidden"
           animate="visible"
         >
-          {/* Живой поток от той же камеры, что пишет эти записи. Отдельной
-              вкладки под него больше нет: там он соседствовал с сервисными
-              настройками платы, которые уехали в Управление → Камера. */}
-          <motion.div variants={itemVar}>
-            <LiveCamera />
-          </motion.div>
-
           <motion.div variants={itemVar} className="videos-section glass-card">
             <div className="section-header">
               <Video size={20} className="section-icon" />

@@ -841,9 +841,7 @@
 /* Карточки-плитки */
 .tabs-header-tiles {
   display: grid;
-  /* Пять с тех пор, как сюда приехала сервисная часть камеры (охлаждение и
-     диагностика) с бывшей вкладки /camera. */
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.75rem;
   padding: 1.5rem 1.5rem 0.5rem 1.5rem;
 }
@@ -944,14 +942,13 @@
     height: 1.25rem;
   }
 
-  /* Плиток стало пять, и на 375px под подпись остаётся уже ~62px (было ~80).
-     Капс с трекингом тут гарантированно вылетал бы или переносился в две
-     строки, растягивая всю строку плиток. Строчными и на кегль мельче
-     «Расписание» — самое длинное слово — укладывается в ~50px.
-     Ряд вкладок в две строки на телефоне не хочется: это съедает экран над
-     контентом, ради которого сюда и заходят. */
+  /* На 375px под подпись остаётся ~62px. «ВЕНТИЛЯТОР» капсом с трекингом — это
+     ~70px, то есть гарантированный вылет или перенос в две строки, от которого
+     тянется вся строка плиток. Строчными без трекинга — ~57px, помещается.
+     Ради одного слова ломать раскладку в два ряда на всех айфонах не хочется:
+     четыре вкладки в ряд — это и есть нужный паттерн для телефона. */
   .tab-button-tile span {
-    font-size: 0.625rem;
+    font-size: 0.6875rem;
     text-transform: none;
     letter-spacing: 0;
   }
@@ -1693,53 +1690,6 @@
 @media (max-width: 400px) {
   .save-bar-text { display: none; }
   .save-bar { justify-content: center; padding: 0.625rem; }
-}
-
-/* Диагностика камеры */
-.camera-diag-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
-}
-
-.camera-diag-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.25rem;
-  padding: 1rem;
-  border-radius: 1.25rem;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-}
-
-.camera-diag-icon {
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 9999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(14, 165, 233, 0.15);
-  color: var(--accent-sky);
-  margin-bottom: 0.25rem;
-}
-
-.camera-diag-label {
-  font-size: 0.75rem;
-  color: var(--text-tertiary);
-}
-
-.camera-diag-value {
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.mode-btn-check {
-  margin-right: 0.25rem;
-  vertical-align: -2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3,6 +3,7 @@
     { "source": "/", "destination": "/index.html" },
     { "source": "/settings", "destination": "/index.html" },
     { "source": "/videos", "destination": "/index.html" },
+    { "source": "/videos/camera", "destination": "/index.html" },
     { "source": "/chat", "destination": "/index.html" },
     { "source": "/profile", "destination": "/index.html" }
   ],

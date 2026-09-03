@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Fan, Sun, Moon, Bath, Monitor, Thermometer, Cloud,
-  SlidersHorizontal, Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw,
-  Camera as CameraIcon, Wifi, WifiOff, Activity, Users, Check
+  SlidersHorizontal, Settings2, AlertCircle, Save, Calendar, Power, VolumeX, RefreshCw
 } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import './SettingsPage.css'
@@ -12,21 +11,6 @@ import { useTheme } from '../../context/ThemeContext'
 import { useAuth } from '../../context/AuthContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
 import { useOnTabReselect } from '../../context/NavBarContext'
-
-// Камера в доме одна; id живёт константой, а не в роуте, с тех пор как
-// отдельная страница /camera переехала сюда (сервис) и в Видео (живой поток).
-const CAMERA_ID = 'cam1'
-const CAMERA_STATUS_INTERVAL = 5000
-
-type CameraStatus = {
-  mode: 'never_connected' | 'connected' | 'streaming' | 'recording' | 'offline'
-  viewers: number
-  metrics: {
-    fps: number
-    temperature: number
-    fan_mode: number
-  }
-}
 
 type Settings = {
   displayMode: number
@@ -259,11 +243,6 @@ export default function SettingsPage() {
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
   const dirty = settings !== null && savedSnapshot !== null && JSON.stringify(settings) !== savedSnapshot
 
-  const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null)
-  const [fanMode, setFanMode] = useState<0 | 1 | 2>(1)
-  const [isChangingFan, setIsChangingFan] = useState(false)
-  const [fanError, setFanError] = useState(false)
-
   // Панели вкладок сильно разной высоты («Расписание» — пять секций, «Вентилятор»
   // — две). Прокрутившись вниз по длинной и переключившись на короткую, юзер
   // оказывался за пределами нового контента: браузер прижимал скролл, и экран
@@ -342,53 +321,11 @@ export default function SettingsPage() {
     }
   }
 
-  // Статус камеры нужен только на своей вкладке — на остальных незачем долбить
-  // сервер раз в пять секунд.
-  useEffect(() => {
-    if (activeTab !== 'camera') return
-    let mounted = true
-    const fetchStatus = async () => {
-      try {
-        const status = await apiClient.getCameraStatus(CAMERA_ID)
-        if (!mounted) return
-        setCameraStatus(status)
-        const mode = status?.metrics?.fan_mode
-        if (mode === 0 || mode === 1 || mode === 2) setFanMode(mode)
-      } catch (e) {
-        console.error('Camera status failed:', e)
-      }
-    }
-    fetchStatus()
-    const interval = setInterval(fetchStatus, CAMERA_STATUS_INTERVAL)
-    return () => { mounted = false; clearInterval(interval) }
-  }, [activeTab])
-
-  // Режим вентилятора — команда железу, а не настройка: применяется сразу и в
-  // "Сохранить" внизу не участвует.
-  const handleFanMode = async (mode: 0 | 1 | 2) => {
-    if (isChangingFan || mode === fanMode) return
-    const prev = fanMode
-    setIsChangingFan(true)
-    setFanError(false)
-    setFanMode(mode)
-    try {
-      await apiClient.setCameraFan(CAMERA_ID, mode)
-    } catch (e) {
-      console.error('Fan mode failed:', e)
-      setFanMode(prev)
-      setFanError(true)
-      setTimeout(() => setFanError(false), 4000)
-    } finally {
-      setIsChangingFan(false)
-    }
-  }
-
   const tabs = [
     { id: 'schedule', label: 'Расписание', icon: Calendar },
     { id: 'relay', label: 'Реле', icon: Power },
     { id: 'display', label: 'Экран', icon: Monitor },
     { id: 'fan', label: 'Вентилятор', icon: Fan },
-    { id: 'camera', label: 'Камера', icon: CameraIcon },
   ]
 
   const avatarInitial = (displayName || username || '?').trim().charAt(0).toUpperCase()
@@ -975,115 +912,6 @@ export default function SettingsPage() {
                       step={1}
                     />
                   </div>
-                </div>
-
-              </div>
-            )}
-
-            {/* Камера — сервисная часть бывшей вкладки /camera. Живой поток
-                уехал в Видео, сюда приехало то, за чем лезут раз в месяц:
-                охлаждение и диагностика. */}
-            {activeTab === 'camera' && (
-              <div className="tab-pane">
-
-                <div className="section">
-                  <div className="section-header">
-                    <Fan className="section-icon purple" />
-                    <h2>Вентилятор охлаждения</h2>
-                  </div>
-
-                  <div className="mode-buttons">
-                    {([
-                      { mode: 1, label: 'С камерой' },
-                      { mode: 2, label: 'Авто' },
-                      { mode: 0, label: 'Выключен' },
-                    ] as const).map(({ mode, label }) => (
-                      <motion.button
-                        key={mode}
-                        className={`mode-btn ${fanMode === mode ? 'active' : ''}`}
-                        onClick={() => handleFanMode(mode)}
-                        disabled={isChangingFan}
-                        whileHover={{ scale: isChangingFan ? 1 : 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        {fanMode === mode && <Check size={14} className="mode-btn-check" />}
-                        {label}
-                      </motion.button>
-                    ))}
-                  </div>
-
-                  <motion.p
-                    className="mode-description"
-                    key={fanMode}
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    {fanMode === 1 && '🎥 Крутится, пока работает камера'}
-                    {fanMode === 2 && '🌡️ Включается сам при нагреве выше 60 °C'}
-                    {fanMode === 0 && '🔇 Не включается никогда'}
-                  </motion.p>
-
-                  {fanError && (
-                    <motion.p
-                      className="mode-description error"
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                    >
-                      Не удалось переключить вентилятор — попробуйте ещё раз
-                    </motion.p>
-                  )}
-                </div>
-
-                <div className="section">
-                  <div className="section-header">
-                    <Activity className="section-icon blue" />
-                    <h2>Диагностика</h2>
-                  </div>
-
-                  <div className="camera-diag-grid">
-                    <div className="camera-diag-item">
-                      <div className="camera-diag-icon">
-                        {cameraStatus?.mode === 'offline' || cameraStatus?.mode === 'never_connected'
-                          ? <WifiOff size={20} /> : <Wifi size={20} />}
-                      </div>
-                      <span className="camera-diag-label">Статус</span>
-                      <span className="camera-diag-value">
-                        {cameraStatus?.mode === 'streaming' && 'Стрим'}
-                        {cameraStatus?.mode === 'recording' && 'Запись'}
-                        {cameraStatus?.mode === 'connected' && 'В сети'}
-                        {cameraStatus?.mode === 'offline' && 'Офлайн'}
-                        {cameraStatus?.mode === 'never_connected' && 'Не подключена'}
-                        {!cameraStatus && '—'}
-                      </span>
-                    </div>
-
-                    <div className="camera-diag-item">
-                      <div className="camera-diag-icon"><Activity size={20} /></div>
-                      <span className="camera-diag-label">FPS</span>
-                      <span className="camera-diag-value">{cameraStatus?.metrics?.fps ?? '—'}</span>
-                    </div>
-
-                    <div className="camera-diag-item">
-                      <div className="camera-diag-icon"><Thermometer size={20} /></div>
-                      <span className="camera-diag-label">Температура</span>
-                      <span className="camera-diag-value">
-                        {cameraStatus?.metrics?.temperature != null
-                          ? `${cameraStatus.metrics.temperature.toFixed(1)}°C` : '—'}
-                      </span>
-                    </div>
-
-                    <div className="camera-diag-item">
-                      <div className="camera-diag-icon"><Users size={20} /></div>
-                      <span className="camera-diag-label">Зрители</span>
-                      <span className="camera-diag-value">{cameraStatus?.viewers ?? '—'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="info-box">
-                  <AlertCircle size={20} />
-                  <p>Живой поток и качество картинки — во вкладке «Видео», в карточке «Сейчас».</p>
                 </div>
 
               </div>
