@@ -1663,7 +1663,7 @@ export const ChatPage: React.FC = () => {
         return (
           <div className="chat-media-error">
             <ImageOff size={22} />
-            <span>Фото недоступно</span>
+            <span>Фото удалено: срок истёк</span>
           </div>
         );
       }
@@ -1712,7 +1712,7 @@ export const ChatPage: React.FC = () => {
         return (
           <div className="chat-media-error">
             <VideoOff size={22} />
-            <span>Видео недоступно</span>
+            <span>Видео удалено: срок истёк</span>
           </div>
         );
       }
@@ -1969,7 +1969,7 @@ export const ChatPage: React.FC = () => {
             {notifStatus === 'default' && (
               <>
                 <Bell size={20} />
-                <span>Получать уведомления о новых сообщениях, когда чат закрыт?</span>
+                <span>Получать уведомления о новых сообщениях?</span>
                 <button className="chat-notif-banner-action" onClick={requestNotificationAccess} disabled={pushBusy}>
                   {pushBusy ? <Loader2 size={14} className="spin" /> : 'Включить'}
                 </button>
@@ -1978,19 +1978,19 @@ export const ChatPage: React.FC = () => {
             {notifStatus === 'denied' && (
               <>
                 <BellOff size={20} />
-                <span>Уведомления заблокированы браузером — включить можно только вручную, в настройках сайта.</span>
+                <span>Уведомления заблокированы — включи в настройках браузера.</span>
               </>
             )}
             {notifStatus === 'ios-not-installed' && (
               <>
                 <BellOff size={20} />
-                <span>Чтобы получать уведомления, добавь приложение на экран «Домой» (Поделиться → На экран «Домой»).</span>
+                <span>Добавь приложение на экран «Домой», чтобы получать уведомления.</span>
               </>
             )}
             {notifStatus === 'unsupported' && (
               <>
                 <BellOff size={20} />
-                <span>Этот браузер не поддерживает уведомления.</span>
+                <span>Браузер не поддерживает уведомления.</span>
               </>
             )}
           </div>

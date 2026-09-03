@@ -518,8 +518,17 @@
   -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 
+.chat-notif-banner svg {
+  /* Без явного flex-shrink:0 иконку сжимает вместе с текстом, когда баннеру
+     не хватает ширины — на узком экране она уезжала обратно к исходному
+     мелкому размеру несмотря на size={20} у самого <Bell>. */
+  flex: 0 0 auto;
+}
+
 .chat-notif-banner span {
   flex: 1 1 auto;
+  font-size: 14.5px;
+  font-weight: 500;
 }
 
 .chat-notif-banner--default {
@@ -771,21 +780,21 @@
 }
 
 .chat-empty-state-icon {
-  color: var(--text-tertiary);
-  opacity: 0.5;
+  color: var(--accent-sky);
   margin-bottom: 4px;
 }
 
 .chat-empty-state p {
   margin: 0;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
 .chat-empty-state span {
-  font-size: 13px;
-  color: var(--text-tertiary);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 /* Булавки рядом с пузырём больше нет — все действия над сообщением живут в
@@ -1383,12 +1392,15 @@
   gap: 6px;
   width: 260px;
   height: 200px;
+  padding: 0 20px;
   border-radius: 12px;
   margin: 2px 0;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  color: var(--text-tertiary);
-  font-size: 13px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
   text-align: center;
 }
 

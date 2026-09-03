@@ -742,6 +742,15 @@
     font-size: 1.25rem;
   }
 
+  /* Без этого аватар оставался 3rem и на мобильном — хедер получался выше
+     и с кнопкой крупнее, чем на Чате/Камере/Видео, где header-action-btn/
+     back-button на этом брейкпоинте уже уменьшены до 2.5rem. */
+  .profile-avatar-button {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 0.9375rem;
+  }
+
   .save-button span {
     display: none;
   }
