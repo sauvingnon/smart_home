@@ -17,7 +17,13 @@ MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 API_BASE_URL = os.getenv("API_BASE_URL")
 CAMERA_ID = os.getenv("CAMERA_ID")
 CAMERA_ACCESS_KEY = os.getenv("CAMERA_ACCESS_KEY")
-DEFAULT_RECORDING_DAYS = int(os.getenv("DEFAULT_RECORDING_DAYS", "7"))
+# Один срок хранения на всё: записи с камеры и сообщения чата (вместе с их
+# медиа в S3) живут одинаковое число дней — решили не заводить отдельную
+# переменную под чат, раз для семьи на 4 человек нет причины держать их
+# порознь. Имя env-переменной оставлено старым (DEFAULT_RECORDING_DAYS) —
+# так на сервере не нужно трогать .env, он не в git и его содержимое не видно
+# отсюда; поменялось только то, что теперь эта переменная значит.
+MEDIA_RETENTION_DAYS = int(os.getenv("DEFAULT_RECORDING_DAYS", "7"))
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")  # "development" | "production"
 COOKIE_SECURE = ENVIRONMENT != "development"
 

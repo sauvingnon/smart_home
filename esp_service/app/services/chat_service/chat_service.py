@@ -653,8 +653,11 @@ class ChatService:
     async def get_unread_count(self, user_id: int) -> int:
         return await self.cache.get_chat_unread_count(user_id)
 
-    async def trim_old_messages(self, days: int = 30):
-        """Удаляет сообщения (и их медиа в S3) старше `days`."""
+    async def trim_old_messages(self, days: int):
+        """Удаляет сообщения (и их медиа в S3) старше `days`. Без дефолта
+        нарочно: срок хранения — один MEDIA_RETENTION_DAYS в config.py, общий
+        с записями камеры (см. worker._chat_retention_loop), и здесь не
+        должно быть второго числа, с которым он может незаметно разойтись."""
         expired = await self.cache.get_expired_chat_messages(older_than_days=days)
         if not expired:
             return

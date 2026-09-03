@@ -21,6 +21,7 @@ from app.services.monitor_db.telemetry_storage import TelemetryStorage
 from app.services.push_service.push_service import send_push, PushSubscriptionExpired
 from app.utils.time import _get_izhevsk_time
 from app.core.auth import init_auth_manager, get_auth_manager
+from config import MEDIA_RETENTION_DAYS
 
 # Константы и тайминги по умолчанию
 DEFAULT_WEATHER_UPDATE_INTERVAL = 1800  # 30 минут (в секундах)
@@ -535,10 +536,14 @@ class BackgroundWorker:
             await asyncio.sleep(300)
 
     async def _chat_retention_loop(self):
-        """Раз в сутки удаляет сообщения чата (и их медиа в S3) старше 30 дней."""
+        """Раз в сутки удаляет сообщения чата (и их медиа в S3) старше
+        MEDIA_RETENTION_DAYS — тот же срок, что и у записей с камеры (см.
+        video_service._cleanup_old_videos). Одна переменная на оба хранилища:
+        для семьи на 4 человека нет причины держать для них разные сроки, а
+        два отдельных числа рано или поздно разойдутся сами по себе."""
         while self.is_running:
             try:
-                await self.chat_service.trim_old_messages(days=30)
+                await self.chat_service.trim_old_messages(days=MEDIA_RETENTION_DAYS)
             except Exception as e:
                 logger.error(f"❌ Ошибка очистки старых сообщений чата: {e}")
             await asyncio.sleep(24 * 3600)

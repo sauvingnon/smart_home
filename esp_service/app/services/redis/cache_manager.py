@@ -7,7 +7,7 @@ from logger import logger
 import asyncio
 import secrets
 import os
-from config import DEFAULT_RECORDING_DAYS, CAMERA_ID
+from config import MEDIA_RETENTION_DAYS, CAMERA_ID
 
 KEYS_BACKUP_PATH = "/app/data/access_keys.json"
 
@@ -28,7 +28,7 @@ class CacheManager:
 
         # Для дедупликации видео (хранить ID уже обработанных видео)
         self.video_dedup_prefix = "video_dedup:"
-        self.video_dedup_ttl = timedelta(days=DEFAULT_RECORDING_DAYS)
+        self.video_dedup_ttl = timedelta(days=MEDIA_RETENTION_DAYS)
 
         
     async def connect(self, max_retries: int = 5, retry_delay: int = 2):
@@ -1226,7 +1226,7 @@ class CacheManager:
         try:
             await self.redis_client.setex(
                 f"video_key:{camera_id}:{video_id}",
-                timedelta(days=DEFAULT_RECORDING_DAYS + 1),
+                timedelta(days=MEDIA_RETENTION_DAYS + 1),
                 s3_key
             )
             return True

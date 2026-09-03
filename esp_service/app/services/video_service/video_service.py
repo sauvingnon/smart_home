@@ -16,7 +16,7 @@ from app.services.redis.cache_manager import CacheManager
 import tempfile
 import os
 from starlette.websockets import WebSocketDisconnect, WebSocketState
-from config import CAMERA_ID, CAMERA_ACCESS_KEY, DEFAULT_RECORDING_DAYS
+from config import CAMERA_ID, CAMERA_ACCESS_KEY, MEDIA_RETENTION_DAYS
 
 class VideoService:
     """Сервис управления камерами — базовая версия (только подключение и метрики)"""
@@ -66,7 +66,7 @@ class VideoService:
         logger.info("🧹 Запуск очистки старых видео...")
 
         IZHEVSK_TZ = timezone(timedelta(hours=4))
-        cutoff = datetime.now(tz=IZHEVSK_TZ) - timedelta(days=DEFAULT_RECORDING_DAYS)
+        cutoff = datetime.now(tz=IZHEVSK_TZ) - timedelta(days=MEDIA_RETENTION_DAYS)
         deleted_count = 0
         deleted_bytes = 0
 
@@ -816,7 +816,7 @@ class VideoService:
         self,
         camera_id: Optional[str] = None
     ) -> List[VideoItem]:
-        """Получить список видео за последние DEFAULT_RECORDING_DAYS+1 дней с кэшированием по дням."""
+        """Получить список видео за последние MEDIA_RETENTION_DAYS+1 дней с кэшированием по дням."""
         if not self.s3_manager:
             raise ValueError("S3 manager не доступен")
 
@@ -827,7 +827,7 @@ class VideoService:
 
         video_dicts = []
 
-        for i in range(DEFAULT_RECORDING_DAYS + 1):
+        for i in range(MEDIA_RETENTION_DAYS + 1):
             day = today - timedelta(days=i)
             is_today = (i == 0)
 
