@@ -24,7 +24,6 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
   const [frameStalled, setFrameStalled] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
-  const wsRef = useRef<WebSocket | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
 
   // Детектор зависших кадров: если connected но кадров нет >2с — стал
@@ -64,7 +63,7 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
       setError('Сервер не отвечает');
     }, CONNECT_TIMEOUT_MS);
 
-    const ws = apiClient.createCameraWebSocket(cameraId, {
+    apiClient.createCameraWebSocket(cameraId, {
       onOpen: () => {
         console.log(`✅ WebSocket opened for camera ${cameraId}`);
         settled = true;
@@ -101,19 +100,22 @@ export function useCamera(cameraId: string, options: UseCameraOptions = {}) {
       },
     });
 
-    wsRef.current = ws;
-
     return () => {
       console.log(`🧹 useCamera: Cleaning up for camera ${cameraId}`);
       clearTimeout(connectTimeout);
 
-      if (wsRef.current) {
-        if (wsRef.current.readyState === WebSocket.OPEN ||
-            wsRef.current.readyState === WebSocket.CONNECTING) {
-          apiClient.closeCameraWebSocket(cameraId);
-        }
-        wsRef.current = null;
-      }
+      // Не проверяем readyState у сокета из этого замыкания: если между
+      // монтированием и сейчас случался авто-реконнект (обрыв сети, фон на
+      // телефоне), apiClient уже подменил соединение внутри себя, а этот `ws`
+      // давно мёртв и ни на что не влияет. closeCameraWebSocket смотрит в
+      // свою карту по cameraId — то есть закрывает СЕЙЧАС живое соединение,
+      // а не то, что было в момент вызова createCameraWebSocket. Раньше тут
+      // проверялся ws.readyState из этого замыкания: он оставался CLOSED
+      // после авто-реконнекта, cleanup решал, что закрывать нечего, и свежее
+      // (уже другое) соединение продолжало отвечать на пинги сервера вечно —
+      // сервер никогда не видел дисконнекта, и зритель оставался в счётчике
+      // до перезапуска сервиса.
+      apiClient.closeCameraWebSocket(cameraId);
 
       setFrameBlob(null);
       setConnectionState('disconnected');
