@@ -935,10 +935,9 @@ export default function SettingsPage() {
             exit={{ y: '120%' }}
             transition={{ type: 'spring', stiffness: 380, damping: 34 }}
           >
-            <span className="save-bar-text">Есть несохранённые изменения</span>
-            <button className="save-button" onClick={saveSettings} disabled={saving}>
-              <Save size={18} />
-              <span>{saving ? 'Сохранение...' : 'Сохранить'}</span>
+            <button className="save-button save-button-floating" onClick={saveSettings} disabled={saving}>
+              <Save size={22} />
+              <span>{saving ? 'Сохранение...' : 'Сохранить изменения'}</span>
             </button>
           </motion.div>
         )}
