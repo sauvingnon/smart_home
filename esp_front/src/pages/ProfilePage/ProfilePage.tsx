@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { ArrowLeft, BellOff, BellRing, Loader2, Users, Cpu, MessageCircle, LogOut } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowLeft, BellOff, BellRing, Loader2, Users, Cpu, MessageCircle, LogOut, AlertTriangle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChatPush } from '../../hooks/useChatPush';
@@ -143,6 +143,24 @@ export const ProfilePage: React.FC = () => {
               )}
             </div>
           </motion.div>
+
+          {/* Секции ниже гаснут именно из-за этого — без явного объяснения
+              выглядело бы как баг ("почему тумблеры не нажимаются"), а не
+              как логичное следствие выключенных уведомлений на устройстве. */}
+          <AnimatePresence>
+            {!topicsEnabled && (
+              <motion.div
+                className="profile-notice"
+                initial={{ height: 0, opacity: 0, marginBottom: 0 }}
+                animate={{ height: 'auto', opacity: 1, marginBottom: '1rem' }}
+                exit={{ height: 0, opacity: 0, marginBottom: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <AlertTriangle size={18} className="profile-notice-icon" />
+                <span>Опции ниже недоступны — нет доступа к уведомлениям на этом устройстве.</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <motion.div
             variants={itemVar}

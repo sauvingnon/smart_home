@@ -175,6 +175,27 @@
   transition: opacity 0.2s ease;
 }
 
+/* Объясняет, почему секции ниже погашены — иначе disabled-тумблеры читаются
+   как баг, а не как логичное следствие выключенных уведомлений. */
+.profile-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--accent-red);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+}
+
+.profile-notice-icon {
+  flex: 0 0 auto;
+  margin-top: 0.0625rem;
+}
+
 /* Пуш на устройстве выключен — темы всё равно ничего не решают. Гасим их
    целиком, чтобы тумблеры не притворялись рабочими.
    !important обязателен: framer-motion пишет opacity секции инлайн-стилем
