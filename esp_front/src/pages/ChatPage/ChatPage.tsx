@@ -2087,7 +2087,12 @@ export const ChatPage: React.FC = () => {
                   <motion.div
                     key={`msg-${message.seq}`}
                     data-seq={message.seq}
-                    className={`chat-bubble-outer ${isMine ? 'mine' : ''} ${readers.length > 0 ? 'chat-bubble-outer--has-readers' : ''}`}
+                    // Отдельного класса под "есть кружок прочтения" тут больше нет:
+                    // метка переезжает по ленте на каждое событие read, и класс,
+                    // менявший margin строки, гонял из-за этого поток на 16px в
+                    // двух разных её местах. Теперь кружок живёт целиком в
+                    // обычном зазоре — см. .chat-read-avatars в ChatPage.css.
+                    className={`chat-bubble-outer ${isMine ? 'mine' : ''}`}
                     style={isExiting ? { overflow: 'hidden', pointerEvents: 'none' } : undefined}
                     initial={{ opacity: 0, y: 10 }}
                     animate={isExiting
