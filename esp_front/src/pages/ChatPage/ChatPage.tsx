@@ -41,6 +41,13 @@ const BUBBLE_POP_SCALE = 1.07;
 const BUBBLE_HOLD_SCALE = 1.03;
 const BUBBLE_POP_MS = 280;
 
+// Появление и уход меню действий. Одно число на все слои сразу (скрим, копия
+// пузыря, стопка карточек): AnimatePresence держит группу, пока не доиграет
+// самый долгий ребёнок, — пока длительности расходились, копия пузыря ещё
+// полсекунды доигрывала поверх уже открытой, незаблюренной ленты.
+const MENU_IN_MS = 180;
+const MENU_OUT_MS = 140;
+
 // Сколько длится схлопывание удалённого сообщения (height/margin → 0, см.
 // exitingMessages ниже). Одно число на саму анимацию и на страховочный
 // таймер, который дожинает строку, если анимация почему-то не доиграла —
@@ -2404,7 +2411,7 @@ export const ChatPage: React.FC = () => {
               initial={{ opacity: 1 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.12 }}
+              transition={{ duration: MENU_OUT_MS / 1000, ease: 'easeOut' }}
               onClick={closeActionMenu}
             />
 
@@ -2419,11 +2426,23 @@ export const ChatPage: React.FC = () => {
               <motion.div
                 key="action-clone"
                 className={`chat-bubble-clone ${actionTarget.user_id === userId ? 'mine' : ''}`}
-                style={{ left: anchorRect.left, top: anchorRect.top, width: anchorRect.width }}
+                style={{
+                  left: anchorRect.left,
+                  top: anchorRect.top,
+                  width: anchorRect.width,
+                  // Растём от того края, к которому пузырь и так прижат, — иначе
+                  // на 1.03 от центра он лезет за поле экрана у края ленты.
+                  transformOrigin: actionTarget.user_id === userId ? 'right center' : 'left center',
+                }}
+                // Ровный тween, а не пружина. Пружина здесь была сильно
+                // недодемпфирована (520/17 — это ζ≈0.37): на трёх процентах
+                // масштаба она успевала несколько раз перелететь цель, и текст
+                // внутри пузыря перерастрировался каждый кадр — это и была
+                // видимая тряска.
                 initial={{ scale: 1 }}
                 animate={{ scale: BUBBLE_HOLD_SCALE }}
-                exit={{ scale: 1 }}
-                transition={{ type: 'spring', stiffness: 520, damping: 17 }}
+                exit={{ scale: 1, transition: { duration: MENU_OUT_MS / 1000, ease: 'easeOut' } }}
+                transition={{ duration: MENU_IN_MS / 1000, ease: 'easeOut' }}
               >
                 <div className={`chat-bubble ${isMediaMessage(actionTarget) ? 'chat-bubble--media' : ''}`}>
                   {renderBubbleContent(
@@ -2454,16 +2473,16 @@ export const ChatPage: React.FC = () => {
               }}
               // Только прозрачность, без scale: у карточек своё стекло, а оно
               // при каждом изменении геометрии пересчитывает размытие заново —
-              // именно связка "стекло + пружинящий scale" и давала рябь.
-              // Пружинит вместо них копия сообщения, у неё стекла нет.
+              // именно связка "стекло + меняющийся scale" и давала рябь.
+              // Двигается вместо них копия сообщения, у неё стекла нет.
               initial={{ opacity: 0 }}
               // Стартуем tween только когда позиция уже известна — иначе он
               // отыгрывает, пока стопка ещё за экраном, и к моменту показа
               // уже почти доигран: на экране она материализуется готовой,
               // без видимого проявления.
               animate={{ opacity: menuPos ? 1 : 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
+              exit={{ opacity: 0, transition: { duration: MENU_OUT_MS / 1000, ease: 'easeOut' } }}
+              transition={{ duration: MENU_IN_MS / 1000, ease: 'easeOut' }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="chat-action-readers">
