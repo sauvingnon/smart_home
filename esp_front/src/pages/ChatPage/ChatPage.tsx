@@ -2119,46 +2119,61 @@ export const ChatPage: React.FC = () => {
           </div>
         ))}
 
-        <AnimatePresence initial={false}>
-          {pendingUploads.map((upload) => (
-            <motion.div
-              key={upload.localId}
-              className="chat-bubble-outer mine"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-            >
-              <div className="chat-bubble-col">
-              <div className="chat-bubble chat-bubble--uploading">
-                <div className={`chat-upload-preview ${upload.type === 'audio' ? 'chat-upload-preview--audio' : ''}`}>
-                  {upload.type === 'image' && upload.previewUrl && (
-                    <img src={upload.previewUrl} alt="" />
-                  )}
-                  {upload.type === 'video' && upload.previewUrl && (
-                    <video src={upload.previewUrl} muted preload="metadata" />
-                  )}
-                  {upload.type === 'video' && !upload.previewUrl && (
-                    <div className="chat-upload-audio-placeholder"><Video size={22} /></div>
-                  )}
-                  <div className="chat-upload-overlay">
-                    {upload.type === 'audio' && <Mic size={18} />}
-                    <svg className="chat-upload-ring" viewBox="0 0 40 40">
-                      <circle className="chat-upload-ring-track" cx="20" cy="20" r="17" />
-                      <circle
-                        className="chat-upload-ring-progress"
-                        cx="20" cy="20" r="17"
-                        strokeDasharray={2 * Math.PI * 17}
-                        strokeDashoffset={2 * Math.PI * 17 * (1 - upload.progress)}
-                      />
-                    </svg>
-                    <span className="chat-upload-percent">{Math.round(upload.progress * 100)}%</span>
-                  </div>
+        {/* Прогресс-пузырь намеренно НЕ обёрнут в AnimatePresence и не имеет
+            exit-анимации. AnimatePresence держит уходящий узел в DOM до конца
+            exit, а opacity высоту не трогает — то есть плейсхолдер оставался
+            бы в потоке ещё ~300мс уже ВМЕСТЕ с готовым сообщением, которое
+            приходит тем же коммитом (см. sendMessage в ChatContext: setMessages
+            и уборка pendingUploads батчатся вместе). Лента на эти 300мс
+            становилась выше на целый пузырь: контент уезжал вверх на высоту
+            готового медиа, а по концу анимации падал обратно на высоту
+            плейсхолдера (180px у фото/видео, 52 у голосового). Плюс уборка
+            попадала внутрь 600мс окна smooth-скролла, на котором pin()
+            намеренно молчит, — то есть эту просадку не подхватывал и
+            ResizeObserver.
+
+            Без AnimatePresence снятие плейсхолдера — обычный анмаунт в том же
+            коммите, что и вставка настоящего сообщения: высота меняется ровно
+            один раз и ровно на разницу между ними. Появление пузыря
+            (initial/animate) работает и без обёртки — она тут отвечала только
+            за уход. */}
+        {pendingUploads.map((upload) => (
+          <motion.div
+            key={upload.localId}
+            className="chat-bubble-outer mine"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="chat-bubble-col">
+            <div className="chat-bubble chat-bubble--uploading">
+              <div className={`chat-upload-preview ${upload.type === 'audio' ? 'chat-upload-preview--audio' : ''}`}>
+                {upload.type === 'image' && upload.previewUrl && (
+                  <img src={upload.previewUrl} alt="" />
+                )}
+                {upload.type === 'video' && upload.previewUrl && (
+                  <video src={upload.previewUrl} muted preload="metadata" />
+                )}
+                {upload.type === 'video' && !upload.previewUrl && (
+                  <div className="chat-upload-audio-placeholder"><Video size={22} /></div>
+                )}
+                <div className="chat-upload-overlay">
+                  {upload.type === 'audio' && <Mic size={18} />}
+                  <svg className="chat-upload-ring" viewBox="0 0 40 40">
+                    <circle className="chat-upload-ring-track" cx="20" cy="20" r="17" />
+                    <circle
+                      className="chat-upload-ring-progress"
+                      cx="20" cy="20" r="17"
+                      strokeDasharray={2 * Math.PI * 17}
+                      strokeDashoffset={2 * Math.PI * 17 * (1 - upload.progress)}
+                    />
+                  </svg>
+                  <span className="chat-upload-percent">{Math.round(upload.progress * 100)}%</span>
                 </div>
               </div>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
+            </div>
+            </div>
+          </motion.div>
+        ))}
         </div>
 
       </div>
