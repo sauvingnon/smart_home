@@ -1,7 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useTheme } from '../../context/ThemeContext';
-import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
 import { useNavBarHidden, useTriggerTabReselect } from '../../context/NavBarContext';
 import { Home, MessageCircle, Video, SlidersHorizontal } from 'lucide-react';
@@ -12,14 +11,13 @@ import './BottomNavBar.css';
 // сервисные настройки платы — в «Управлении».
 const navItems = [
   { path: '/', icon: Home, label: 'Дом' },
-  { path: '/chat', icon: MessageCircle, label: 'Чат', adminOnly: true },
+  { path: '/chat', icon: MessageCircle, label: 'Чат' },
   { path: '/videos', icon: Video, label: 'Видео' },
   { path: '/settings', icon: SlidersHorizontal, label: 'Управление' },
 ];
 
 export const BottomNavBar = () => {
   const { theme } = useTheme();
-  const { isAdmin } = useAuth();
   const { unreadCount } = useChat();
   const location = useLocation();
   const triggerReselect = useTriggerTabReselect();
@@ -30,7 +28,7 @@ export const BottomNavBar = () => {
 
   return (
     <nav className={`bottom-nav ${theme} ${hidden ? 'hidden' : ''}`}>
-      {navItems.filter((item) => !item.adminOnly || isAdmin).map(({ path, icon: Icon, label }) => {
+      {navItems.map(({ path, icon: Icon, label }) => {
         const isActive = path === '/'
           ? location.pathname === '/'
           : location.pathname.startsWith(path.split('/').slice(0, 2).join('/'));

@@ -16,7 +16,7 @@ import { NavBarProvider } from './context/NavBarContext';
 import { BottomNavBar } from './components/BottomNavBar/BottomNavBar';
 
 function App() {
-  const { accessKey, isLoading: authLoading, resetSession, isAdmin } = useAuth();
+  const { accessKey, isLoading: authLoading, resetSession } = useAuth();
   const [appReady, setAppReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -92,7 +92,7 @@ function App() {
               {/* Не в таб-баре — сюда попадают только по кнопке камеры в шапке
                   Видео. Камера в доме одна, поэтому без :cameraId в пути. */}
               <Route path="/videos/camera" element={<CameraPage />} />
-              <Route path="/chat" element={isAdmin ? <ChatPage /> : <Navigate to="/" replace />} />
+              <Route path="/chat" element={<ChatPage />} />
               {/* /chat/settings и /videos/settings больше нет: настройки
                   уведомлений из обоих сведены в /profile. Старые ссылки ловит
                   catch-all ниже. */}
