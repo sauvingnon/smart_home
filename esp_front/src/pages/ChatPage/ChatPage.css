@@ -427,12 +427,16 @@
   padding: 12px 16px;
 }
 
+/* Цвет тот же, что у пунктов меню, а не приглушённый: в тёмной теме
+   --text-tertiary это всего 30% белого, и на матовом стекле карточки такой
+   заголовок не читался. Роль второстепенного текста здесь и так отыгрывают
+   размер и капитель — гасить его ещё и прозрачностью незачем. */
 .chat-action-readers-title {
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--text-tertiary);
+  color: var(--text-primary);
 }
 
 .chat-action-readers-empty {
@@ -456,9 +460,10 @@
   white-space: nowrap;
 }
 
+/* И время тоже в цвет имени рядом — по той же причине, что и заголовок выше. */
 .chat-action-reader-time {
   flex: 0 0 auto;
-  color: var(--text-tertiary);
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
 
