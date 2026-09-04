@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, ImageOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Users, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
@@ -729,41 +730,56 @@ export const ChatPage: React.FC = () => {
       setSendError('Нет соединения — дождись переподключения и отправь ещё раз');
       return;
     }
+    const editing = editTarget;
     setSending(true);
-    let sent = false;
+
+    // Поле пересоздаётся и фокусируется ЗДЕСЬ — синхронно, ещё внутри
+    // обработчика тапа, до всякой сети.
+    //
+    // Пересоздание нужно вот зачем: просто textContent = '' + .focus() не
+    // сбрасывает "сессию автозаглавной буквы" WebKit — после программной
+    // очистки поля следующее сообщение стабильно начиналось со строчной.
+    // Толкание contentEditable false→true на том же узле тоже не помогло.
+    // Реально работает только пересоздание DOM-узла: рост composerKey
+    // размонтирует старый div и монтирует новый, для WebKit это буквально
+    // "поле только что появилось".
+    //
+    // Но у размонтирования contentEditable есть цена, уже описанная выше у
+    // оверлея записи: вместе с узлом браузер уносит фокус и закрывает
+    // клавиатуру. Раньше ремаунт стоял в finally, то есть после await —
+    // пользовательский жест к тому моменту давно кончился, а вернуть
+    // клавиатуру программным .focus() вне жеста iOS не даёт. Получалось
+    // худшее из возможных: клавиатуры нет, но inputFocused всё ещё true, а
+    // значит таб-бар остаётся спрятанным (useHideNavBar) и инпут-бар висит
+    // в позиции "над клавиатурой" — снизу пустая полоса вместо чего угодно.
+    // Внутри жеста ремаунт и фокус проходят по тем же правилам, что и обычный
+    // тап по полю, и клавиатура остаётся на месте.
+    flushSync(() => {
+      setInputText('');
+      composerRefocusRef.current = true;
+      setComposerKey((k) => k + 1);
+    });
+
     try {
-      if (editTarget) {
-        await editMessage(editTarget.seq, text);
+      if (editing) {
+        await editMessage(editing.seq, text);
         setEditTarget(null);
       } else {
         await sendMessage({ type: 'text', text, replyTo: replyTarget?.seq ?? null });
         setReplyTarget(null);
       }
-      setInputText('');
-      sent = true;
       setSendError(null);
     } catch (err) {
       console.error('Не удалось отправить сообщение', err);
       setSendError(errorMessage(err));
+      // Не ушло — возвращаем набранное в поле, чтобы не заставлять печатать
+      // заново. Узел тут уже новый (тот самый ремаунт), поэтому текст пишем
+      // и в состояние, и в сам DOM.
+      setInputText(text);
+      if (textInputRef.current) textInputRef.current.textContent = text;
+      focusComposerAtEnd();
     } finally {
       setSending(false);
-      if (sent) {
-        // Просто textContent = '' + .focus() не сбрасывает "сессию
-        // автозаглавной буквы" WebKit — после программной очистки поля
-        // следующее сообщение стабильно начиналось со строчной. Толкание
-        // contentEditable false→true на том же узле тоже не помогло (было
-        // опробовано ранее). Реально работает только пересоздание самого
-        // DOM-узла — рост composerKey размонтирует старый div и монтирует
-        // новый, для WebKit это буквально "поле только что появилось".
-        composerRefocusRef.current = true;
-        setComposerKey((k) => k + 1);
-      } else {
-        // Поле не disabled во время отправки специально — но фокус браузер
-        // всё равно может увести на кнопку отправки, возвращаем его в поле
-        // ввода. Ремаунт тут не нужен и вреден: текст не отправился и
-        // должен остаться как есть, а новый пустой узел его бы стёр.
-        focusComposerAtEnd();
-      }
     }
   };
 
@@ -1462,6 +1478,12 @@ export const ChatPage: React.FC = () => {
     if (!composerRefocusRef.current) return;
     composerRefocusRef.current = false;
     textInputRef.current?.focus();
+    // Уход фокуса вместе с размонтированным узлом браузер blur-ом не
+    // сопровождает, поэтому onBlur старого поля не сработает и inputFocused
+    // сам по себе не обновится. Если фокус на новый узел почему-то не сел —
+    // приводим флаг к реальности руками, иначе страница застрянет в режиме
+    // "печатают" (спрятанный таб-бар, поднятый инпут-бар) без клавиатуры.
+    setInputFocused(document.activeElement === textInputRef.current);
   }, [composerKey]);
 
   const startReply = (message: ChatMessage) => {
@@ -2325,7 +2347,10 @@ export const ChatPage: React.FC = () => {
               чтобы отправить" — специально НЕ размонтируется между этими состояниями
               (см. handleMicPointerDown), иначе setPointerCapture слетит на середине
               удержания. */}
-          {!recording && inputText.trim() ? (
+          {/* `|| sending` — поле очищается сразу по тапу (см. handleSendText),
+              и без этого кнопка на время отправки успевала перещёлкнуться на
+              микрофон: вместо спиннера мигала посторонняя иконка. */}
+          {!recording && (inputText.trim() || sending) ? (
             <button
               className={`chat-send-button ${connectionState !== 'connected' ? 'chat-send-button--offline' : ''}`}
               disabled={sending}
