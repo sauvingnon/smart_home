@@ -1,6 +1,7 @@
 import redis.asyncio as redis
 from typing import Optional
 from app.schemas.weather_data import WeatherData
+from app.utils.time import IZHEVSK_TZ as _IZHEVSK_TZ
 from datetime import timedelta, datetime, timezone
 import json
 from logger import logger
@@ -374,7 +375,12 @@ class CacheManager:
             self._save_keys_backup(backup)
         return result
     
-    IZHEVSK_TZ = timezone(timedelta(hours=4))
+    # Ровно та же зона, что и у app.utils.time._get_izhevsk_time, а не своя
+    # копия смещения: время сообщения (ts) ставит один источник, время
+    # прочтения (read_at) — другой, и лежат они рядом в одном UI. Смещение
+    # совпадало и раньше (Самара — UTC+4 без перевода часов), но два
+    # независимых определения одного и того же — это то, что расходится молча.
+    IZHEVSK_TZ = _IZHEVSK_TZ
 
     # ───────────────────── ЮЗЕРЫ ─────────────────────
     # Конечный, фиксированный набор людей — новые не добавляются через UI,
@@ -660,11 +666,53 @@ class CacheManager:
         return reads
 
     async def get_chat_unread_count(self, user_id: int) -> int:
-        """Непрочитанные = текущий seq - последний прочитанный юзером seq."""
-        current = await self.chat_current_seq()
+        """Непрочитанные — это реально лежащие в ленте чужие сообщения новее
+        последнего прочитанного.
+
+        Раньше тут была разность счётчиков (chat:seq - last_read_seq), и она
+        врала сразу тремя способами, потому что chat:seq только растёт и ничего
+        не знает ни об авторстве, ни о том, живо ли ещё сообщение:
+
+          * удалённое сообщение продолжало считаться непрочитанным навсегда;
+          * то же самое после чистки по retention — юзер, не заходивший месяц,
+            получал бейдж на пустом чате, и погасить его можно было только
+            зайдя в чат;
+          * системные плашки ("закрепил(а)") и собственные сообщения юзера
+            считались наравне с чужими, хотя фронт их в бейдж не берёт (см.
+            ветку 'message' в ChatContext) — из-за чего локальный счётчик и
+            серверный расходились на каждой пересинхронизации.
+
+        Цена — проход по непрочитанному хвосту вместо вычитания. Хвост ограничен
+        сверху всей историей чата (retention 30 дней), а поля берём двумя
+        значениями через hmget одним пайплайном, а не hgetall на сообщение.
+        """
+        if not await self._ensure_connection():
+            return 0
         read = await self.get_chat_read(user_id)
         last_read_seq = read["last_read_seq"] if read else 0
-        return max(0, current - last_read_seq)
+        seqs = await self.redis_client.zrangebyscore(
+            self.CHAT_MESSAGES_ZSET, f"({last_read_seq}", "+inf"
+        )
+        if not seqs:
+            return 0
+        pipe = self.redis_client.pipeline()
+        for s in seqs:
+            pipe.hmget(f"{self.CHAT_MSG_PREFIX}{s}", "user_id", "type")
+        rows = await pipe.execute()
+        count = 0
+        for author, msg_type in rows:
+            # Сообщение исчезло между zrangebyscore и hmget — считать нечего.
+            if author is None:
+                continue
+            if msg_type == "system":
+                continue
+            try:
+                if int(author) == user_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            count += 1
+        return count
 
     CHAT_LAST_SEEN_PREFIX = "chat:last_seen:"
 

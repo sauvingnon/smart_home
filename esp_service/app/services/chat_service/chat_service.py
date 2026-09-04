@@ -640,7 +640,20 @@ class ChatService:
         # каждом открытии и каждом новом сообщении, и "прочитано в HH:MM" у уже
         # прочитанных сообщений иначе переписывалось бы на now при каждом вызове.
         read_at = await self.cache.set_chat_read(user_id, seq)
-        payload = {"user_id": user_id, "seq": seq, "at": read_at or _get_izhevsk_time().isoformat()}
+        # display_name прямо в событии, а не только в /read_states. Клиент строит
+        # свою таблицу прочтений из двух источников — полного снимка по HTTP и
+        # этих событий — и раньше событие, пришедшее раньше снимка (сокет
+        # поднимается позже первого запроса истории, а снимок мог и не доехать
+        # вовсе), создавало запись с пустым именем. Дальше она копировалась из
+        # самой себя при каждом следующем событии, и кружок прочтения так и
+        # оставался безымянным "?" до полной пересинхронизации.
+        user = await self.cache.get_user(user_id)
+        payload = {
+            "user_id": user_id,
+            "display_name": user["display_name"] if user else str(user_id),
+            "seq": seq,
+            "at": read_at or _get_izhevsk_time().isoformat(),
+        }
         await self.broadcast({"type": "read", "data": payload})
         return payload
 

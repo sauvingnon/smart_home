@@ -55,6 +55,10 @@ class ReadReceiptsResponse(BaseModel):
 
 class MarkReadResponse(BaseModel):
     user_id: int
+    # Дублирует то, что и так лежит в /read_states — нужно именно в этом ответе,
+    # потому что тем же телом уходит WS-событие "read", а оно может прийти
+    # клиенту раньше, чем полный снимок прочтений (см. ChatService.mark_read).
+    display_name: str
     seq: int
     at: str
 

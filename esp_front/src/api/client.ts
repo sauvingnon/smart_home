@@ -72,7 +72,11 @@ export interface ChatPresenceEntry {
 
 export type ChatWsEvent =
   | { type: 'message'; data: ChatMessage }
-  | { type: 'read'; data: { user_id: number; seq: number; at: string } }
+  // display_name приходит прямо в событии: оно вполне может опередить полный
+  // снимок из /chat/read_states (сокет поднимается позже первого запроса
+  // истории, а снимок мог и не доехать), и без имени в самом событии кружок
+  // прочтения оставался безымянным до следующей пересинхронизации.
+  | { type: 'read'; data: { user_id: number; display_name?: string; seq: number; at: string } }
   | { type: 'pinned'; data: ChatMessage }
   | { type: 'unpinned'; data: Record<string, never> }
   | { type: 'deleted'; data: { seq: number } }
@@ -353,7 +357,7 @@ class ApiClient {
     });
   }
 
-  async markChatRead(): Promise<{ user_id: number; seq: number; at: string }> {
+  async markChatRead(): Promise<{ user_id: number; display_name: string; seq: number; at: string }> {
     return this.fetch('/chat/read', { method: 'POST' });
   }
 
