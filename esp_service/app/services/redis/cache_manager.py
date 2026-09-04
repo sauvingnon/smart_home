@@ -493,6 +493,12 @@ class CacheManager:
     # retention-окна, а не по числу сообщений.
     CHAT_READ_HIST_PREFIX = "chat:read_hist:"
     CHAT_PINNED_KEY = "chat:pinned"
+    # Реакции — отдельный хэш на сообщение, {user_id: emoji}, а не поле внутри
+    # самого сообщения. Полем это был бы read-modify-write всего списка на
+    # каждый тап (две одновременные реакции затирали бы друг друга), а так —
+    # один HSET/HDEL. Одна реакция на человека, как в бесплатном Telegram:
+    # ключ — сам юзер, смена эмодзи просто перезаписывает его запись.
+    CHAT_REACT_PREFIX = "chat:react:"
 
     async def chat_next_seq(self) -> int:
         """Инкрементирует и возвращает новый seq для сообщения."""
@@ -562,12 +568,19 @@ class CacheManager:
         seqs = await self.redis_client.zrevrangebyscore(
             self.CHAT_MESSAGES_ZSET, max_score, "-inf", start=0, num=limit
         )
-        messages = []
+        if not seqs:
+            return []
+        # Пайплайном, а не последовательными await: страница — это 50 сообщений,
+        # то есть было 50 round-trip'ов в Redis подряд на каждую загрузку
+        # истории (и столько же ещё за реакциями к ним, см.
+        # get_chat_reactions_bulk). Тот же приём, что в get_chat_unread_count.
+        pipe = self.redis_client.pipeline()
         for s in seqs:
-            data = await self.redis_client.hgetall(f"{self.CHAT_MSG_PREFIX}{s}")
-            if not data:
-                continue
-            messages.append(self._decode_chat_message(data))
+            pipe.hgetall(f"{self.CHAT_MSG_PREFIX}{s}")
+        rows = await pipe.execute()
+        # Сообщение могло исчезнуть между zrevrangebyscore и чтением — пустой
+        # хэш просто пропускаем.
+        messages = [self._decode_chat_message(data) for data in rows if data]
         messages.reverse()
         return messages
 
@@ -599,6 +612,65 @@ class CacheManager:
         await self.redis_client.delete(self.CHAT_PINNED_KEY)
         return True
 
+    async def toggle_chat_reaction(self, seq: int, user_id: int, emoji: str) -> dict:
+        """Ставит, меняет или снимает реакцию юзера на сообщении: тот же эмодзи
+        повторно — снять, другой — заменить (одна реакция на человека). Возвращает
+        реакции всего сообщения целиком, {user_id: emoji} — в агрегат по эмодзи их
+        складывает вызывающая сторона, ей же принадлежит и порядок."""
+        if not await self._ensure_connection():
+            raise RuntimeError("Redis недоступен")
+        key = f"{self.CHAT_REACT_PREFIX}{seq}"
+        current = await self.redis_client.hget(key, str(user_id))
+        if current == emoji:
+            await self.redis_client.hdel(key, str(user_id))
+        else:
+            # Смена эмодзи — это удаление и новая запись, а не правка на месте,
+            # хотя одного HSET хватило бы. Порядок полей в хэше — это порядок
+            # чипсов и лиц на экране (см. _aggregate_reactions), и правка на
+            # месте оставляла бы передумавшего на его старой позиции: снятый им
+            # чипс исчезал, а тот, что остался за другими людьми, уезжал вбок —
+            # ровно тот прыжок, ради которого порядок и сделан "кто вперёд, тот
+            # и левее". Передумал — встал в конец очереди, остальные не
+            # шелохнулись. Клиент считает оптимистичное состояние по этому же
+            # правилу (applyOwnReaction в ChatContext).
+            if current is not None:
+                await self.redis_client.hdel(key, str(user_id))
+            await self.redis_client.hset(key, str(user_id), emoji)
+        return await self.get_chat_reactions(seq)
+
+    async def get_chat_reactions(self, seq: int) -> dict:
+        """Реакции одного сообщения: {user_id: emoji}. Пусто — реакций нет."""
+        if not await self._ensure_connection():
+            return {}
+        data = await self.redis_client.hgetall(f"{self.CHAT_REACT_PREFIX}{seq}")
+        return self._decode_reactions(data)
+
+    async def get_chat_reactions_bulk(self, seqs: list) -> dict:
+        """Реакции сразу ко всей странице истории — {seq: {user_id: emoji}}, и
+        только к тем сообщениям, где они вообще есть. Одним пайплайном: иначе
+        каждая загрузка истории стоила бы ещё 50 round-trip'ов поверх самих
+        сообщений."""
+        if not seqs or not await self._ensure_connection():
+            return {}
+        pipe = self.redis_client.pipeline()
+        for s in seqs:
+            pipe.hgetall(f"{self.CHAT_REACT_PREFIX}{s}")
+        rows = await pipe.execute()
+        return {int(s): self._decode_reactions(row) for s, row in zip(seqs, rows) if row}
+
+    @staticmethod
+    def _decode_reactions(data: dict) -> dict:
+        """Ключи хэша — строки; наружу отдаём int user_id, как везде в чате.
+        Нечисловой ключ в этом хэше означал бы, что его писал не наш код, —
+        такую запись просто игнорируем, а не роняем всю выдачу истории."""
+        decoded = {}
+        for uid, emoji in data.items():
+            try:
+                decoded[int(uid)] = emoji
+            except (TypeError, ValueError):
+                continue
+        return decoded
+
     async def get_expired_chat_messages(self, older_than_days: int = 30) -> list:
         """Сообщения старше N дней (seq растёт вместе с временем — как только
         встретили ещё не протухшее, дальше можно не проверять)."""
@@ -622,13 +694,16 @@ class CacheManager:
         return expired
 
     async def delete_chat_messages(self, seqs: list) -> int:
-        """Удаляет сообщения по seq (из hash'ей и из ленты). Не трогает S3 — файлы
-        медиа удаляет вызывающая сторона (ChatService), у CacheManager нет доступа к S3."""
+        """Удаляет сообщения по seq (из hash'ей, из ленты и вместе с реакциями к
+        ним — иначе хэш реакций пережил бы само сообщение и остался в Redis
+        навсегда). Не трогает S3 — файлы медиа удаляет вызывающая сторона
+        (ChatService), у CacheManager нет доступа к S3."""
         if not seqs or not await self._ensure_connection():
             return 0
         removed = 0
         for s in seqs:
             await self.redis_client.delete(f"{self.CHAT_MSG_PREFIX}{s}")
+            await self.redis_client.delete(f"{self.CHAT_REACT_PREFIX}{s}")
             await self.redis_client.zrem(self.CHAT_MESSAGES_ZSET, s)
             removed += 1
         return removed

@@ -10,6 +10,19 @@ export const getWebSocketBaseUrl = (): string => {
   return `${protocol}//${window.location.host}${API_BASE_URL}`;
 };
 
+// Базовый набор реакций. Дублирует ALLOWED_REACTIONS на бэке (он же и
+// валидирует) — здесь это и кнопки пикера, и порядок чипсов под сообщением:
+// сортировка по этому списку, а не по тому, кто отреагировал первым, иначе
+// чипсы перетасовывались бы на каждую чужую реакцию.
+export const REACTION_EMOJI: readonly string[] = ['👍', '❤️', '🔥', '😁', '😢', '👎'];
+
+export interface ChatReaction {
+  emoji: string;
+  // Кто поставил. Не счётчик: по этим id подсвечивается своя реакция, и из них
+  // же берутся имена (они уже есть в presence) для подписи «кто отреагировал».
+  user_ids: number[];
+}
+
 export interface ChatMessage {
   seq: number;
   user_id: number;
@@ -39,6 +52,10 @@ export interface ChatMessage {
   // Только у type === 'system': 'pinned' | 'unpinned'. Кто — user_id/username,
   // какое сообщение — reply_to/reply_to_preview (тот же снимок, что у ответов).
   system_kind: string;
+  // Реакции на сообщении. Необязательное поле: в localStorage лежит кеш
+  // последней страницы, записанный ещё до появления реакций (см. CHAT_CACHE_KEY
+  // в ChatContext) — оттуда сообщения приезжают вообще без этого ключа.
+  reactions?: ChatReaction[];
 }
 
 export interface ChatReadState {
@@ -81,6 +98,9 @@ export type ChatWsEvent =
   | { type: 'unpinned'; data: Record<string, never> }
   | { type: 'deleted'; data: { seq: number } }
   | { type: 'edited'; data: ChatMessage }
+  // Не дельта, а весь агрегат по сообщению: мержить дельты на клиенте — лишний
+  // источник расхождения, а участников чата всего четверо.
+  | { type: 'reaction'; data: { seq: number; reactions: ChatReaction[] } }
   | { type: 'presence'; data: ChatPresenceEntry }
   | { type: 'presence_snapshot'; data: ChatPresenceEntry[] }
   | { type: 'typing'; data: { user_id: number; display_name: string } };
@@ -402,6 +422,13 @@ class ApiClient {
 
   async editChatMessage(seq: number, text: string): Promise<ChatMessage> {
     return this.fetch(`/chat/messages/${seq}`, { method: 'PATCH', body: JSON.stringify({ text }) });
+  }
+
+  /** Тоггл своей реакции: тот же эмодзи повторно снимает её, другой — заменяет
+      (реакция на человека одна). Возвращает агрегат по сообщению целиком, он же
+      уходит всем остальным событием reaction по WS. */
+  async toggleChatReaction(seq: number, emoji: string): Promise<{ reactions: ChatReaction[] }> {
+    return this.fetch(`/chat/messages/${seq}/reaction`, { method: 'POST', body: JSON.stringify({ emoji }) });
   }
 
   async getPinnedChatMessage(): Promise<{ message: ChatMessage | null }> {

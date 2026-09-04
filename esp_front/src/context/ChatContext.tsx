@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { apiClient } from '../api/client';
-import type { ChatMessage, ChatPresenceEntry, ChatReadState, ChatWsEvent } from '../api/client';
+import type { ChatMessage, ChatPresenceEntry, ChatReaction, ChatReadState, ChatWsEvent } from '../api/client';
 import { useAuth } from './AuthContext';
 import { useTheme } from './ThemeContext';
 import './ChatContext.css';
@@ -50,6 +50,8 @@ interface ChatContextType {
   unpinMessage: () => Promise<void>;
   deleteMessage: (seq: number) => Promise<void>;
   editMessage: (seq: number, text: string) => Promise<void>;
+  /** Тоггл своей реакции на сообщении: тот же эмодзи снимает, другой заменяет. */
+  toggleReaction: (seq: number, emoji: string) => Promise<void>;
   presence: ChatPresenceEntry[];
   typingUsers: TypingUser[];
   notifyTyping: () => void;
@@ -111,6 +113,45 @@ function mergeFreshPage(prev: ChatMessage[], page: ChatMessage[]): ChatMessage[]
   // юзер догрузит скроллом.
   if (!contiguous) return page;
   return [...prev.filter((m) => m.seq < oldestFresh), ...page];
+}
+
+// Свежий снимок прочтений поверх уже показанного — с сохранением порядка, в
+// котором читатели стоят сейчас. Порядок этого массива виден на экране (кружки
+// "прочитано" идут ровно им), а /chat/read_states отдаёт людей в порядке
+// обхода ключей Redis, который между вызовами вполне может оказаться другим.
+// Заменять массив целиком значило бы перетасовывать кружки на каждой
+// досинхронизации — то есть на каждом возврате в приложение и реконнекте.
+// Известные остаются на местах со свежими данными, новые дописываются в хвост.
+function mergeReads(prev: ChatReadState[], fresh: ChatReadState[]): ChatReadState[] {
+  const byId = new Map(fresh.map((r) => [r.user_id, r]));
+  const merged: ChatReadState[] = [];
+  for (const known of prev) {
+    const next = byId.get(known.user_id);
+    // Юзера нет в свежем снимке — его удалили; сервер тут истина.
+    if (!next) continue;
+    merged.push(next);
+    byId.delete(known.user_id);
+  }
+  return [...merged, ...byId.values()];
+}
+
+// Оптимистичный пересчёт реакций сообщения после собственного тапа: свой id
+// либо убираем (тот же эмодзи повторно), либо переносим на новый — реакция на
+// человека одна.
+//
+// Только дописывание в хвост, никакой сортировки — тем же правилом, что и на
+// сервере (см. _aggregate_reactions): порядок "кто раньше, тот левее" не
+// двигает уже нарисованные аватарки, когда рядом появляется новая.
+function applyOwnReaction(list: ChatReaction[], userId: number, emoji: string): ChatReaction[] {
+  const had = list.some((r) => r.emoji === emoji && r.user_ids.includes(userId));
+  const without = list
+    .map((r) => ({ emoji: r.emoji, user_ids: r.user_ids.filter((id) => id !== userId) }))
+    .filter((r) => r.user_ids.length > 0);
+  if (had) return without;
+  const target = without.find((r) => r.emoji === emoji);
+  return target
+    ? without.map((r) => (r.emoji === emoji ? { ...r, user_ids: [...r.user_ids, userId] } : r))
+    : [...without, { emoji, user_ids: [userId] }];
 }
 
 const TOAST_DURATION_MS = 4000;
@@ -336,7 +377,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (isStale()) return;
       setMessages((prev) => mergeFreshPage(prev, historyRes.messages));
       setHasMoreHistory(historyRes.messages.length >= HISTORY_PAGE_SIZE);
-      setReads(readsRes.reads);
+      setReads((prev) => mergeReads(prev, readsRes.reads));
       setPinnedMessage(pinnedRes.message);
       setPresence(presenceRes.entries);
       // Мы смотрим прямо в ленту — то, что пришло, пока нас не было, читается
@@ -433,8 +474,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Повтор того же (или более старого) seq — например, юзер просто заново
             // открыл чат: время прочтения уже зафиксировано, перетирать его нельзя.
             if (existing && existing.last_read_seq >= event.data.seq) return prev;
-            const next = prev.filter((r) => r.user_id !== event.data.user_id);
-            next.push({
+            const updated = {
               user_id: event.data.user_id,
               // Имя берём из события, и только потом — из уже известной записи.
               // Раньше был только второй источник, и запись, созданная событием,
@@ -445,8 +485,15 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
               display_name: event.data.display_name || existing?.display_name || '',
               last_read_seq: event.data.seq,
               read_at: event.data.at,
-            });
-            return next;
+            };
+            // Обновление НА МЕСТЕ, а не "выдернуть и дописать в конец". Порядок
+            // этого массива — это порядок кружков "прочитано" под сообщением
+            // (ChatPage больше не сортирует их сам): выдёргивание перетасовывало
+            // бы их на каждое чужое прочтение. Новый читатель — в хвост, кто
+            // раньше пришёл, тот и левее.
+            return existing
+              ? prev.map((r) => (r.user_id === event.data.user_id ? updated : r))
+              : [...prev, updated];
           });
         } else if (event.type === 'pinned') {
           setPinnedMessage(event.data);
@@ -456,6 +503,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const edited = event.data;
           setMessages((prev) => prev.map((m) => (m.seq === edited.seq ? edited : m)));
           setPinnedMessage((prev) => (prev?.seq === edited.seq ? edited : prev));
+        } else if (event.type === 'reaction') {
+          const { seq, reactions } = event.data;
+          setMessages((prev) => prev.map((m) => (m.seq === seq ? { ...m, reactions } : m)));
+          // Закреплённое сообщение живёт у клиента отдельной копией (баннер над
+          // лентой) — по той же причине, что и у правки, её надо обновлять
+          // явно, иначе копия и лента разойдутся до перезахода в чат.
+          setPinnedMessage((prev) => (prev?.seq === seq ? { ...prev, reactions } : prev));
+          // Ни бейджа, ни тоста: реакция — не сообщение, "пропустить" её нельзя.
         } else if (event.type === 'deleted') {
           // Сервер шлёт это всем, включая автора удаления: у него сообщение
           // уже убрано оптимистично, повторное удаление из массива безвредно.
@@ -660,6 +715,31 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Оптимистично, как правка и удаление: чипс появляется под пальцем, не
+  // дожидаясь сети. Ответ сервера всё равно приходит агрегатом и перезаписывает
+  // наш локальный пересчёт — расхождение (кто-то отреагировал в ту же секунду)
+  // живёт ровно до него. Откат на прежний список, если запрос не прошёл.
+  const toggleReaction = useCallback(async (seq: number, emoji: string) => {
+    if (!userId) return;
+    let previous: ChatReaction[] | undefined;
+    setMessages((prev) => prev.map((m) => {
+      if (m.seq !== seq) return m;
+      previous = m.reactions ?? [];
+      return { ...m, reactions: applyOwnReaction(previous, userId, emoji) };
+    }));
+    try {
+      const { reactions } = await apiClient.toggleChatReaction(seq, emoji);
+      setMessages((prev) => prev.map((m) => (m.seq === seq ? { ...m, reactions } : m)));
+      setPinnedMessage((prev) => (prev?.seq === seq ? { ...prev, reactions } : prev));
+    } catch (e) {
+      if (previous) {
+        const restored = previous;
+        setMessages((prev) => prev.map((m) => (m.seq === seq ? { ...m, reactions: restored } : m)));
+      }
+      throw e;
+    }
+  }, [userId]);
+
   const sendMessage = useCallback(async (payload: Parameters<typeof apiClient.sendChatMessage>[0]) => {
     // Прогресс-пузырь только для медиа (текст улетает мгновенно, показывать
     // нечего) и только локально у отправителя — превью из локального Blob,
@@ -724,6 +804,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unpinMessage,
       deleteMessage,
       editMessage,
+      toggleReaction,
       presence,
       typingUsers,
       notifyTyping,

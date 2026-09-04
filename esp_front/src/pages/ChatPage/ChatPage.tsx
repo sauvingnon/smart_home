@@ -5,7 +5,7 @@ import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, V
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
-import { apiClient } from '../../api/client';
+import { apiClient, REACTION_EMOJI } from '../../api/client';
 import type { ChatMessage, ChatReadState, PushStatusEntry } from '../../api/client';
 import { useHideNavBar } from '../../context/NavBarContext';
 import { useChatPush } from '../../hooks/useChatPush';
@@ -56,6 +56,12 @@ const EXIT_COLLAPSE_MS = 220;
 
 // Цвет кружка "прочитано" — по user_id, а не по позиции в списке: так буква
 // у человека всегда одного цвета, независимо от порядка ответа сервера.
+// Сколько лиц влезает в один чипс реакции, прежде чем остальные схлопнутся в
+// "+N". В этом чате людей четверо, так что порог почти никогда не срабатывает —
+// он страховка от того, чтобы одна популярная реакция не растянула чипс на всю
+// ленту (в базе, кроме живых людей, живут ещё и тестовые юзеры).
+const REACTION_AVATARS_MAX = 3;
+
 const READ_AVATAR_COLORS = ['#3b82f6', '#10b981', '#a855f7', '#f97316', '#ec4899', '#06b6d4'];
 const readAvatarColor = (userId: number) => READ_AVATAR_COLORS[Math.abs(userId) % READ_AVATAR_COLORS.length];
 const readAvatarLetter = (displayName: string) => displayName.trim().charAt(0).toUpperCase() || '?';
@@ -234,7 +240,7 @@ export const ChatPage: React.FC = () => {
   const { userId } = useAuth();
   const {
     messages, pendingUploads, reads, unreadFromSeq, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead, setReadGate,
-    pinnedMessage, pinMessage, unpinMessage, deleteMessage, editMessage, presence, typingUsers, notifyTyping,
+    pinnedMessage, pinMessage, unpinMessage, deleteMessage, editMessage, toggleReaction, presence, typingUsers, notifyTyping,
   } = useChat();
 
   const [inputText, setInputText] = useState('');
@@ -1573,6 +1579,20 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  // Тап по эмодзи в пикере и тап по уже стоящему чипсу — одно и то же действие
+  // (тоггл), поэтому обработчик один. Меню закрываем сразу, не дожидаясь сети:
+  // сам чипс появляется оптимистично (см. toggleReaction в ChatContext), и
+  // держать поверх него открытое меню было бы только помехой.
+  const handleReaction = async (message: ChatMessage, emoji: string) => {
+    closeActionMenu();
+    navigator.vibrate?.(10);
+    try {
+      await toggleReaction(message.seq, emoji);
+    } catch (e) {
+      setSendError(errorMessage(e));
+    }
+  };
+
   const confirmDelete = async (message: ChatMessage) => {
     closeActionMenu();
     if (!window.confirm('Удалить сообщение у всех? Это необратимо.')) return;
@@ -1599,10 +1619,25 @@ export const ChatPage: React.FC = () => {
     popBubble(seq);
   };
 
+  // Имена по id — для подписи "кто отреагировал". Отдельного запроса не надо:
+  // presence и так приезжает на каждый вход в чат и содержит всех участников,
+  // включая нас самих.
+  const displayNameById = useMemo(
+    () => new Map(presence.map((p) => [p.user_id, p.display_name])),
+    [presence],
+  );
+
+  const reactorsLabel = (userIds: number[]): string => userIds
+    .map((id) => (id === userId ? 'Вы' : displayNameById.get(id) || 'Кто-то'))
+    .join(', ');
+
   // Содержимое пузыря отдельно от самого пузыря: этим же кодом рисуется его
   // копия поверх блюра при открытом меню (см. .chat-bubble-clone), чтобы
   // оригинал и копия не разъезжались при любой правке разметки.
   const renderBubbleContent = (message: ChatMessage, isMine: boolean, isMediaBubble: boolean, readers: ChatReadState[]) => {
+    // Поля может не быть вовсе — в localStorage лежит кеш ленты, записанный
+    // ещё до появления реакций (см. CHAT_CACHE_KEY в ChatContext).
+    const reactions = message.reactions ?? [];
     const timeLabel = (
       <>
         {message.edited_at && <span className="chat-bubble-edited">изм. </span>}
@@ -1661,23 +1696,148 @@ export const ChatPage: React.FC = () => {
       {!isMediaBubble && !message.text && (
         <div className="chat-bubble-time">{timeLabel}</div>
       )}
-      {readers.length > 0 && (
-        <div className="chat-read-avatars">
-          {readers.map((r) => (
-            <span
-              key={r.user_id}
-              className="chat-read-avatar"
-              style={{ background: readAvatarColor(r.user_id) }}
-              // Кружок стоит на фронтире читателя, поэтому здесь время как раз
-              // про это место ленты — в отличие от карточки в меню, где то же
-              // самое read_at у старого сообщения было бы завышено (см. там).
-              title={`${r.display_name || 'Прочитано'}${r.read_at ? ` · дочитал(а) досюда в ${formatTime(r.read_at)}` : ''}`}
-            >
-              {readAvatarLetter(r.display_name)}
-            </span>
-          ))}
-        </div>
+      {/* Реакции — строкой в потоке внизу пузыря, как в Telegram, а не
+          абсолютом под ним. Абсолютом их пришлось бы вписывать в тот же зазор
+          ленты, где уже живёт кружок "прочитано" (см. инвариант у :root в
+          CSS); строкой пузырь просто становится выше, и ResizeObserver ленты
+          честно подтягивает низ. Кружок при этом не задевает чипсы: он
+          налезает на пузырь всего на 6px снизу, а нижний отступ под строкой
+          чипсов не меньше — см. .chat-reactions в CSS. */}
+      {/* Появление и уход анимированы на трёх уровнях сразу, и у каждого своя
+          роль — вместе они дают одно движение на одно событие, без наложений:
+
+            строка целиком — только на переход "реакций не было ↔ не осталось";
+            отдельный чипс — новая эмодзи в уже существующей строке;
+            лицо внутри чипса — человек, подсевший к уже стоящей реакции.
+
+          Ключ ко всему — initial={false} на каждом AnimatePresence: дети,
+          которые были на месте в момент его монтирования, не анимируются, а
+          добавленные позже — анимируются. Отсюда бесплатно берётся всё
+          нужное поведение: история, приехавшая с готовыми реакциями, не
+          устраивает салют из полусотни чипсов; копия пузыря над блюром (она
+          монтируется заново на каждое открытие меню) не переигрывает их же;
+          а вот реакция, пришедшая по WS в открытый чат, — всплывает.
+
+          Внешний AnimatePresence живёт снаружи условия, а не внутри: иначе
+          при снятии последней реакции строка размонтировалась бы мгновенно и
+          унесла exit своего чипса с собой. Своего бокса он не рисует, так что
+          пустому сообщению это не стоит ни пикселя.
+
+          Пружины слегка передемпфированы (в отличие от подпрыгивания пузыря,
+          где 520/17 взяты ради явного перелёта): нужен короткий "поп", а не
+          качание — на мелком элементе перелёты дают ту же перерастрировку
+          текста, из-за которой уже переделывали анимацию меню действий.
+
+          Высота пузыря при этом меняется кадр за кадром — ровно тот случай,
+          на который рассчитан ResizeObserver ленты: pin() держит низ на
+          каждом кадре, как при схлопывании удалённого сообщения. */}
+      <AnimatePresence initial={false}>
+      {reactions.length > 0 && (
+        <motion.div
+          key="reactions"
+          className="chat-reactions"
+          initial={{ opacity: 0, scale: 0.85 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.85 }}
+          transition={{ type: 'spring', stiffness: 500, damping: 26 }}
+        >
+          <AnimatePresence initial={false}>
+          {reactions.map((r) => {
+            const mine = userId !== null && r.user_ids.includes(userId);
+            return (
+              <motion.button
+                key={r.emoji}
+                type="button"
+                className={`chat-reaction-chip ${mine ? 'chat-reaction-chip--mine' : ''}`}
+                title={reactorsLabel(r.user_ids)}
+                initial={{ opacity: 0, scale: 0.55 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.55 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 24 }}
+                // Тап по чипсу — тот же тоггл, что и в пикере: своя реакция
+                // снимается, чужая добавляется к ней. stopPropagation, иначе
+                // клик всплывёт на пузырь и вместо реакции откроется меню.
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!suppressClickIfLongPress(e)) void handleReaction(message, r.emoji);
+                }}
+              >
+                <span className="chat-reaction-emoji">{r.emoji}</span>
+                {/* Вместо счётчика — сами лица: в чате на четверых "кто" куда
+                    важнее, чем "сколько", и цифру всё равно приходилось бы
+                    расшифровывать долгим тапом. Цвет и буква те же, что у
+                    кружка "прочитано", — один человек выглядит одинаково
+                    везде; а чтобы эти два кружка не путались между собой,
+                    разведены оправой и местом (см. .chat-reaction-avatar). */}
+                <AnimatePresence initial={false}>
+                  {r.user_ids.slice(0, REACTION_AVATARS_MAX).map((id) => (
+                    <motion.span
+                      key={id}
+                      className="chat-reaction-avatar"
+                      style={{ background: readAvatarColor(id) }}
+                      initial={{ opacity: 0, scale: 0.4 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.4 }}
+                      transition={{ type: 'spring', stiffness: 500, damping: 24 }}
+                    >
+                      {readAvatarLetter(displayNameById.get(id) ?? '')}
+                    </motion.span>
+                  ))}
+                </AnimatePresence>
+                {r.user_ids.length > REACTION_AVATARS_MAX && (
+                  <span className="chat-reaction-more">+{r.user_ids.length - REACTION_AVATARS_MAX}</span>
+                )}
+              </motion.button>
+            );
+          })}
+          </AnimatePresence>
+        </motion.div>
       )}
+      </AnimatePresence>
+      {/* Кружки "прочитано" — по той же схеме, что и реакции выше: внешний
+          AnimatePresence снаружи условия (иначе уход последнего кружка с
+          сообщения не успел бы отыграться), внутренний — на отдельных лицах,
+          когда к уже стоящему кружку присоединяется второй читатель. И тот и
+          другой с initial={false}, так что history load не устраивает салют, а
+          копия пузыря в меню не переигрывает анимацию заново.
+
+          Метка не появляется и не исчезает, а ПЕРЕЕЗЖАЕТ по ленте вслед за
+          читателем: на одном сообщении отыгрывает уход, на другом — приход.
+          Анимировать это ничем не рискованно, в отличие от реакций: блок
+          лежит абсолютом (см. .chat-read-avatars в CSS) и на поток ленты не
+          влияет ни в одном кадре — ResizeObserver его даже не замечает. */}
+      <AnimatePresence initial={false}>
+      {readers.length > 0 && (
+        <motion.div
+          key="readers"
+          className="chat-read-avatars"
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.5 }}
+          transition={{ type: 'spring', stiffness: 500, damping: 26 }}
+        >
+          <AnimatePresence initial={false}>
+            {readers.map((r) => (
+              <motion.span
+                key={r.user_id}
+                className="chat-read-avatar"
+                style={{ background: readAvatarColor(r.user_id) }}
+                initial={{ opacity: 0, scale: 0.4 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.4 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 26 }}
+                // Кружок стоит на фронтире читателя, поэтому здесь время как раз
+                // про это место ленты — в отличие от карточки в меню, где то же
+                // самое read_at у старого сообщения было бы завышено (см. там).
+                title={`${r.display_name || 'Прочитано'}${r.read_at ? ` · дочитал(а) досюда в ${formatTime(r.read_at)}` : ''}`}
+              >
+                {readAvatarLetter(r.display_name)}
+              </motion.span>
+            ))}
+          </AnimatePresence>
+        </motion.div>
+      )}
+      </AnimatePresence>
     </>
     );
   };
@@ -1892,10 +2052,16 @@ export const ChatPage: React.FC = () => {
       if (existing) existing.push(r);
       else bySeq.set(anchor.seq, [r]);
     }
-    // Порядок кружков на одном сообщении — по user_id, а не по порядку массива
-    // reads: тот перетасовывается каждым WS-событием (запись выдёргивается и
-    // уходит в конец), и кружки молча менялись местами на ровном месте.
-    for (const list of bySeq.values()) list.sort((a, b) => a.user_id - b.user_id);
+    // Порядок кружков — порядок самого массива reads, без сортировки: кто
+    // раньше появился, тот и левее, и с приходом нового никто не двигается.
+    //
+    // Раньше тут был сорт по user_id — как лекарство от того, что reads
+    // перетасовывался каждым WS-событием. Лечил он симптом и сам же оставался
+    // причиной прыжка: сорт вставляет нового читателя в СЕРЕДИНУ ряда, и
+    // стоявший первым кружок уезжает вправо в тот же кадр, в котором всплывает
+    // второй. Тасовку теперь не лечим, а не создаём — ChatContext обновляет
+    // запись на месте (см. ветку 'read') и сохраняет порядок при
+    // досинхронизации (mergeReads).
     return bySeq;
   }, [messages, reads, userId]);
 
@@ -2015,17 +2181,15 @@ export const ChatPage: React.FC = () => {
   // В разговоре вдвоём карточка на чужом сообщении говорила "Пока никто"
   // всегда, даже когда прочитали оба.
   //
-  // Себя ставим первым, остальных — по времени прочтения: порядок массива
-  // reads зависит от того, в каком порядке приходили WS-события, и список
-  // молча перетасовывался между открытиями меню.
+  // Порядок — тот же, что у кружков в ленте, то есть порядок самого массива
+  // reads, без сортировки. Прежний сорт (себя первым, остальных по времени
+  // прочтения) существовал ровно затем, что reads перетасовывался WS-событиями
+  // и список менялся между открытиями меню; теперь он стабилен сам по себе
+  // (см. ветку 'read' и mergeReads в ChatContext), а один и тот же человек
+  // стоит на одном и том же месте и в кружках, и в этой карточке. Себя видно
+  // и без первой строки — по подписи "Вы".
   const actionReaders = actionTarget && actionTarget.type !== 'system'
-    ? reads
-      .filter((r) => r.user_id !== actionTarget.user_id && r.last_read_seq >= actionTarget.seq)
-      .sort((a, b) => {
-        if (a.user_id === userId) return -1;
-        if (b.user_id === userId) return 1;
-        return (a.read_at ?? '').localeCompare(b.read_at ?? '');
-      })
+    ? reads.filter((r) => r.user_id !== actionTarget.user_id && r.last_read_seq >= actionTarget.seq)
     : [];
 
   // Точное время прочтения ИМЕННО этого сообщения. В reads такого времени нет
@@ -2145,8 +2309,38 @@ export const ChatPage: React.FC = () => {
             потоке страницы: в потоке они отодвигали ленту вниз, и за ними —
             как и за самой шапкой — оставалась глухая полоса фона. Теперь это
             плавающие таблетки поверх ленты, а лента идёт под ними. */}
+        {/* Баннер закрепа проявляется и слегка съезжает вниз, а не возникает
+            щелчком. Анимируются ТОЛЬКО прозрачность и transform — то есть
+            свойства, которые живут в композиторе и не трогают раскладку.
+
+            Высоту анимировать нельзя, хотя визуально это было бы красивее
+            (таблетка раздвигала бы шапку, а не проявлялась в готовом месте).
+            Высота шапки замеряется ResizeObserver'ом и уходит в стейт
+            (headerPadTop, см. выше) — а значит каждый кадр такой анимации был
+            бы полной перерисовкой страницы чата. Лента живёт по правилу "не
+            бомбить React деревом на каждое событие", и 13 перерисовок ради
+            плавности одной таблетки этому правилу противоречат. Здесь
+            перерисовка ровно одна, как и до появления анимации: коробка
+            таблетки встаёт на место сразу, а видно её становится плавно.
+
+            Скролл при этом остаётся на месте — и это не недосмотр. padding-top
+            ленты вырастает на высоту таблетки, а useChatListAnchor тем же
+            кадром правит scrollTop на ту же дельту, чтобы у читающего не
+            уехала из-под глаз строка. Лента следует за КОНТЕНТОМ (новое
+            сообщение внизу — она едет за ним), но не за хромом. К тому же
+            когда лента прижата к низу, сдвинуть контент вниз и одновременно
+            остаться внизу геометрически невозможно. */}
+        <AnimatePresence initial={false}>
         {pinnedMessage && (
-          <div className="chat-pinned-banner" onClick={() => scrollToMessage(pinnedMessage.seq)}>
+          <motion.div
+            key="pinned-banner"
+            className="chat-pinned-banner"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            onClick={() => scrollToMessage(pinnedMessage.seq)}
+          >
             <Pin size={18} />
             {/* Автор — отдельной строкой над текстом, как в цитате ответа:
                 по одному обрывку текста не понять, кто закрепил, а из ленты
@@ -2160,8 +2354,9 @@ export const ChatPage: React.FC = () => {
             <button onClick={(e) => { e.stopPropagation(); unpinMessage(); }} title="Открепить">
               <X size={20} />
             </button>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {notifStatus !== 'granted' && (
           <div className={`chat-notif-banner chat-notif-banner--${notifStatus}`}>
@@ -2793,6 +2988,26 @@ export const ChatPage: React.FC = () => {
               transition={{ duration: MENU_IN_MS / 1000, ease: 'easeOut' }}
               onClick={(e) => e.stopPropagation()}
             >
+              {/* Ряд базовых реакций — первой карточкой стопки, вплотную к
+                  самому сообщению (как в Telegram). Своя уже поставленная
+                  реакция подсвечена, повторный тап по ней её снимает. */}
+              <div className="chat-reaction-picker">
+                {REACTION_EMOJI.map((emoji) => {
+                  const mine = userId !== null
+                    && (actionTarget.reactions ?? []).some((r) => r.emoji === emoji && r.user_ids.includes(userId));
+                  return (
+                    <button
+                      key={emoji}
+                      type="button"
+                      className={mine ? 'chat-reaction-picker-item chat-reaction-picker-item--mine' : 'chat-reaction-picker-item'}
+                      onClick={() => void handleReaction(actionTarget, emoji)}
+                    >
+                      {emoji}
+                    </button>
+                  );
+                })}
+              </div>
+
               <div className="chat-action-readers">
                 <span className="chat-action-readers-title">Прочитали</span>
                 {actionReaders.length === 0 ? (

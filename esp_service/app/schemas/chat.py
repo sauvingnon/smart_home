@@ -3,6 +3,14 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
+class ReactionOut(BaseModel):
+    """Одна реакция на сообщении и все, кто её поставил. Именно user_ids, а не
+    счётчик: по ним клиент и подсвечивает собственную реакцию, и показывает,
+    кто отреагировал (имена у него уже есть из presence)."""
+    emoji: str
+    user_ids: List[int]
+
+
 class ChatMessageOut(BaseModel):
     """Одно сообщение в общем чате."""
     seq: int
@@ -36,6 +44,10 @@ class ChatMessageOut(BaseModel):
     # закрепил/открепил, reply_to/reply_to_preview (снимок, тот же механизм,
     # что у ответов) — какое сообщение.
     system_kind: str = ""
+    # Реакции живут отдельным хэшем в Redis и подклеиваются к сообщению на
+    # выдаче (см. ChatService._with_reactions), поэтому дефолт — пустой список,
+    # а не отсутствие поля.
+    reactions: List[ReactionOut] = []
 
 
 class ChatMessagesResponse(BaseModel):
@@ -104,6 +116,15 @@ class PinMessageIn(BaseModel):
 
 class EditMessageIn(BaseModel):
     text: str
+
+
+class ReactionIn(BaseModel):
+    """Тоггл: тот же эмодзи повторно снимает реакцию, другой — заменяет её."""
+    emoji: str
+
+
+class ReactionsResponse(BaseModel):
+    reactions: List[ReactionOut]
 
 
 class PinnedMessageResponse(BaseModel):

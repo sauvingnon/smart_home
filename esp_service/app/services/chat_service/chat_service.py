@@ -76,6 +76,13 @@ _PUSH_BODY_BY_TYPE = {
     "video": "🎬 Видео",
 }
 
+# Базовый набор реакций — тот же на клиенте (REACTION_EMOJI в api/client.ts).
+# Список закрытый: без него в Redis приехала бы любая строка, которую клиент
+# решит прислать. Порядок здесь — только порядок кнопок в пикере; порядок
+# чипсов под сообщением задаётся не им, а тем, кто отреагировал раньше (см.
+# _aggregate_reactions).
+ALLOWED_REACTIONS = ("👍", "❤️", "🔥", "😁", "😢", "👎")
+
 
 class ChatService:
     """Общий групповой чат — один канал на всех, без списка чатов и личных сообщений."""
@@ -413,6 +420,11 @@ class ChatService:
         }
 
         await self.cache.save_chat_message(seq, message)
+        # Строго после сохранения: хэш сообщения хранит только строки (см.
+        # _encode_chat_message), и список, попавший в него до save, лёг бы в
+        # Redis литералом "[]". У нового сообщения реакций и так нет — поле
+        # нужно лишь затем, чтобы форма сообщения была одинаковой везде.
+        message["reactions"] = []
         await self.broadcast({"type": "message", "data": message})
         await self._push_to_offline_users(message)
 
@@ -480,7 +492,7 @@ class ChatService:
         закрепил — отдельным системным сообщением в самой ленте (см.
         _create_system_message), а не только баннером, который просто
         перезапишется следующим пином."""
-        message = await self.cache.get_chat_message(seq)
+        message = await self._with_reactions(await self.cache.get_chat_message(seq))
         if not message:
             raise ValueError("Сообщение не найдено")
         await self.cache.set_chat_pinned(seq)
@@ -525,6 +537,7 @@ class ChatService:
             "ts": _get_izhevsk_time().isoformat(),
         }
         await self.cache.save_chat_message(seq, message)
+        message["reactions"] = []
         await self.broadcast({"type": "message", "data": message})
         return message
 
@@ -558,6 +571,9 @@ class ChatService:
         )
         if not updated:
             raise ValueError("Сообщение не найдено")
+        # Клиент по событию edited подменяет объект сообщения целиком — без
+        # реакций в этом ответе правка стирала бы их у всех, кто в чате.
+        await self._with_reactions(updated)
 
         await self.broadcast({"type": "edited", "data": updated})
         # Закреплённое сообщение живёт у клиентов отдельной копией в баннере —
@@ -614,11 +630,76 @@ class ChatService:
             except Exception as e:
                 logger.warning(f"⚠️ Не удалось удалить медиа чата {key}: {e}")
 
+    @staticmethod
+    def _aggregate_reactions(raw: dict) -> list:
+        """{user_id: emoji} → [{emoji, user_ids}] в порядке появления: кто раньше
+        отреагировал, тот и левее — и внутри чипса, и среди самих чипсов.
+
+        Ничего не сортируем намеренно. Любой сорт (по user_id, по палитре) —
+        это вставка НОВОГО элемента в СЕРЕДИНУ уже нарисованного ряда: чужая
+        аватарка, стоявшая первой, уезжает вправо в тот же кадр, в котором
+        всплывает твоя. На экране это ровно тот прыжок, ради которого сорт и
+        убран. При добавлении в хвост не двигается вообще ничего.
+
+        Опирается на то, что HGETALL маленького хэша отдаёт поля в порядке
+        вставки: до hash-max-listpack-entries (128 по умолчанию) хэш лежит
+        listpack'ом, то есть буквально массивом в порядке записи, а тут полей
+        не больше, чем людей в чате. Если когда-нибудь перевалит и порядок
+        станет произвольным — сломается только косметика (аватарки в чипсе
+        встанут иначе), а не смысл.
+
+        Клиенту нужны именно user_ids, а не число: по ним он и подсвечивает
+        свою реакцию, и печатает, кто отреагировал, — имена у него уже есть из
+        presence, так что отдельного запроса за ними не нужно."""
+        by_emoji = {}
+        for user_id, emoji in raw.items():
+            by_emoji.setdefault(emoji, []).append(user_id)
+        # dict в Python держит порядок вставки, поэтому эмодзи идут в том
+        # порядке, в каком их впервые поставили.
+        return [{"emoji": emoji, "user_ids": user_ids} for emoji, user_ids in by_emoji.items()]
+
+    async def _with_reactions(self, message: Optional[dict]) -> Optional[dict]:
+        """Подклеивает реакции к одному сообщению. Зовётся на каждом пути, по
+        которому сообщение уходит клиенту (история, закреп, правка), потому что
+        фронт при событии edited заменяет объект сообщения целиком: не окажись
+        там реакций — они пропали бы у всех до перезагрузки чата."""
+        if message is None:
+            return None
+        message["reactions"] = self._aggregate_reactions(
+            await self.cache.get_chat_reactions(message["seq"])
+        )
+        return message
+
+    async def toggle_reaction(self, user_id: int, seq: int, emoji: str) -> list:
+        """Ставит/меняет/снимает реакцию (одна на человека на сообщение).
+        Рассылаем не дельту, а весь агрегат по этому сообщению: мержить дельты
+        на клиенте — лишний источник расхождения, а на четверых участников это
+        считанные байты.
+
+        Пуша и бейджа непрочитанного тут намеренно нет: реакция не создаёт
+        сообщения, поэтому в счётчик она не попадает сама собой, а будить
+        чужой телефон ради эмодзи — перебор (в Telegram это отдельная,
+        по умолчанию выключенная настройка)."""
+        if emoji not in ALLOWED_REACTIONS:
+            raise ValueError("Недопустимая реакция")
+        message = await self.cache.get_chat_message(seq)
+        if not message:
+            raise ValueError("Сообщение не найдено")
+        # Системные плашки ("закрепил(а)") — служебная отметка, а не чей-то
+        # текст, реагировать там не на что.
+        if message.get("type") == "system":
+            raise PermissionError("На системные сообщения нельзя реагировать")
+
+        raw = await self.cache.toggle_chat_reaction(seq, user_id, emoji)
+        reactions = self._aggregate_reactions(raw)
+        await self.broadcast({"type": "reaction", "data": {"seq": seq, "reactions": reactions}})
+        return reactions
+
     async def get_pinned_message(self) -> Optional[dict]:
         seq = await self.cache.get_chat_pinned_seq()
         if seq is None:
             return None
-        return await self.cache.get_chat_message(seq)
+        return await self._with_reactions(await self.cache.get_chat_message(seq))
 
     async def get_push_status(self) -> list:
         """Кто из юзеров сейчас подписан на Web Push — для UI 'кто получит
@@ -658,7 +739,13 @@ class ChatService:
         return payload
 
     async def get_messages(self, before_seq: Optional[int] = None, limit: int = 50) -> list:
-        return await self.cache.get_chat_messages(before_seq=before_seq, limit=limit)
+        messages = await self.cache.get_chat_messages(before_seq=before_seq, limit=limit)
+        # Реакции ко всей странице одним пайплайном, а не по сообщению: иначе
+        # каждая загрузка истории стоила бы ещё полсотни round-trip'ов.
+        by_seq = await self.cache.get_chat_reactions_bulk([m["seq"] for m in messages])
+        for message in messages:
+            message["reactions"] = self._aggregate_reactions(by_seq.get(message["seq"], {}))
+        return messages
 
     async def get_read_states(self) -> list:
         return await self.cache.get_all_chat_reads()

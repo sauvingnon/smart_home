@@ -16,6 +16,8 @@ from app.schemas.chat import (
     PresenceResponse,
     PushStatusResponse,
     PushSubscriptionIn,
+    ReactionIn,
+    ReactionsResponse,
     ReadAtResponse,
     ReadReceiptsResponse,
     ShareVideoIn,
@@ -213,6 +215,26 @@ async def edit_message(
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/messages/{seq}/reaction", response_model=ReactionsResponse)
+async def toggle_reaction(
+    seq: int,
+    payload: ReactionIn,
+    user_id: int = Depends(get_current_user_id_dep),
+):
+    """Поставить/сменить/снять свою реакцию на сообщении. Тоггл, а не отдельные
+    PUT и DELETE: реакция на человека одна, и «тот же эмодзи ещё раз» — это ровно
+    то же действие, что тап по уже поставленной. Как и всё остальное в чате,
+    идёт по REST, а результат разлетается всем по WS (событие reaction)."""
+    worker = BackgroundWorker.get_instance()
+    try:
+        reactions = await worker.chat_service.toggle_reaction(user_id, seq, payload.emoji)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"reactions": reactions}
 
 
 @router.delete("/messages/{seq}")
