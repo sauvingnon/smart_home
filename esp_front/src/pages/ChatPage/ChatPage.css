@@ -704,6 +704,36 @@
   box-shadow: var(--glass-shadow);
 }
 
+/* Полоса "непрочитанные" — граница, на которой юзер остановился в прошлый
+   раз (см. unreadFromSeq в ChatContext). В отличие от плашки даты НЕ sticky:
+   это отметка о конкретном месте ленты, и прилипать к верхней кромке она не
+   должна — уехала из виду, значит юзер её прошёл. Линия во всю ширину, чтобы
+   её нельзя было спутать со стеклянной таблеткой даты. */
+.chat-unread-divider {
+  /* Строка ленты сама несёт свой нижний зазор — см. .chat-messages-content. */
+  margin-bottom: var(--chat-row-gap);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.chat-unread-divider::before,
+.chat-unread-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--accent-blue);
+  opacity: 0.35;
+}
+
+.chat-unread-divider span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  white-space: nowrap;
+}
+
 /* Служебная запись в ленте — "юзер закрепил(а)/открепил(а) сообщение".
    Центрированная плашка без пузыря и без своих действий (долгий тап/меню),
    единственный жест — тап целиком прыгает к затронутому сообщению. */

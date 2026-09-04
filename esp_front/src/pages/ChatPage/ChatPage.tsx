@@ -233,7 +233,7 @@ export const ChatPage: React.FC = () => {
   const { theme } = useTheme();
   const { userId } = useAuth();
   const {
-    messages, pendingUploads, reads, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead,
+    messages, pendingUploads, reads, unreadFromSeq, connectionState, loadingHistory, historyReady, hasMoreHistory, loadMoreHistory, sendMessage, markRead, setReadGate,
     pinnedMessage, pinMessage, unpinMessage, deleteMessage, editMessage, presence, typingUsers, notifyTyping,
   } = useChat();
 
@@ -403,9 +403,38 @@ export const ChatPage: React.FC = () => {
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  // Отметка о прочтении. Два изменения против прежнего `[messages.length]`.
+  //
+  // Первое — сам триггер. Длина ленты меняется не только от новых сообщений:
+  // подгрузка истории вверх давала +50 (лишний POST /read, а он бродкастится
+  // ВСЕМ подключённым), удаление давало −1, а приход одного сообщения
+  // одновременно с удалением другого не менял длину вообще — и новое
+  // сообщение висело на экране непрочитанным до следующего события. Считаем
+  // по seq последнего сообщения: он растёт ровно тогда, когда лента выросла
+  // с конца, и ни от чего другого.
+  //
+  // Второе — гейт. Пока юзер далеко от низа (ушёл читать историю), новые
+  // сообщения приходят ниже экрана, и отмечать их прочитанными — врать
+  // отправителю. Тот же признак, что и у кнопки "вниз": вернулся к низу —
+  // эффект перезапустится сам и отметка уйдёт.
+  const lastMessageSeq = messages.length > 0 ? messages[messages.length - 1].seq : null;
   useEffect(() => {
+    if (lastMessageSeq === null || showScrollDown) return;
     markRead();
-  }, [messages.length, markRead]);
+  }, [lastMessageSeq, showScrollDown, markRead]);
+
+  // Тот же гейт, но для отметок, которые шлёт не эта страница: досинхронизация
+  // при возврате в приложение и повтор не ушедшей отметки живут в ChatContext
+  // и про положение скролла ничего не знают. Снимаем при уходе со страницы —
+  // вне чата гейт всегда открыт.
+  const farFromBottomRef = useRef(showScrollDown);
+  useEffect(() => {
+    farFromBottomRef.current = showScrollDown;
+  }, [showScrollDown]);
+  useEffect(() => {
+    setReadGate(() => !farFromBottomRef.current);
+    return () => setReadGate(() => true);
+  }, [setReadGate]);
 
   useEffect(() => {
     if (connectionState === 'connected') hasConnectedOnceRef.current = true;
@@ -488,7 +517,7 @@ export const ChatPage: React.FC = () => {
       // ленты, а не весь зазор до низа экрана).
       // Плюс-8 тут больше нет: с тех пор как зазор ленты переехал с gap
       // контейнера на margin-bottom самих строк (см. ChatPage.css), последнее
-      // сообщение несёт свои 10px под собой само — иначе отступ до бара
+      // сообщение несёт свой зазор под собой само (--chat-row-gap) — иначе отступ до бара
       // сложился бы дважды.
       setMessagesPadBottom(rect.height);
     };
@@ -1639,7 +1668,10 @@ export const ChatPage: React.FC = () => {
               key={r.user_id}
               className="chat-read-avatar"
               style={{ background: readAvatarColor(r.user_id) }}
-              title={`${r.display_name || 'Прочитано'}${r.read_at ? ` · прочитано в ${formatTime(r.read_at)}` : ''}`}
+              // Кружок стоит на фронтире читателя, поэтому здесь время как раз
+              // про это место ленты — в отличие от карточки в меню, где то же
+              // самое read_at у старого сообщения было бы завышено (см. там).
+              title={`${r.display_name || 'Прочитано'}${r.read_at ? ` · дочитал(а) досюда в ${formatTime(r.read_at)}` : ''}`}
             >
               {readAvatarLetter(r.display_name)}
             </span>
@@ -1812,9 +1844,18 @@ export const ChatPage: React.FC = () => {
     if (messages.length === 0) return bySeq;
     for (const r of reads) {
       if (r.user_id === userId || r.last_read_seq <= 0) continue;
+      // Идём с конца: цель — самое свежее прочитанное, и в подавляющем
+      // большинстве случаев она в последних нескольких строках. Прежний
+      // проход с начала пробегал всю загруженную историю целиком, и делал это
+      // на каждое изменение messages/reads, то есть на каждое сообщение,
+      // правку и чужую отметку о прочтении.
       let target: ChatMessage | undefined;
-      for (const m of messages) {
-        if (m.seq > r.last_read_seq) break;
+      // Запасная цель — собственное сообщение читателя. Нужна ровно для
+      // случая ниже, когда чужого в прочитанном диапазоне не нашлось совсем.
+      let ownFallback: ChatMessage | undefined;
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (m.seq > r.last_read_seq) continue;
         // Системные (закрепил/открепил) — не настоящий контент, кружок
         // "прочитано" под служебной плашкой смотрелся бы странно.
         if (m.type === 'system') continue;
@@ -1822,19 +1863,32 @@ export const ChatPage: React.FC = () => {
         // что человек прочитал сам себя. Но и терять её из-за этого нельзя:
         // отметка о прочтении ставится на текущий конец ленты, так что стоит
         // человеку ответить — самым свежим прочитанным становится его же
-        // сообщение. Раньше на этом кружок просто пропадал из ленты целиком,
-        // то есть исчезал ровно тогда, когда на сообщение ответили. Поэтому
-        // не бросаем читателя, а отступаем на ближайшее чужое сообщение —
-        // до него он дочитал ровно так же.
-        if (m.user_id === r.user_id) continue;
+        // сообщение. Поэтому отступаем на ближайшее чужое сообщение — до него
+        // он дочитал ровно так же, и метка сообщает то, ради чего она есть:
+        // "твоё он прочитал".
+        if (m.user_id === r.user_id) {
+          if (!ownFallback) ownFallback = m;
+          continue;
+        }
         target = m;
+        break;
       }
+      // Отступать оказалось некуда: весь прочитанный диапазон в загруженной
+      // истории — сообщения самого читателя (он отвечал подряд, либо чужое
+      // уехало за пределы страницы). Раньше метка тут пропадала из ленты
+      // целиком, и человек просто исчезал из прочитавших; лучше показать её
+      // на его собственном сообщении, чем не показать вовсе.
+      const anchor = target ?? ownFallback;
       // Прочитанное вымылось из загруженной истории — вешать метку не на что.
-      if (!target) continue;
-      const existing = bySeq.get(target.seq);
+      if (!anchor) continue;
+      const existing = bySeq.get(anchor.seq);
       if (existing) existing.push(r);
-      else bySeq.set(target.seq, [r]);
+      else bySeq.set(anchor.seq, [r]);
     }
+    // Порядок кружков на одном сообщении — по user_id, а не по порядку массива
+    // reads: тот перетасовывается каждым WS-событием (запись выдёргивается и
+    // уходит в конец), и кружки молча менялись местами на ровном месте.
+    for (const list of bySeq.values()) list.sort((a, b) => a.user_id - b.user_id);
     return bySeq;
   }, [messages, reads, userId]);
 
@@ -1920,16 +1974,51 @@ export const ChatPage: React.FC = () => {
     return groups;
   }, [displayMessages]);
 
-  // Кто прочитал именно это сообщение — для карточки над меню. Себя и автора
-  // не показываем: своё прочтение неинтересно, авторское тривиально. Время
-  // здесь — момент, когда человек дочитал до этого места, ровно то же, что
-  // стоит за кружком в ленте.
-  const actionReaders = actionTarget
-    ? reads.filter((r) => (
-      r.user_id !== actionTarget.user_id
-      && r.user_id !== userId
-      && r.last_read_seq >= actionTarget.seq
-    ))
+  // Якорь полосы "непрочитанные" — первое сообщение новее нашего фронтира на
+  // момент входа в чат (снимок снимает ChatContext до первого markRead, иначе
+  // читать было бы уже нечего).
+  //
+  // Это и есть ответ на "где моё собственное прочтение в ленте": кружком его
+  // рисовать бессмысленно — свой фронтир всегда стоит на последнем сообщении,
+  // и кружок был бы вечно приклеен к низу. Полезен обратный вопрос, "откуда
+  // читать", и на него отвечает полоса.
+  //
+  // Якорем берём первое сообщение, которое непрочитанным вообще может быть, —
+  // ровно по тому же правилу, по которому считает бейдж (см. серверный
+  // get_chat_unread_count): не системное и не своё. Системные плашки отпадают
+  // потому, что полоса над "закрепил(а) сообщение" обещает непрочитанное там,
+  // где его нет. Свои — потому, что "Непрочитанные" над собственным
+  // сообщением утверждает, будто ты не читал то, что сам написал; а попасть
+  // своё сообщение за фронтир вполне может (отправлено с другого устройства,
+  // пока это не отмечалось прочитанным). Три места — одно определение
+  // непрочитанного, иначе полоса и бейдж снова разойдутся.
+  const firstUnreadSeq = useMemo(() => {
+    if (unreadFromSeq === null || unreadFromSeq <= 0) return null;
+    const first = displayMessages.find((m) => (
+      m.seq > unreadFromSeq && m.type !== 'system' && m.user_id !== userId
+    ));
+    return first ? first.seq : null;
+  }, [displayMessages, unreadFromSeq, userId]);
+
+  // Кто прочитал именно это сообщение — для карточки над меню.
+  //
+  // Автора по-прежнему не показываем: он прочитал своё тривиально. А вот себя
+  // показываем, как "Вы" — раньше исключались оба, и на ЧУЖОМ сообщении это
+  // давало структурно пустой список: остаться в нём могли только третьи лица.
+  // В разговоре вдвоём карточка на чужом сообщении говорила "Пока никто"
+  // всегда, даже когда прочитали оба.
+  //
+  // Себя ставим первым, остальных — по времени прочтения: порядок массива
+  // reads зависит от того, в каком порядке приходили WS-события, и список
+  // молча перетасовывался между открытиями меню.
+  const actionReaders = actionTarget && actionTarget.type !== 'system'
+    ? reads
+      .filter((r) => r.user_id !== actionTarget.user_id && r.last_read_seq >= actionTarget.seq)
+      .sort((a, b) => {
+        if (a.user_id === userId) return -1;
+        if (b.user_id === userId) return 1;
+        return (a.read_at ?? '').localeCompare(b.read_at ?? '');
+      })
     : [];
 
   // Одна строка под заголовком "Чат": печатает > кто в сети. "Был(а) в сети
@@ -2108,10 +2197,21 @@ export const ChatPage: React.FC = () => {
               <span>{group.label}</span>
             </div>
             <AnimatePresence initial={false}>
-              {group.messages.map((message) => {
+              {group.messages.flatMap((message) => {
+                // Полоса "непрочитанные" — отдельным элементом массива, а не
+                // обёрткой над строкой: AnimatePresence различает своих детей
+                // по ключу, и завернуть motion-строку во фрагмент значит
+                // спрятать её от него вместе с анимацией удаления. flatMap
+                // отдаёт оба элемента плоско, каждый со своим ключом.
+                const divider = message.seq === firstUnreadSeq ? (
+                  <div className="chat-unread-divider" key="unread-divider">
+                    <span>Непрочитанные</span>
+                  </div>
+                ) : null;
+
                 if (message.type === 'system') {
                   const isPinned = message.system_kind !== 'unpinned';
-                  return (
+                  return [divider, (
                     <div
                       className="chat-system-message"
                       key={`msg-${message.seq}`}
@@ -2125,7 +2225,7 @@ export const ChatPage: React.FC = () => {
                         {message.reply_to_preview && <>: «{message.reply_to_preview}»</>}
                       </span>
                     </div>
-                  );
+                  )];
                 }
 
                 const isMine = message.user_id === userId;
@@ -2148,7 +2248,7 @@ export const ChatPage: React.FC = () => {
                 // схлопывается вместе с высотой, а не щёлкает в конце.
                 const isExiting = exitingSeqs.has(message.seq);
 
-                return (
+                return [divider, (
                   <motion.div
                     key={`msg-${message.seq}`}
                     data-seq={message.seq}
@@ -2183,7 +2283,7 @@ export const ChatPage: React.FC = () => {
                       </motion.div>
                     </div>
                   </motion.div>
-                );
+                )];
               })}
             </AnimatePresence>
           </div>
@@ -2657,8 +2757,23 @@ export const ChatPage: React.FC = () => {
                     <span className="chat-read-avatar" style={{ background: readAvatarColor(r.user_id) }}>
                       {readAvatarLetter(r.display_name)}
                     </span>
-                    <span className="chat-action-reader-name">{r.display_name}</span>
-                    <span className="chat-action-reader-time">{r.read_at ? formatReadDateTime(r.read_at) : ''}</span>
+                    <span className="chat-action-reader-name">
+                      {r.user_id === userId ? 'Вы' : r.display_name}
+                    </span>
+                    {/* Время показываем только когда оно про ЭТО сообщение.
+                        read_at — момент, когда человек дочитал до своего
+                        текущего фронтира, а фронтир почти всегда стоит на
+                        конце ленты. Печатать его у сообщения трёхдневной
+                        давности значит утверждать, что его прочли сегодня в
+                        14:30, хотя прочли три дня назад: ошибка всегда в одну
+                        сторону, всегда в большую. Точное время есть ровно
+                        тогда, когда фронтир совпал с сообщением; во всех
+                        остальных случаях честный ответ — "раньше". */}
+                    <span className="chat-action-reader-time">
+                      {r.last_read_seq === actionTarget.seq && r.read_at
+                        ? formatReadDateTime(r.read_at)
+                        : 'раньше'}
+                    </span>
                   </div>
                 ))}
               </div>

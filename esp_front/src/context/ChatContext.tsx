@@ -29,6 +29,11 @@ interface ChatContextType {
   pendingUploads: PendingUpload[];
   reads: ChatReadState[];
   unreadCount: number;
+  /** Наш собственный last_read_seq на момент входа в чат — снимок, снятый ДО
+      того, как markRead сдвинет фронтир на текущий конец ленты. Из него лента
+      рисует полосу "непрочитанные". null — снимка нет (мы не в чате, либо своё
+      состояние прочтений ещё не приехало). */
+  unreadFromSeq: number | null;
   connectionState: ConnectionState;
   loadingHistory: boolean;
   historyReady: boolean;
@@ -36,6 +41,10 @@ interface ChatContextType {
   loadMoreHistory: () => Promise<void>;
   sendMessage: (payload: Parameters<typeof apiClient.sendChatMessage>[0]) => Promise<void>;
   markRead: () => Promise<void>;
+  /** Условие, при котором отметка о прочтении вообще имеет право уйти. Ставит
+      страница чата (см. setReadGate ниже) — контекст сам не знает, видит ли
+      юзер низ ленты. */
+  setReadGate: (gate: () => boolean) => void;
   pinnedMessage: ChatMessage | null;
   pinMessage: (seq: number) => Promise<void>;
   unpinMessage: () => Promise<void>;
@@ -124,6 +133,10 @@ const PONG_TIMEOUT_MS = 3000;
 // (быстрое переключение между табами/аппами) не должна долбить сервер новыми
 // соединениями поверх уже идущего реконнекта.
 const FORCE_RECONNECT_DEBOUNCE_MS = 5000;
+// Через столько повторяем отметку о прочтении, не ушедшую из-за сети. Без
+// повтора она ждала бы следующего нового сообщения: бейдж висел бы на
+// открытом чате, а отправитель не увидел бы кружок вообще.
+const READ_RETRY_MS = 5000;
 
 export const previewForMessage = (message: ChatMessage): string => {
   if (message.text) return message.text;
@@ -182,14 +195,100 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     apiClient.sendChatTyping();
   }, []);
 
+  // Отметка не ушла (сеть моргнула или экран был потушен) и ждёт повтора.
+  const pendingReadRef = useRef(false);
+  const readRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Дополнительное условие от страницы чата: "низ ленты сейчас перед глазами".
+  // По умолчанию открыто — вне /chat отметку шлёт только явная синхронизация.
+  const readGateRef = useRef<() => boolean>(() => true);
+  const setReadGate = useCallback((gate: () => boolean) => {
+    readGateRef.current = gate;
+  }, []);
+
+  // Ссылка на саму себя — нужна ретраю по таймеру и флашу из обработчика
+  // visibilitychange, которые живут в эффектах с другими зависимостями.
+  const markReadRef = useRef<() => Promise<void>>(async () => {});
+
   const markRead = useCallback(async () => {
+    if (readRetryTimerRef.current) {
+      clearTimeout(readRetryTimerRef.current);
+      readRetryTimerRef.current = null;
+    }
+
+    // Юзер ушёл в историю: новые сообщения приходят ниже экрана, и он их не
+    // видит — отмечать прочитанным нечего. Специально БЕЗ pendingReadRef:
+    // это не отложенная отправка, а отказ. Как только он вернётся к низу,
+    // страница чата дёрнет markRead сама (эффект завязан на тот же признак,
+    // что и этот гейт), и отметка уйдёт уже честно.
+    if (!readGateRef.current()) return;
+
+    // Экран потушен или приложение свёрнуто. Раньше отметка уходила и отсюда:
+    // сокет жив, сообщение прилетает в ленту, лента меняется — и отправитель
+    // мгновенно видел "прочитано" от человека, у которого телефон лежит в
+    // кармане. Откладываем до реального возвращения в приложение.
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      pendingReadRef.current = true;
+      return;
+    }
+
     try {
       await apiClient.markChatRead();
+      pendingReadRef.current = false;
       setUnreadCount(0);
     } catch {
-      // best-effort — не критично, попробуем при следующем событии
+      pendingReadRef.current = true;
+      readRetryTimerRef.current = setTimeout(() => {
+        readRetryTimerRef.current = null;
+        void markReadRef.current();
+      }, READ_RETRY_MS);
     }
   }, []);
+
+  useEffect(() => {
+    markReadRef.current = markRead;
+  }, [markRead]);
+
+  useEffect(() => () => {
+    if (readRetryTimerRef.current) clearTimeout(readRetryTimerRef.current);
+  }, []);
+
+  // Снимок собственного фронтира на момент входа в чат.
+  //
+  // Своё прочтение в ленте нельзя показывать кружком: markRead уводит наш
+  // last_read_seq на текущий конец ленты, так что кружок был бы навсегда
+  // приклеен к последнему сообщению и не сообщал бы ничего. Полезен ровно
+  // обратный вопрос — "откуда читать", — и ответ на него живёт ровно один
+  // миг: до первого markRead этого захода. Снимаем его здесь и держим до
+  // ухода со страницы, из него лента рисует полосу "непрочитанные".
+  const [unreadFromSeq, setUnreadFromSeq] = useState<number | null>(null);
+  const unreadSnapshotTakenRef = useRef(false);
+  const readsRef = useRef<ChatReadState[]>(reads);
+  useEffect(() => {
+    readsRef.current = reads;
+  }, [reads]);
+
+  const takeUnreadSnapshot = useCallback((source: ChatReadState[]) => {
+    if (unreadSnapshotTakenRef.current || !userId) return;
+    const mine = source.find((r) => r.user_id === userId);
+    // Своего состояния прочтений ещё нет — снимем на ближайшей синхронизации,
+    // она приходит первой же из двух и всё равно раньше любого markRead.
+    if (!mine) return;
+    unreadSnapshotTakenRef.current = true;
+    setUnreadFromSeq(mine.last_read_seq);
+  }, [userId]);
+
+  // Один снимок на один заход в чат: пока юзер на странице, полоса стоит на
+  // месте и не переезжает от каждого нового сообщения (иначе она следовала бы
+  // за лентой и всегда оказывалась под последним сообщением — то же самое,
+  // чем плох собственный кружок).
+  useEffect(() => {
+    if (isOnChatPage) {
+      takeUnreadSnapshot(readsRef.current);
+      return;
+    }
+    unreadSnapshotTakenRef.current = false;
+    setUnreadFromSeq(null);
+  }, [isOnChatPage, takeUnreadSnapshot]);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -243,6 +342,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Мы смотрим прямо в ленту — то, что пришло, пока нас не было, читается
       // сейчас; показать бейдж и тут же его погасить было бы миганием.
       if (isOnChatPageRef.current) {
+        // Строго до markRead и из свежего ответа, а не из стейта: markRead
+        // сдвинет наш фронтир на конец ленты, а WS-эхо этой же отметки
+        // перепишет нашу запись в reads. Здесь — последний момент, когда
+        // видно, докуда мы дочитали на самом деле.
+        takeUnreadSnapshot(readsRes.reads);
         void markRead();
       } else {
         setUnreadCount(unreadRes.unread_count);
@@ -257,7 +361,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setHistoryReady(true);
       }
     }
-  }, [markRead]);
+  }, [markRead, takeUnreadSnapshot]);
 
   // Обработчики WS/visibility живут в эффекте с deps [userId] — брать функцию
   // оттуда через ref, чтобы её пересоздание не роняло и не переподнимало сокет.
@@ -332,7 +436,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const next = prev.filter((r) => r.user_id !== event.data.user_id);
             next.push({
               user_id: event.data.user_id,
-              display_name: existing?.display_name ?? '',
+              // Имя берём из события, и только потом — из уже известной записи.
+              // Раньше был только второй источник, и запись, созданная событием,
+              // пришедшим раньше первого /read_states, навсегда оставалась с
+              // пустым именем: каждое следующее событие копировало пустоту из
+              // неё же самой. В ленте это был кружок с "?" вместо буквы, в меню
+              // — строка вообще без имени, и жило это до перезахода в чат.
+              display_name: event.data.display_name || existing?.display_name || '',
               last_read_seq: event.data.seq,
               read_at: event.data.at,
             });
@@ -406,6 +516,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let pongTimer: ReturnType<typeof setTimeout> | null = null;
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
+
+      // Нулевое: отметка о прочтении, отложенная пока экран был потушен (или
+      // не ушедшая из-за сети). Теперь юзер действительно смотрит в ленту —
+      // markRead сам перепроверит и гейт страницы, и видимость.
+      if (pendingReadRef.current) void markReadRef.current();
 
       // Первое: пока PWA был свёрнут, всё пришедшее прошло мимо ленты — WS
       // доставляет только то, что случилось при живом соединении, и никогда
@@ -595,6 +710,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       pendingUploads,
       reads,
       unreadCount,
+      unreadFromSeq,
       connectionState,
       loadingHistory,
       historyReady,
@@ -602,6 +718,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loadMoreHistory,
       sendMessage,
       markRead,
+      setReadGate,
       pinnedMessage,
       pinMessage,
       unpinMessage,
