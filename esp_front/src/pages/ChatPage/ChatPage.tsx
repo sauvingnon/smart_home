@@ -299,6 +299,7 @@ export const ChatPage: React.FC = () => {
   // и списком зависимостей эффектов он быть не может.
   const {
     settle: settleList,
+    scrollToNode: scrollListToNode,
     freeze: freezeList,
     unfreeze: unfreezeList,
     isStuckNow,
@@ -1538,7 +1539,12 @@ export const ChatPage: React.FC = () => {
   const scrollToMessage = (seq: number) => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
     if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Через хук, а не своим scrollIntoView: прыжок обязан снять удержание низа
+    // (тап по цитате жеста не создаёт, сам собой оно не снимется, и первое же
+    // новое сообщение утащило бы юзера обратно вниз) и объявить о своей
+    // smooth-анимации, чтобы pin() не оборвал её на полпути. Заодно это
+    // возвращает scrollTop под единственного владельца — см. useChatListAnchor.
+    scrollListToNode(el);
     popBubble(seq);
   };
 
