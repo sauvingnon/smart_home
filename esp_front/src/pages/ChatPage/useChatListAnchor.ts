@@ -1,8 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-// Насколько близко к низу лента считается "у низа". Тот же порог, что был в
-// ChatPage до выделения этого хука.
-const NEAR_BOTTOM_PX = 120;
+// Дальше этого от низа — показываем кнопку "вниз". Это ЧИСТО про кнопку и ни
+// про что больше.
+//
+// Раньше это же число решало и второй, совершенно отдельный вопрос: держать ли
+// низ при росте контента. Совмещение и было багом. Пока юзер оставался в этих
+// 120px, режим залипания считался включённым — то есть pin() на каждое
+// изменение высоты возвращал его вниз прямо поверх его же жеста. На колесе
+// это значило, что в оживлённом чате отмотать на 40px просто невозможно:
+// каждое новое сообщение отменяло прокрутку. На тач-устройствах pin() ждал
+// touchend и дёргал ленту вниз ровно в момент, когда палец оторвали.
+const FAR_FROM_BOTTOM_PX = 120;
+
+// Порог возврата: юзер сам домотал вплотную к низу — снова держим низ за
+// ним. Не 0, потому что дробный scrollTop (зум страницы, hidpi) до нуля не
+// доезжает.
+const AT_BOTTOM_PX = 8;
+
+// Насколько надо увести ленту вверх, чтобы это считалось намерением уйти от
+// низа, а не дрожанием пальца/тачпада.
+const RELEASE_UP_PX = 4;
 
 // Окно, внутри которого события scroll считаются следствием жеста
 // пользователя. Каждое событие скролла, пришедшее внутри окна, продлевает его
@@ -42,11 +59,23 @@ export function useChatListAnchor(
   containerRef: React.RefObject<HTMLDivElement | null>,
   contentRef: React.RefObject<HTMLDivElement | null>,
 ) {
-  // Ref, а не state: читается из обработчиков событий и из ResizeObserver,
-  // где замыкание на state было бы устаревшим. Зеркалим в state ниже только
-  // ради рендера кнопки "вниз".
+  // Ref, а не state: читается из обработчиков событий и из ResizeObserver, где
+  // замыкание на state было бы устаревшим. В state он больше и не зеркалится —
+  // из режима залипания ничего не рендерится (кнопка "вниз" теперь живёт на
+  // своём собственном признаке, см. isFarFromBottom ниже), а с новым правилом
+  // "любой жест вверх снимает залипание" такое зеркало давало бы ре-рендер
+  // всей страницы чата на каждое движение пальца.
   const stickRef = useRef(true);
-  const [isStuck, setIsStuck] = useState(true);
+
+  // А вот это — рендерится, поэтому state. Меняется только на пересечении
+  // порога, а не на каждое событие скролла: ref рядом гасит повторы.
+  const farRef = useRef(false);
+  const [isFarFromBottom, setIsFarFromBottom] = useState(false);
+
+  // Ориентир для определения направления жеста. Держим отдельно от scrollTop
+  // самой ленты: нам нужно "куда повёл ОТ предыдущего события скролла", а не
+  // абсолютное положение.
+  const lastScrollTopRef = useRef(0);
 
   // Палец сейчас на ленте. Программная запись scrollTop поверх активного
   // тач-жеста на iOS — известный триггер "заморозки" слоя скролла в
@@ -66,10 +95,26 @@ export function useChatListAnchor(
   const prependingRef = useRef(false);
 
   const setStick = useCallback((next: boolean) => {
-    if (stickRef.current === next) return;
     stickRef.current = next;
-    setIsStuck(next);
   }, []);
+
+  /**
+   * Кнопка "вниз" — единственное, что осталось за порогом FAR_FROM_BOTTOM_PX.
+   * Считается от фактического расстояния до низа, а не от режима залипания:
+   * они теперь отвечают на разные вопросы. Зовётся и из обработчика скролла, и
+   * из обоих наблюдателей размера — потому что уехать от низа можно не только
+   * прокруткой, но и ростом контента под собой (лента выросла, а scrollTop
+   * остался), а события scroll на это не приходит.
+   */
+  const syncScrollDownButton = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const next = distanceFromBottom >= FAR_FROM_BOTTOM_PX;
+    if (farRef.current === next) return;
+    farRef.current = next;
+    setIsFarFromBottom(next);
+  }, [containerRef]);
 
   /**
    * Единственное место во всём чате, где выполняется запись scrollTop ради
@@ -126,15 +171,43 @@ export function useChatListAnchor(
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
+
+    // Кнопке "вниз" безразлично, кто подвинул ленту, — она про факт, а не про
+    // намерение. Поэтому считается до всех проверок на жест.
+    syncScrollDownButton();
+
     const now = Date.now();
+    const prevScrollTop = lastScrollTopRef.current;
+    lastScrollTopRef.current = el.scrollTop;
+
     // Вне окна жеста — этот scroll породила раскладка, а не человек. Режим
     // залипания не трогаем: раньше именно тут он и слетал сам по себе.
+    // Ориентир выше при этом всё равно обновили, иначе первое же настоящее
+    // движение пальца сравнилось бы с давно устаревшим значением и приняло
+    // чужой сдвиг за жест.
     if (now >= gestureUntilRef.current) return;
     // Инерция продлевает окно, пока события скролла продолжают приходить.
     gestureUntilRef.current = now + GESTURE_WINDOW_MS;
+
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setStick(distanceFromBottom < NEAR_BOTTOM_PX);
-  }, [containerRef, setStick]);
+
+    // Домотал вплотную к низу — снова держим низ за ним. Приоритетнее проверки
+    // направления: последний кадр инерции у самой границы вполне может прийти
+    // как микро-движение вверх, и трактовать его как уход было бы неверно.
+    if (distanceFromBottom <= AT_BOTTOM_PX) {
+      setStick(true);
+      return;
+    }
+
+    // Повёл вверх — отпускаем низ, каким бы близким к нему юзер ни был. Это и
+    // есть вся разница с прежним поведением: раньше жест внутри 120px не
+    // считался уходом, и pin() возвращал ленту вниз поверх него.
+    if (el.scrollTop < prevScrollTop - RELEASE_UP_PX) {
+      setStick(false);
+    }
+    // Движение вниз, не дошедшее до самого низа, режим не меняет: юзер ещё в
+    // пути, и решать за него рано.
+  }, [containerRef, setStick, syncScrollDownButton]);
 
   const handleTouchStart = useCallback(() => {
     isTouchingRef.current = true;
@@ -197,10 +270,18 @@ export function useChatListAnchor(
   useEffect(() => {
     const content = contentRef.current;
     if (!content) return;
-    const ro = new ResizeObserver(() => pin());
+    const ro = new ResizeObserver(() => {
+      pin();
+      // Контент вырос под юзером, который низ не держит: событие scroll на это
+      // не приходит, а от низа он уехал. Без этой строки кнопка "вниз" не
+      // появилась бы, и он остался бы без единого признака, что внизу что-то
+      // происходит — а с новым правилом отпускания низа отойти от него стало
+      // куда проще, чем раньше.
+      syncScrollDownButton();
+    });
     ro.observe(content);
     return () => ro.disconnect();
-  }, [contentRef, pin]);
+  }, [contentRef, pin, syncScrollDownButton]);
 
   /**
    * Второй наблюдатель — на сам скролл-контейнер, и он про другое.
@@ -266,15 +347,20 @@ export function useChatListAnchor(
       // Нижний отступ контент не двигает, но съедает место под ним: если мы
       // держим низ, последнее сообщение только что ушло под поле ввода.
       pin();
+      // Расстояние до низа изменилось вместе с отступом — кнопка про это ещё
+      // не знает, событий scroll тут тоже не было.
+      syncScrollDownButton();
     });
 
     ro.observe(el);
     return () => ro.disconnect();
-  }, [containerRef, pin]);
+  }, [containerRef, pin, syncScrollDownButton]);
 
   return {
-    /** Держим ли сейчас низ ленты (для кнопки "вниз"). */
-    isStuck,
+    /** Юзер достаточно далеко от низа, чтобы имело смысл показать кнопку "вниз".
+        Именно расстояние, а НЕ режим залипания: уйти от низа теперь можно
+        любым жестом вверх, и вешать кнопку на это было бы дёрганьем. */
+    isFarFromBottom,
     /** Текущее значение без ожидания рендера — для обработчиков и эффектов. */
     isStuckNow: useCallback(() => stickRef.current, []),
     settle,
