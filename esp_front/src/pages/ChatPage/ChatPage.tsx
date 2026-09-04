@@ -300,6 +300,8 @@ export const ChatPage: React.FC = () => {
   // и списком зависимостей эффектов он быть не может.
   const {
     settle: settleList,
+    freeze: freezeList,
+    unfreeze: unfreezeList,
     isStuckNow,
     scrollToBottom: scrollListToBottom,
     handleScroll: listAnchorScroll,
@@ -1289,6 +1291,19 @@ export const ChatPage: React.FC = () => {
     const maxLeft = Math.max(MARGIN, window.innerWidth - width - MARGIN);
     setMenuPos({ left: Math.min(Math.max(MARGIN, preferredLeft), maxLeft), top });
   }, [actionTarget, userId]);
+
+  // Пока открыто меню действий, лента не двигается вообще. .chat-page--menu-open
+  // запирает её от пальца, но не изнутри: pin() продолжал тянуть низ на каждое
+  // пришедшее по WS сообщение. А меню и копия пузыря поверх блюра стоят по
+  // геометрии, снятой один раз при открытии (см. useLayoutEffect выше), и
+  // разъезжались с ней — вплоть до того, что меню оказывалось под чужим
+  // сообщением. Снятие заморозки — в уборке эффекта, то есть на любом пути
+  // закрытия меню, а не только через closeActionMenu.
+  useEffect(() => {
+    if (!actionTarget) return;
+    freezeList();
+    return () => unfreezeList();
+  }, [actionTarget, freezeList, unfreezeList]);
 
   const startLongPress = (message: ChatMessage, e: React.PointerEvent) => {
     longPressFiredRef.current = false;
