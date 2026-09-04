@@ -19,7 +19,13 @@ const itemVar = {
   visible: { y: 0, opacity: 1 },
 };
 
-const DEFAULT_PREFS: NotifyPrefs = { visit_people: {}, board_offline: false, chat_messages: true };
+const DEFAULT_PREFS: NotifyPrefs = {
+  visit_people: {}, board_offline: false, chat_messages: true,
+  // Своего тумблера ниже пока нет — тема включена всегда, но в объекте
+  // присутствует, чтобы сохранение соседней настройки не отправляло prefs без
+  // неё (см. NotifyPrefs в api/client.ts).
+  chat_reactions: true,
+};
 
 export const ProfilePage: React.FC = () => {
   const { theme } = useTheme();

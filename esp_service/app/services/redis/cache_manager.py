@@ -499,6 +499,9 @@ class CacheManager:
     # один HSET/HDEL. Одна реакция на человека, как в бесплатном Telegram:
     # ключ — сам юзер, смена эмодзи просто перезаписывает его запись.
     CHAT_REACT_PREFIX = "chat:react:"
+    # Кулдаун на пуш о реакции — ключ на пару «кому» + «от кого», значение не
+    # нужно, вся информация в самом факте существования ключа и в его TTL.
+    CHAT_REACT_PUSH_PREFIX = "chat:react_push:"
 
     async def chat_next_seq(self) -> int:
         """Инкрементирует и возвращает новый seq для сообщения."""
@@ -670,6 +673,28 @@ class CacheManager:
             except (TypeError, ValueError):
                 continue
         return decoded
+
+    async def take_reaction_push_slot(self, author_id: int, actor_id: int, ttl_seconds: int) -> bool:
+        """Кулдаун на пуш о реакции: True — слать можно, False — этой паре людей
+        уже слали недавно, молчим.
+
+        Реакции, в отличие от сообщений, тыкают: поставил, передумал, сменил
+        эмодзи, прошёлся по чужой ленте и облепил пять сообщений подряд. Каждый
+        такой тап — это отдельный жест, но не отдельная новость, ради которой
+        стоит будить телефон ещё раз.
+
+        Ключ на пару «автор сообщения + реагирующий», а не на сообщение: за
+        минуту от одного человека приходит один пуш, сколько бы всего он не
+        натыкал. SET NX EX атомарен, поэтому две одновременные реакции не
+        просочатся обе, а сам слот исчезает сам по TTL — чистить нечего.
+
+        Redis недоступен — False: пуш о реакции не та вещь, ради которой стоит
+        рисковать спамом в обход кулдауна.
+        """
+        if not await self._ensure_connection():
+            return False
+        key = f"{self.CHAT_REACT_PUSH_PREFIX}{author_id}:{actor_id}"
+        return bool(await self.redis_client.set(key, "1", ex=ttl_seconds, nx=True))
 
     async def get_expired_chat_messages(self, older_than_days: int = 30) -> list:
         """Сообщения старше N дней (seq растёт вместе с временем — как только

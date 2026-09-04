@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { flushSync } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
 import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, ImageOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Users, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
@@ -40,6 +41,13 @@ const EDIT_WINDOW_MS = 60 * 60 * 1000;
 const BUBBLE_POP_SCALE = 1.07;
 const BUBBLE_HOLD_SCALE = 1.03;
 const BUBBLE_POP_MS = 280;
+
+// Сколько держится подсветка сообщения, к которому приехали по ссылке из пуша.
+// Заметно дольше, чем подпрыгивание по тапу (BUBBLE_POP_MS): туда юзер целился
+// пальцем и знает, куда смотреть, а сюда его привезли из системной шторки —
+// акцент должен пережить саму прокрутку и подождать, пока глаз догонит.
+// Держим в паре с одноимённой длительностью анимации в ChatPage.css.
+const DEEP_LINK_HIGHLIGHT_MS = 2200;
 
 // Появление и уход меню действий. Одно число на все слои сразу (скрим, копия
 // пузыря, стопка карточек): AnimatePresence держит группу, пока не доиграет
@@ -369,6 +377,15 @@ export const ChatPage: React.FC = () => {
   const actionMenuRef = useRef<HTMLDivElement>(null);
   const [poppedSeq, setPoppedSeq] = useState<number | null>(null);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Подсвеченное сообщение, к которому приехали по ?seq= из пуша.
+  const [linkedSeq, setLinkedSeq] = useState<number | null>(null);
+  const linkedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Цель диплинка — именно ref, а не стейт: это одноразовое поручение «доехать
+  // и забыть», а не то, что рисуется. Стейтом каждая перерисовка ленты (а их
+  // при догрузке страниц истории будет несколько) тянула бы за собой лишний
+  // рендер, и пришлось бы отдельно следить, чтобы прыжок не повторился.
+  const deepLinkSeqRef = useRef<number | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   // Ответ и правка взаимоисключающие — поле ввода одно, и занято либо тем, либо другим.
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
   const [editTarget, setEditTarget] = useState<ChatMessage | null>(null);
@@ -796,6 +813,67 @@ export const ChatPage: React.FC = () => {
     prependAnchorRef.current = null;
     releaseTopAnchor();
   }, [loadingHistory, releaseTopAnchor]);
+
+  // ───────── Диплинк: /chat?seq=N из пуш-уведомления ─────────
+  //
+  // Параметр снимаем сразу и через replace: это одноразовое поручение «привези
+  // меня сюда», а не состояние экрана. Оставленный в адресе, он повторял бы
+  // прыжок на каждый возврат по «назад» и на каждую перезагрузку — юзера
+  // выкидывало бы из ленты обратно к старому сообщению спустя часы.
+  useEffect(() => {
+    const raw = searchParams.get('seq');
+    if (!raw) return;
+    setSearchParams({}, { replace: true });
+    const seq = Number(raw);
+    // Параметр приходит снаружи (из payload пуша, а то и руками из адресной
+    // строки) — мусор просто игнорируем, чат при этом открывается как обычно.
+    if (Number.isInteger(seq) && seq > 0) deepLinkSeqRef.current = seq;
+  }, [searchParams, setSearchParams]);
+
+  // Доехать до цели. Сообщения может не быть в загруженной странице — из пуша
+  // чат открывается холодным, и в ленте только последние HISTORY_PAGE_SIZE, —
+  // поэтому эффект не одноразовый: он переспрашивает себя на каждую вставку
+  // страницы, пока цель не найдётся или искать не станет негде.
+  useEffect(() => {
+    const target = deepLinkSeqRef.current;
+    // historyReady — не косметика: до первой страницы лента пуста, и цель
+    // «не нашлась» была бы неотличима от удалённой.
+    if (target === null || !historyReady) return;
+
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-seq="${target}"]`);
+    if (el) {
+      deepLinkSeqRef.current = null;
+      // Тем же путём, что прыжок по цитате: через хук, а не своим
+      // scrollIntoView — см. scrollToMessage.
+      scrollListToNode(el);
+      highlightMessage(target);
+      return;
+    }
+
+    // Страница уже едет — ждём её, а не заказываем вторую.
+    if (loadingHistory) return;
+
+    // Цель лежит в уже загруженном диапазоне, но её там нет — значит сообщение
+    // удалили, пока уведомление висело в шторке. Догружать бесполезно: дальше
+    // только ещё более старые. Тихо сдаёмся — юзер просто окажется в чате, и
+    // это честнее, чем увести его в начало истории.
+    const oldestLoaded = messages[0]?.seq;
+    if (oldestLoaded !== undefined && target >= oldestLoaded) {
+      deepLinkSeqRef.current = null;
+      return;
+    }
+
+    if (!hasMoreHistory) {
+      deepLinkSeqRef.current = null;
+      return;
+    }
+
+    // Якорь — по той же причине, что и при обычной подгрузке скроллом: пока мы
+    // отматываем историю страницами, лента не должна дёргаться под руками.
+    // Прыжок случится один раз, в конце, когда цель наконец окажется в DOM.
+    prependAnchorRef.current = captureTopAnchor();
+    loadMoreHistory();
+  }, [historyReady, messages, loadingHistory, hasMoreHistory, loadMoreHistory, scrollListToNode, captureTopAnchor]);
 
   // Поле ввода — contenteditable div, а не textarea: на iOS textarea/input
   // всегда тянет за собой системную панель над клавиатурой со стрелками
@@ -1368,8 +1446,19 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  // Подсветка цели диплинка. Отдельно от popBubble, а не его hold-режимом:
+  // popBubble масштабирует пузырь (отклик на палец), а тут нужно кольцо,
+  // которое видно издалека, пока лента ещё доезжает. Заодно они не мешают друг
+  // другу, если по приехавшему сообщению сразу же тапнуть.
+  const highlightMessage = (seq: number) => {
+    if (linkedTimerRef.current) clearTimeout(linkedTimerRef.current);
+    setLinkedSeq(seq);
+    linkedTimerRef.current = setTimeout(() => setLinkedSeq(null), DEEP_LINK_HIGHLIGHT_MS);
+  };
+
   useEffect(() => () => {
     if (popTimerRef.current) clearTimeout(popTimerRef.current);
+    if (linkedTimerRef.current) clearTimeout(linkedTimerRef.current);
   }, []);
 
   const closeActionMenu = () => {
@@ -2609,7 +2698,7 @@ export const ChatPage: React.FC = () => {
                   >
                     <div className="chat-bubble-col">
                       <motion.div
-                        className={`chat-bubble ${isMediaBubble ? 'chat-bubble--media' : ''}`}
+                        className={`chat-bubble ${isMediaBubble ? 'chat-bubble--media' : ''} ${linkedSeq === message.seq ? 'chat-bubble--linked' : ''}`}
                         animate={{ scale: poppedSeq === message.seq ? BUBBLE_POP_SCALE : 1 }}
                         transition={{ type: 'spring', stiffness: 520, damping: 17 }}
                         onPointerDown={(e) => startLongPress(message, e)}

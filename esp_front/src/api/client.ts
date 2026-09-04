@@ -72,6 +72,11 @@ export interface NotifyPrefs {
   visit_people: Record<string, boolean>;
   board_offline: boolean;
   chat_messages: boolean;
+  // Тумблера в ProfilePage у этой темы пока нет — она всегда включена. Поле
+  // всё равно описано и ездит в обе стороны: prefs сохраняются целиком, и
+  // необъявленное поле терялось бы на каждом сохранении соседнего тумблера,
+  // молча возвращаясь к дефолту бэка.
+  chat_reactions: boolean;
 }
 
 export interface PushStatusEntry {

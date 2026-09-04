@@ -83,6 +83,17 @@ _PUSH_BODY_BY_TYPE = {
 # _aggregate_reactions).
 ALLOWED_REACTIONS = ("👍", "❤️", "🔥", "😁", "😢", "👎")
 
+# Как часто один человек может разбудить телефон другого реакциями. Не «раз в
+# минуту на сообщение», а раз в минуту на пару людей — обоснование срока и
+# выбранной гранулярности см. в cache.take_reaction_push_slot.
+REACTION_PUSH_COOLDOWN_SECONDS = 60
+
+# Цитата в теле пуша заметно короче, чем в цитате ответа (REPLY_PREVIEW_MAX_CHARS):
+# там строка живёт в пузыре во всю ширину экрана, а тут — в системной плашке,
+# где после имени и эмодзи остаётся строка-полторы, и остальное всё равно
+# обрежет сама ОС, только уже без многоточия.
+REACTION_PUSH_PREVIEW_MAX_CHARS = 60
+
 
 class ChatService:
     """Общий групповой чат — один канал на всех, без списка чатов и личных сообщений."""
@@ -381,14 +392,21 @@ class ChatService:
         original = await self.cache.get_chat_message(reply_to)
         if not original:
             return {"reply_to": None, "reply_to_username": "", "reply_to_preview": ""}
-        preview = original.get("text") or _PUSH_BODY_BY_TYPE.get(original.get("type", ""), "Сообщение")
-        if len(preview) > REPLY_PREVIEW_MAX_CHARS:
-            preview = preview[:REPLY_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
         return {
             "reply_to": original["seq"],
             "reply_to_username": original.get("username", ""),
-            "reply_to_preview": preview,
+            "reply_to_preview": self._message_preview(original, REPLY_PREVIEW_MAX_CHARS),
         }
+
+    @staticmethod
+    def _message_preview(message: dict, max_chars: int) -> str:
+        """Короткое «о чём это сообщение» — для цитаты в ответе и для тела пуша
+        о реакции. У медиа своего текста нет, поэтому вместо него идёт подпись
+        по типу («📷 Фото»): пустая цитата не сказала бы вообще ни о чём."""
+        preview = message.get("text") or _PUSH_BODY_BY_TYPE.get(message.get("type", ""), "Сообщение")
+        if len(preview) > max_chars:
+            preview = preview[:max_chars - 1].rstrip() + "…"
+        return preview
 
     async def _finalize_message(
         self, seq: int, user_id: int, msg_type: str, text: str, media_key: str,
@@ -438,7 +456,11 @@ class ChatService:
         payload = {
             "title": message["username"],
             "body": message["text"] or _PUSH_BODY_BY_TYPE.get(message["type"], "Новое сообщение"),
-            "url": "/chat",
+            # С seq, а не просто "/chat": тап по пуш-уведомлению открывает чат
+            # ровно на том сообщении, о котором оно было (см. deep-link в
+            # ChatPage). Без параметра юзер приезжал в конец ленты и искал
+            # глазами, что именно ему прилетело.
+            "url": f"/chat?seq={message['seq']}",
         }
         for user in users:
             uid = user["user_id"]
@@ -455,15 +477,70 @@ class ChatService:
             subscription = await self.cache.get_push_subscription(uid)
             if not subscription:
                 continue
-            try:
-                await send_push(subscription, payload)
-            except PushSubscriptionExpired:
-                await self.cache.delete_push_subscription(uid)
-                logger.info(f"🔕 Push-подписка юзера {uid} протухла, удалена")
-            except Exception as e:
-                # Push — best-effort уведомление, а не часть доставки сообщения:
-                # ошибка здесь (например, VAPID не настроен) не должна ронять send_message.
-                logger.warning(f"⚠️ Не удалось отправить push юзеру {uid}: {e}")
+            await self._deliver_push(uid, subscription, payload)
+
+    async def _deliver_push(self, user_id: int, subscription: dict, payload: dict) -> None:
+        """Отправка одного пуша со штатной уборкой за собой. Push — best-effort
+        уведомление, а не часть доставки сообщения: ошибка здесь (скажем, VAPID
+        не настроен) не должна ронять ни send_message, ни toggle_reaction —
+        сообщение и реакция к этому моменту уже сохранены и разосланы по WS.
+
+        Подписку принимаем готовой, а не читаем сами: вызывающий и так держит её
+        в руках, а у реакций порядок проверок важен — кулдаун берётся последним,
+        уже после того как выяснилось, что слать вообще есть куда."""
+        try:
+            await send_push(subscription, payload)
+        except PushSubscriptionExpired:
+            await self.cache.delete_push_subscription(user_id)
+            logger.info(f"🔕 Push-подписка юзера {user_id} протухла, удалена")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось отправить push юзеру {user_id}: {e}")
+
+    async def _push_reaction(self, message: dict, actor_id: int, emoji: str) -> None:
+        """Пуш автору сообщения о том, что на него отреагировали.
+
+        Условий много, и каждое отсекает свой случай, поэтому порядок не
+        произвольный: сначала бесплатные проверки в памяти, потом Redis, и
+        только в самом конце — кулдаун. Взять слот раньше значило бы сжечь его
+        на юзера, которому мы всё равно ничего не отправили, и следующая, уже
+        доставимая, реакция от того же человека молча утонула бы в кулдауне.
+        """
+        author_id = message["user_id"]
+        # Реакция на собственное сообщение — сам себе новость.
+        if author_id == actor_id:
+            return
+        # Автор сидит в чате — он уже увидел реакцию вживую, событием reaction
+        # по WS. Тот же принцип, что и у сообщений (_push_to_offline_users).
+        if author_id in self.connected_user_ids():
+            return
+
+        prefs = await self.cache.get_video_notify_prefs(author_id) or {}
+        if not prefs.get("chat_messages", True) or not prefs.get("chat_reactions", True):
+            return
+
+        subscription = await self.cache.get_push_subscription(author_id)
+        if not subscription:
+            return
+
+        if not await self.cache.take_reaction_push_slot(
+            author_id, actor_id, REACTION_PUSH_COOLDOWN_SECONDS,
+        ):
+            return
+
+        actor = await self.cache.get_user(actor_id)
+        preview = self._message_preview(message, REACTION_PUSH_PREVIEW_MAX_CHARS)
+        # Свой текст берём в кавычки, подпись типа («📷 Фото») — нет: кавычки
+        # вокруг неё выглядели бы цитатой того, чего никто не писал.
+        body = f"{emoji} на «{preview}»" if (message.get("text") or "").strip() else f"{emoji} на {preview.lower()}"
+        await self._deliver_push(author_id, subscription, {
+            "title": actor["display_name"] if actor else str(actor_id),
+            "body": body,
+            "url": f"/chat?seq={message['seq']}",
+            # Тег на пару «сообщение + реагирующий»: передумавший и сменивший
+            # эмодзи заменяет собой своё же уведомление, а реакция второго
+            # человека приходит отдельной строкой, а не затирает первого.
+            "tag": f"chat-reaction-{message['seq']}-{actor_id}",
+        })
 
     async def send_test_push(self) -> bool:
         """Тестовый пуш админу напрямую, в обход сообщений/подписчиков —
@@ -676,10 +753,14 @@ class ChatService:
         на клиенте — лишний источник расхождения, а на четверых участников это
         считанные байты.
 
-        Пуша и бейджа непрочитанного тут намеренно нет: реакция не создаёт
-        сообщения, поэтому в счётчик она не попадает сама собой, а будить
-        чужой телефон ради эмодзи — перебор (в Telegram это отдельная,
-        по умолчанию выключенная настройка)."""
+        Бейджа непрочитанного тут по-прежнему нет: реакция не создаёт
+        сообщения, поэтому в счётчик она сама собой не попадает — и не должна,
+        читать в чате после неё нечего.
+
+        А вот пуш автору сообщения — есть, под кулдауном и только на постановку
+        реакции (см. _push_reaction). Шлём его после broadcast, а не до: сидящие
+        в чате должны увидеть чипс сразу, не дожидаясь похода в чужой push-сервис,
+        который в худшем случае отвечает секунду."""
         if emoji not in ALLOWED_REACTIONS:
             raise ValueError("Недопустимая реакция")
         message = await self.cache.get_chat_message(seq)
@@ -693,6 +774,15 @@ class ChatService:
         raw = await self.cache.toggle_chat_reaction(seq, user_id, emoji)
         reactions = self._aggregate_reactions(raw)
         await self.broadcast({"type": "reaction", "data": {"seq": seq, "reactions": reactions}})
+
+        # Тоггл — три разных действия под одним вызовом, и пуш заслуживает
+        # только одно из них. Отличаем по итоговому состоянию, а не по
+        # возвращаемому cache флагу: после снятия своей записи в хэше просто нет,
+        # после постановки и смены — есть, и в ней ровно тот эмодзи, который
+        # прислали. Снятие не уведомляем принципиально: «я передумал» — не
+        # новость, ради которой стоит будить телефон.
+        if raw.get(user_id) == emoji:
+            await self._push_reaction(message, user_id, emoji)
         return reactions
 
     async def get_pinned_message(self) -> Optional[dict]:

@@ -958,6 +958,39 @@
   box-shadow: none;
 }
 
+/* Сообщение, к которому приехали по ссылке из пуш-уведомления. Кольцом, а не
+   заливкой: фон у пузыря свой в каждой теме, а у своих сообщений ещё и
+   градиентный — перекрашивать его значило бы держать четыре варианта
+   подсветки вместо одной.
+
+   Именно box-shadow, а не outline: outline начал повторять border-radius
+   только в Safari 16.4, а на более старых iPhone'ах (а чат живёт в PWA
+   как раз на них) кольцо вокруг скруглённого пузыря вышло бы прямоугольным.
+
+   Базовую тень пузыря переносим в каждый кадр: анимация перебивает свойство
+   целиком, и без неё чужие сообщения на две секунды теряли бы стеклянную
+   подложку. Длительность держим в паре с DEEP_LINK_HIGHLIGHT_MS в ChatPage.tsx —
+   класс снимается по таймеру оттуда. */
+@keyframes chat-bubble-linked {
+  0% { box-shadow: var(--glass-shadow), 0 0 0 0 rgba(14, 165, 233, 0); }
+  15% { box-shadow: var(--glass-shadow), 0 0 0 4px rgba(14, 165, 233, 0.55); }
+  70% { box-shadow: var(--glass-shadow), 0 0 0 4px rgba(14, 165, 233, 0.45); }
+  100% { box-shadow: var(--glass-shadow), 0 0 0 0 rgba(14, 165, 233, 0); }
+}
+
+.chat-bubble--linked {
+  animation: chat-bubble-linked 2.2s ease-out;
+}
+
+/* Тем, кто просил меньше движения, оставляем сам факт подсветки — она тут не
+   украшение, а единственный ответ на вопрос «куда меня привезли». */
+@media (prefers-reduced-motion: reduce) {
+  .chat-bubble--linked {
+    animation: none;
+    box-shadow: var(--glass-shadow), 0 0 0 3px rgba(14, 165, 233, 0.45);
+  }
+}
+
 .chat-bubble-author {
   font-size: 14px;
   font-weight: 600;
