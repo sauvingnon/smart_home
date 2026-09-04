@@ -312,9 +312,13 @@ export const ChatPage: React.FC = () => {
   // Повторный тап по табу "Чат" — как кнопка "вниз": та же санкционированная
   // точка входа в scrollTop ленты, никакой отдельной записи scrollTop тут нет.
   useOnTabReselect(() => scrollListToBottom('smooth'));
-  // Кнопка "вниз" — прямое следствие режима залипания, а не отдельный стейт,
-  // который надо не забыть погасить в каждой ветке.
-  const showScrollDown = !listAnchor.isStuck;
+  // Кнопка "вниз" — следствие фактического расстояния до низа, а не режима
+  // залипания. Раньше это было одно и то же (showScrollDown = !isStuck), но с
+  // тех пор как низ отпускается любым жестом вверх, а не только уходом за
+  // 120px, кнопка на залипании выскакивала бы от каждого касания ленты.
+  // Гасить её вручную по-прежнему негде: признак считает сам хук — и по
+  // скроллу, и по росту контента.
+  const showScrollDown = listAnchor.isFarFromBottom;
 
   const headerRef = useRef<HTMLDivElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
