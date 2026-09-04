@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
 import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, ImageOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Users, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
@@ -65,6 +65,90 @@ const REACTION_AVATARS_MAX = 3;
 const READ_AVATAR_COLORS = ['#3b82f6', '#10b981', '#a855f7', '#f97316', '#ec4899', '#06b6d4'];
 const readAvatarColor = (userId: number) => READ_AVATAR_COLORS[Math.abs(userId) % READ_AVATAR_COLORS.length];
 const readAvatarLetter = (displayName: string) => displayName.trim().charAt(0).toUpperCase() || '?';
+
+// Насколько долго строка реакций догоняет свою новую высоту. Пружина заведомо
+// передемпфирована (46 при 600 — коэффициент чуть выше единицы, перелёта нет
+// вовсе): высота тут не украшение, а поток ленты, и любой перелёт превратился
+// бы в дрожание всего, что лежит ниже сообщения.
+const REACTIONS_HEIGHT_SPRING = { type: 'spring' as const, stiffness: 600, damping: 46 };
+
+/**
+ * Обёртка над строкой реакций, которая ведёт её высоту по-настоящему.
+ *
+ * Чипсы появляются и уходят через scale/opacity, а те не занимают в потоке ни
+ * пикселя — из-за этого место под строку открывалось щелчком, ещё до того как
+ * в нём что-то нарисуется, а на уходе схлопывалось наоборот: чипс уже растаял,
+ * а пустое место стояло до самого конца exit и исчезало одним кадром. Есть и
+ * третий случай, самый заметный и вообще не связанный с появлением: очередной
+ * чипс не влез в ширину пузыря и перенёсся на вторую строку — высота выросла
+ * на целый ряд, хотя ни один AnimatePresence при этом даже не сработал.
+ *
+ * Поэтому высоту ведёт не React и не длина списка реакций, а ResizeObserver
+ * самой строки: что бы с ней ни случилось — прибавился чипс, ушёл, вырос или
+ * пропал перенос, — клип пружиной догоняет новый замер. React при этом не
+ * перерисовывается ни разу: значение живёт в MotionValue, то есть ровно то
+ * "не бомбить дерево по кадру", ради которого так же сделаны и остальные
+ * анимации ленты. Растущую высоту подхватывает ResizeObserver самой ленты и
+ * держит низ на каждом кадре (см. useChatListAnchor) — тот же путь, которым
+ * идут догрузившаяся картинка и схлопывание удалённого сообщения.
+ */
+const ReactionsRow: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Фиксированная высота и обрезка живут тут РОВНО столько, сколько идёт
+  // анимация, а в покое значение всегда 'auto' и overflow снят. Это не
+  // экономия, а единственный способ не порезать строку: любая мера высоты
+  // числом рано или поздно окажется на пиксель-другой меньше настоящей —
+  // offsetHeight округляет дробную высоту вниз, эмодзи рисуется чуть ниже
+  // своей строки шрифта, пружина финиширует с допуском, — и всё это осталось
+  // бы навсегда подрезанным низом. Числа нет в покое — резать нечем.
+  const height = useMotionValue<number | string>('auto');
+  const clipRef = useRef<HTMLDivElement | null>(null);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  // Предыдущий ЗАМЕР, а не текущее значение анимации: сравнивать замер с
+  // летящим значением нельзя — пружина проходит мимо любой отметки, и порог
+  // ниже принял бы настоящее изменение размера за дребезг ровно в тот момент,
+  // когда высота как раз пролетала мимо нового замера.
+  const measuredRef = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    let running: { stop: () => void } | null = null;
+    // offsetHeight, а не getBoundingClientRect: у пузыря есть собственный
+    // "поп" по тапу (scale 1.07), и rect вернул бы высоту, умноженную на него.
+    const ro = new ResizeObserver(() => {
+      const next = row.offsetHeight;
+      const prev = measuredRef.current;
+      measuredRef.current = next;
+      // Первый замер — молча: в истории реакции приезжают уже готовыми, и
+      // разъезжаться там нечему.
+      if (prev === null || Math.abs(next - prev) < 0.5) return;
+      const clip = clipRef.current;
+      if (clip) clip.style.overflow = 'hidden';
+      if (typeof height.get() !== 'number') height.set(prev);
+      running = animate(height, next, {
+        ...REACTIONS_HEIGHT_SPRING,
+        onComplete: () => {
+          running = null;
+          height.set('auto');
+          if (clipRef.current) clipRef.current.style.overflow = '';
+        },
+      });
+    });
+    ro.observe(row);
+    return () => { ro.disconnect(); running?.stop(); };
+  }, [height]);
+
+  // Клип монтируется всегда, даже когда реакций нет и в помине: только так
+  // появление ПЕРВОЙ реакции — тоже рост высоты, а не щелчок. Пустая строка
+  // не стоит ни пикселя (.chat-reactions:empty гасит собственные отступы) и
+  // ни одного лишнего кадра — ResizeObserver будит колбэк только на реальное
+  // изменение размера.
+  return (
+    <motion.div ref={clipRef} className="chat-reactions-clip" style={{ height }}>
+      <div ref={rowRef} className="chat-reactions">{children}</div>
+    </motion.div>
+  );
+};
 
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -1706,11 +1790,12 @@ export const ChatPage: React.FC = () => {
       {/* Появление и уход анимированы на трёх уровнях сразу, и у каждого своя
           роль — вместе они дают одно движение на одно событие, без наложений:
 
-            строка целиком — только на переход "реакций не было ↔ не осталось";
+            высота строки — открывается и закрывается место под реакции, будь
+                            то первая реакция, последняя или лишний перенос;
             отдельный чипс — новая эмодзи в уже существующей строке;
             лицо внутри чипса — человек, подсевший к уже стоящей реакции.
 
-          Ключ ко всему — initial={false} на каждом AnimatePresence: дети,
+          Ключ к двум нижним — initial={false} на каждом AnimatePresence: дети,
           которые были на месте в момент его монтирования, не анимируются, а
           добавленные позже — анимируются. Отсюда бесплатно берётся всё
           нужное поведение: история, приехавшая с готовыми реакциями, не
@@ -1718,30 +1803,22 @@ export const ChatPage: React.FC = () => {
           монтируется заново на каждое открытие меню) не переигрывает их же;
           а вот реакция, пришедшая по WS в открытый чат, — всплывает.
 
-          Внешний AnimatePresence живёт снаружи условия, а не внутри: иначе
-          при снятии последней реакции строка размонтировалась бы мгновенно и
-          унесла exit своего чипса с собой. Своего бокса он не рисует, так что
-          пустому сообщению это не стоит ни пикселя.
-
           Пружины слегка передемпфированы (в отличие от подпрыгивания пузыря,
           где 520/17 взяты ради явного перелёта): нужен короткий "поп", а не
           качание — на мелком элементе перелёты дают ту же перерастрировку
           текста, из-за которой уже переделывали анимацию меню действий.
 
-          Высота пузыря при этом меняется кадр за кадром — ровно тот случай,
-          на который рассчитан ResizeObserver ленты: pin() держит низ на
-          каждом кадре, как при схлопывании удалённого сообщения. */}
-      <AnimatePresence initial={false}>
-      {reactions.length > 0 && (
-        <motion.div
-          key="reactions"
-          className="chat-reactions"
-          initial={{ opacity: 0, scale: 0.85 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.85 }}
-          transition={{ type: 'spring', stiffness: 500, damping: 26 }}
-        >
-          <AnimatePresence initial={false}>
+          Главное правило всего блока: КАЖДАЯ анимация здесь двигает настоящий
+          бокс, а не только его картинку. Scale и opacity сами по себе места в
+          потоке не занимают, и раньше на них всё и держалось — оттого место
+          под строку открывалось щелчком до всякой анимации, ширина чипса при
+          подсевшем человеке прыгала на целое лицо, а уходящий чипс уносил
+          соседей влево одним кадром уже после того, как сам растаял. Теперь
+          лицо ведёт width+marginLeft, уходящий чипс — width+marginRight (то
+          есть соседи разъезжаются потоком, сами по себе), а высоту строки —
+          ResizeObserver в ReactionsRow. */}
+      <ReactionsRow>
+        <AnimatePresence initial={false}>
           {reactions.map((r) => {
             const mine = userId !== null && r.user_ids.includes(userId);
             return (
@@ -1752,7 +1829,25 @@ export const ChatPage: React.FC = () => {
                 title={reactorsLabel(r.user_ids)}
                 initial={{ opacity: 0, scale: 0.55 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.55 }}
+                // На уходе, в отличие от прихода, схлопывается и сам бокс:
+                // width в ноль, marginRight в минус зазор строки (gap: 4px,
+                // см. CSS) — иначе от чипса остался бы висеть пустой зазор.
+                // Соседям при этом ничего анимировать не нужно, они просто
+                // едут потоком за сжимающейся шириной.
+                //
+                // Приход бокс не трогает намеренно: новая эмодзи всегда
+                // приписывается в КОНЕЦ строки (порядок групп — по первому
+                // появлению эмодзи, см. _aggregate_reactions на бэке), то
+                // есть двигать ей некого, и хватает чистого "попа". Он же и
+                // быстрее ухода: уход тут не самоценен, за ним ещё поедет
+                // высота строки, и растягивать эту пару вдвое не за чем.
+                exit={{
+                  opacity: 0,
+                  scale: 0.55,
+                  width: 0,
+                  marginRight: -4,
+                  transition: { duration: 0.16, ease: 'easeIn' },
+                }}
                 transition={{ type: 'spring', stiffness: 500, damping: 24 }}
                 // Тап по чипсу — тот же тоггл, что и в пикере: своя реакция
                 // снимается, чужая добавляется к ней. stopPropagation, иначе
@@ -1775,9 +1870,16 @@ export const ChatPage: React.FC = () => {
                       key={id}
                       className="chat-reaction-avatar"
                       style={{ background: readAvatarColor(id) }}
-                      initial={{ opacity: 0, scale: 0.4 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.4 }}
+                      // width и marginLeft (гасящий gap: 6px чипса) едут вместе
+                      // со scale: лицо не просто проявляется на уже готовом
+                      // месте, а раздвигает пилюлю под себя — иначе правый край
+                      // чипса отскакивал бы на 28px одним кадром, а вся строка
+                      // за ним. Числа обязаны совпадать с .chat-reaction-avatar
+                      // в CSS, там же min-width: 0, без которого флекс не даёт
+                      // ужать элемент ниже его содержимого.
+                      initial={{ opacity: 0, scale: 0.4, width: 0, marginLeft: -6 }}
+                      animate={{ opacity: 1, scale: 1, width: 22, marginLeft: 0 }}
+                      exit={{ opacity: 0, scale: 0.4, width: 0, marginLeft: -6 }}
                       transition={{ type: 'spring', stiffness: 500, damping: 24 }}
                     >
                       {readAvatarLetter(displayNameById.get(id) ?? '')}
@@ -1790,10 +1892,8 @@ export const ChatPage: React.FC = () => {
               </motion.button>
             );
           })}
-          </AnimatePresence>
-        </motion.div>
-      )}
-      </AnimatePresence>
+        </AnimatePresence>
+      </ReactionsRow>
       {/* Кружки "прочитано" — по той же схеме, что и реакции выше: внешний
           AnimatePresence снаружи условия (иначе уход последнего кружка с
           сообщения не успел бы отыграться), внутренний — на отдельных лицах,

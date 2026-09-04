@@ -174,6 +174,22 @@ const PONG_TIMEOUT_MS = 3000;
 // (быстрое переключение между табами/аппами) не должна долбить сервер новыми
 // соединениями поверх уже идущего реконнекта.
 const FORCE_RECONNECT_DEBOUNCE_MS = 5000;
+// Шаг, с которым разбирается очередь входящих событий: столько проходит между
+// двумя показанными подряд событиями одной пачки.
+//
+// Отмеряется не на глаз, а от длительности самой анимации появления: пружина
+// чипса (stiffness 500, damping 24) затухает примерно за 330мс. Шаг заметно
+// короче неё — и соседние анимации идут внахлёст почти целиком, то есть пачка
+// снова читается как одна вспышка, только слегка размазанная (на 80мс так и
+// было). Шаг около половины — начало каждой следующей уже отчётливо отдельное,
+// а хвосты ещё перекрываются, и получается каскад, а не череда щелчков.
+const BURST_STEP_MS = 160;
+// Столько событий в очереди ещё считаем пачкой. Больше — это уже поток
+// (пересинхронизация, чей-то скрипт), и растягивать его по шагу значило бы
+// отставать от реальности на секунды; такое применяем разом. Порог связан с
+// шагом: восемь событий — это чуть больше секунды каскада, дольше ждать
+// свежую ленту уже неприлично.
+const BURST_MAX_QUEUE = 8;
 // Через столько повторяем отметку о прочтении, не ушедшую из-за сети. Без
 // повтора она ждала бы следующего нового сообщения: бейдж висел бы на
 // открытом чате, а отправитель не увидел бы кружок вообще.
@@ -430,6 +446,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     connectionStateRef.current = connectionState;
   }, [connectionState]);
 
+  // Очередь входящих событий сокета и её разбиратель — см. enqueueEvent ниже.
+  // Рефы живут на уровне провайдера, а не внутри эффекта, чтобы уборка эффекта
+  // могла погасить незавершённый разбор при смене юзера или размонтировании.
+  const eventQueueRef = useRef<ChatWsEvent[]>([]);
+  const drainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAppliedAtRef = useRef(0);
+
   // Время последнего полученного 'pong' — по нему health-check при возврате в
   // приложение отличает живой сокет от того, который только считается живым.
   const lastPongAtRef = useRef(0);
@@ -456,7 +479,15 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       onPong: () => {
         lastPongAtRef.current = Date.now();
       },
-      onEvent: (event: ChatWsEvent) => {
+      // Не applyEvent напрямую: события проходят через очередь (см. ниже).
+      onEvent: (event: ChatWsEvent) => enqueueEvent(event),
+      onError: () => setConnectionState('error'),
+      onClose: () => setConnectionState('disconnected'),
+    };
+
+    // Собственно применение события к состоянию. Вызывается не сокетом
+    // напрямую, а разбирателем очереди (см. enqueueEvent ниже).
+    function applyEvent(event: ChatWsEvent) {
         if (event.type === 'message') {
           const incoming = event.data;
           setMessages((prev) => (prev.some((m) => m.seq === incoming.seq) ? prev : [...prev, incoming]));
@@ -540,10 +571,61 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             timers.delete(typingUserId);
           }, TYPING_EXPIRY_MS));
         }
-      },
-      onError: () => setConnectionState('error'),
-      onClose: () => setConnectionState('disconnected'),
-    };
+    }
+
+    // Сглаживание пачек: между сокетом и React'ом стоит очередь.
+    //
+    // Смысл не в задержке ради задержки, а в том, чтобы события не сваливались
+    // в один коммит. Когда трое отреагировали и двое дочитали в один тик, лента
+    // без очереди перестраивается одним кадром — все анимации появления
+    // стартуют и заканчиваются вместе, и вместо череды мелких движений выходит
+    // одна вспышка, в которой ничего не разобрать. Разложенные по кадрам, те же
+    // события читаются как последовательность.
+    //
+    // Одиночное событие (а это подавляющее большинство) применяется СРАЗУ:
+    // ровная задержка всему подряд сделала бы тормозным и собственный тап по
+    // реакции, и обычную переписку. Задержка появляется только со второго
+    // события пачки — то есть ровно там, где без неё была бы вспышка.
+    function drainQueue() {
+      drainTimerRef.current = null;
+      const queued = eventQueueRef.current;
+      if (queued.length === 0) return;
+
+      // Поток, а не пачка: раскладывать сотню событий по 80мс — это две минуты
+      // отставания от реальности, что куда хуже одной вспышки. Такое применяем
+      // разом и выходим.
+      if (queued.length > BURST_MAX_QUEUE) {
+        eventQueueRef.current = [];
+        queued.forEach(applyEvent);
+        lastAppliedAtRef.current = Date.now();
+        return;
+      }
+
+      applyEvent(queued.shift() as ChatWsEvent);
+      lastAppliedAtRef.current = Date.now();
+      if (queued.length > 0) {
+        drainTimerRef.current = setTimeout(drainQueue, BURST_STEP_MS);
+      }
+    }
+
+    function enqueueEvent(event: ChatWsEvent) {
+      const now = Date.now();
+      // Очередь пуста и прошлое событие было давно — значит это не пачка.
+      if (eventQueueRef.current.length === 0 && now - lastAppliedAtRef.current >= BURST_STEP_MS) {
+        lastAppliedAtRef.current = now;
+        applyEvent(event);
+        return;
+      }
+      // Иначе — в хвост, порядок прихода сохраняется. Момент следующего показа
+      // отсчитывается от предыдущего применённого, а не от "сейчас": иначе
+      // событие, прилетевшее в конце паузы, ждало бы полный шаг лишний раз.
+      eventQueueRef.current.push(event);
+      if (!drainTimerRef.current) {
+        const wait = Math.max(0, BURST_STEP_MS - (now - lastAppliedAtRef.current));
+        drainTimerRef.current = setTimeout(drainQueue, wait);
+      }
+    }
+
 
     // Задержка перед первым коннектом — иначе WS-хендшейк стартует в тот же
     // тик, что и история чата и телеметрия HomePage, и это снова залп новых
@@ -612,6 +694,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       apiClient.closeChatWebSocket();
       typingTimers.forEach((timer) => clearTimeout(timer));
       typingTimers.clear();
+      // Недоразобранная очередь умирает вместе с сокетом: события в ней
+      // относятся к соединению, которое мы закрываем, а applyEvent в замыкании
+      // всё ещё держит прежнего userId. Пропущенное всё равно доберёт
+      // syncFromServer при следующем подключении — он для того и есть.
+      if (drainTimerRef.current) {
+        clearTimeout(drainTimerRef.current);
+        drainTimerRef.current = null;
+      }
+      eventQueueRef.current = [];
+      lastAppliedAtRef.current = 0;
     };
   }, [userId]);
 
