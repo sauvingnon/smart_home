@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useMotionValue } from 'framer-motion'
 import {
   ArrowLeft,
   Wifi,
@@ -87,6 +87,20 @@ export const CameraPage: React.FC = () => {
 
   const videoContainerRef = useRef<HTMLDivElement>(null)
   const timeoutRef = useRef<number>()
+
+  // Зум стрима в полноэкранном режиме — тот же приём, что и у фото в лайтбоксе
+  // чата (см. ChatPage): scale обычным стейтом (щипок трекает палец 1:1), x/y
+  // motion-values под панорамирование, с тем же порогом "снапа" к 1x.
+  const [streamScale, setStreamScale] = useState(1)
+  const streamX = useMotionValue(0)
+  const streamY = useMotionValue(0)
+  const streamWrapperRef = useRef<HTMLDivElement>(null)
+  const streamPinchStartRef = useRef<{ dist: number; scale: number } | null>(null)
+  const streamPinchEndedAtRef = useRef(0)
+  const streamLastTapRef = useRef(0)
+  // Двойной тап зумит, а не переключает fullscreen — этим флагом гасим клик,
+  // который иначе последует за вторым тапом и дёрнет handleVideoTap.
+  const streamSuppressClickRef = useRef(false)
 
   // Маппинг числовых значений из бекенда в наши типы
   const qualityToResolution = (quality?: number): Resolution => {
@@ -315,7 +329,15 @@ export const CameraPage: React.FC = () => {
 
   const handleVideoTap = () => {
     if (!videoContainerRef.current) return
-    
+
+    if (streamSuppressClickRef.current) {
+      streamSuppressClickRef.current = false
+      return
+    }
+    // Зумленное фото/недавно завершённый щипок — тап не должен закрывать
+    // fullscreen, это тот же приём, что и в лайтбоксе чата (см. pinchEndedAtRef).
+    if (streamScale > 1 || Date.now() - streamPinchEndedAtRef.current < 400) return
+
     if (isMobile) {
       if (isIOS && isPWA) {
         toggleSimulatedFullscreen()
@@ -326,6 +348,91 @@ export const CameraPage: React.FC = () => {
       }
     }
   }
+
+  const STREAM_MIN_SCALE = 1
+  const STREAM_MAX_SCALE = 4
+  const STREAM_ZOOM_SNAP_BACK = 1.08
+  const clampStreamScale = (s: number) => Math.min(STREAM_MAX_SCALE, Math.max(STREAM_MIN_SCALE, s))
+
+  const resetStreamZoom = () => {
+    setStreamScale(1)
+    streamX.set(0)
+    streamY.set(0)
+  }
+
+  const applyStreamScale = (next: number) => {
+    const clamped = clampStreamScale(next)
+    if (clamped <= STREAM_ZOOM_SNAP_BACK) {
+      resetStreamZoom()
+    } else {
+      setStreamScale(clamped)
+    }
+  }
+
+  const toggleStreamZoom = () => {
+    if (streamScale > 1) resetStreamZoom()
+    else setStreamScale(2.5)
+  }
+
+  const getStreamTouchDistance = (touches: React.TouchList) =>
+    Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
+
+  const handleStreamWheel = (e: React.WheelEvent) => {
+    e.preventDefault()
+    applyStreamScale(streamScale - e.deltaY * 0.0015)
+  }
+
+  const handleStreamTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      streamPinchStartRef.current = { dist: getStreamTouchDistance(e.touches), scale: streamScale }
+      return
+    }
+    if (e.touches.length === 1) {
+      const now = Date.now()
+      if (now - streamLastTapRef.current < 300) {
+        toggleStreamZoom()
+        streamSuppressClickRef.current = true
+      }
+      streamLastTapRef.current = now
+    }
+  }
+
+  const handleStreamTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && streamPinchStartRef.current) {
+      const dist = getStreamTouchDistance(e.touches)
+      applyStreamScale(streamPinchStartRef.current.scale * (dist / streamPinchStartRef.current.dist))
+      streamSuppressClickRef.current = true
+    }
+  }
+
+  const handleStreamTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) {
+      if (streamPinchStartRef.current) streamPinchEndedAtRef.current = Date.now()
+      streamPinchStartRef.current = null
+      if (streamScale <= STREAM_ZOOM_SNAP_BACK) resetStreamZoom()
+    }
+  }
+
+  // Панорамирование зумленного стрима ограничено видимой областью — считаем
+  // от реального размера обёртки, а не от вьюпорта: в эмуляции для iOS PWA
+  // видео меньше экрана (над ним хедер, под ним подсказка выхода).
+  const getStreamDragConstraints = () => {
+    const el = streamWrapperRef.current
+    const w = el?.offsetWidth ?? window.innerWidth
+    const h = el?.offsetHeight ?? window.innerHeight
+    return {
+      left: -(w / 2) * (streamScale - 1),
+      right: (w / 2) * (streamScale - 1),
+      top: -(h / 2) * (streamScale - 1),
+      bottom: (h / 2) * (streamScale - 1),
+    }
+  }
+
+  // Выходя из любого fullscreen-режима, сбрасываем зум — следующий заход
+  // должен начинаться с исходного масштаба.
+  useEffect(() => {
+    if (!fullscreen && !simulatedFullscreen) resetStreamZoom()
+  }, [fullscreen, simulatedFullscreen])
 
   const closeSimulatedFullscreen = () => {
     setSimulatedFullscreen(false)
@@ -390,13 +497,29 @@ export const CameraPage: React.FC = () => {
             <div className="video-tap-area" onClick={handleVideoTap}>
               {/* Пока открыт simulatedFullscreen (iOS PWA) — поток идёт через второй
                   CameraStream ниже, в оверлее. Этот размонтируем, иначе оба держат
-                  свой WebSocket одновременно и сервер считает одного человека за двух зрителей. */}
+                  свой WebSocket одновременно и сервер считает одного человека за двух зрителей.
+                  Обёртка зума всегда смонтирована той же структурой (чтобы вход/выход
+                  из fullscreen не пересоздавал CameraStream и не рвал сокет) — жесты
+                  и touch-action включаются только пока реально в fullscreen. */}
               {!simulatedFullscreen && (
-                <CameraStream
-                  cameraId={CAMERA_ID}
-                  cameraStatus={cameraStatus?.mode}
-                  onFrameStall={fetchStatus}
-                />
+                <motion.div
+                  ref={streamWrapperRef}
+                  className={`stream-zoom-wrapper ${fullscreen ? 'stream-zoom-wrapper--active' : ''} ${fullscreen && streamScale > 1 ? 'stream-zoom-wrapper--zoomed' : ''}`}
+                  style={{ x: streamX, y: streamY, scale: streamScale }}
+                  onWheel={fullscreen ? handleStreamWheel : undefined}
+                  onTouchStart={fullscreen ? handleStreamTouchStart : undefined}
+                  onTouchMove={fullscreen ? handleStreamTouchMove : undefined}
+                  onTouchEnd={fullscreen ? handleStreamTouchEnd : undefined}
+                  drag={fullscreen && streamScale > 1}
+                  dragConstraints={getStreamDragConstraints()}
+                  dragElastic={0.15}
+                >
+                  <CameraStream
+                    cameraId={CAMERA_ID}
+                    cameraStatus={cameraStatus?.mode}
+                    onFrameStall={fetchStatus}
+                  />
+                </motion.div>
               )}
             </div>
 
@@ -684,11 +807,24 @@ export const CameraPage: React.FC = () => {
           </div>
           
           <div className="simulated-fullscreen-video">
-            <CameraStream
-              cameraId={CAMERA_ID}
-              cameraStatus={cameraStatus?.mode}
-              onFrameStall={fetchStatus}
-            />
+            <motion.div
+              ref={streamWrapperRef}
+              className={`stream-zoom-wrapper stream-zoom-wrapper--active ${streamScale > 1 ? 'stream-zoom-wrapper--zoomed' : ''}`}
+              style={{ x: streamX, y: streamY, scale: streamScale }}
+              onWheel={handleStreamWheel}
+              onTouchStart={handleStreamTouchStart}
+              onTouchMove={handleStreamTouchMove}
+              onTouchEnd={handleStreamTouchEnd}
+              drag={streamScale > 1}
+              dragConstraints={getStreamDragConstraints()}
+              dragElastic={0.15}
+            >
+              <CameraStream
+                cameraId={CAMERA_ID}
+                cameraStatus={cameraStatus?.mode}
+                onFrameStall={fetchStatus}
+              />
+            </motion.div>
           </div>
           
           <div className="simulated-fullscreen-footer">
