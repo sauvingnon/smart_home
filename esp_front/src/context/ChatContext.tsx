@@ -81,6 +81,29 @@ function persistChatMessagesCache(messages: ChatMessage[]) {
   }
 }
 
+// Слияние свежей последней страницы с тем, что уже в ленте. Сервер — истина
+// для того диапазона, который он вернул: там уже учтены и правки, и удаления,
+// случившиеся, пока мы были офлайн. Всё, что старше этого диапазона, оставляем
+// как есть — эту историю юзер мог догрузить скроллом, а сейчас её никто не
+// присылал, и терять её при каждой досинхронизации незачем.
+function mergeFreshPage(prev: ChatMessage[], page: ChatMessage[]): ChatMessage[] {
+  // Пустой ответ без пагинации значит именно "сообщений нет" (всё удалено или
+  // вычищено ретеншеном), а не "нечего добавить".
+  if (page.length === 0) return [];
+  const oldestFresh = page[0].seq;
+  const newestLocal = prev.length > 0 ? prev[prev.length - 1].seq : -1;
+  // Страница пересеклась с лентой — значит между ними нет дыры и склейка
+  // честная. Неполная страница тоже безопасна: сервер отдал вообще всю
+  // историю, какая есть, пропускать нечего.
+  const contiguous = newestLocal >= oldestFresh || page.length < HISTORY_PAGE_SIZE;
+  // Иначе за время отсутствия набежало больше страницы: между старым хвостом
+  // и свежей страницей провал, и склеивать их встык — значит нарисовать
+  // непрерывную ленту там, где её нет. Показываем только свежее, остальное
+  // юзер догрузит скроллом.
+  if (!contiguous) return page;
+  return [...prev.filter((m) => m.seq < oldestFresh), ...page];
+}
+
 const TOAST_DURATION_MS = 4000;
 // Разводим холодный старт чата по времени с HomePage (её запросы уже
 // разнесены на 0/150/300/450мс) — иначе история чата и WS-хендшейк всё
@@ -94,6 +117,13 @@ const TYPING_EXPIRY_MS = 4000;
 // Не чаще, чем раз в столько шлём typing-фрейм при непрерывном наборе —
 // иначе каждое нажатие клавиши было бы отдельным сообщением по WS.
 const TYPING_THROTTLE_MS = 2500;
+// Сколько ждём 'pong' на health-check при возврате в приложение, прежде чем
+// признать сокет мёртвым и пересоздать его.
+const PONG_TIMEOUT_MS = 3000;
+// Не пересоздаём сокет чаще, чем раз в столько: серия visibilitychange
+// (быстрое переключение между табами/аппами) не должна долбить сервер новыми
+// соединениями поверх уже идущего реконнекта.
+const FORCE_RECONNECT_DEBOUNCE_MS = 5000;
 
 export const previewForMessage = (message: ChatMessage): string => {
   if (message.text) return message.text;
@@ -161,50 +191,92 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Смена юзера (логаут/вход) обесценивает уже улетевшие запросы: ответ на
+  // историю прошлого юзера не должен приземлиться в ленту нового.
+  const syncGenerationRef = useRef(0);
+
+  const syncInFlightRef = useRef(false);
+
+  // Полный снимок состояния чата с сервера. Дёргается и на старте, и каждый
+  // раз, когда мы могли что-то пропустить: WS доставляет только события,
+  // случившиеся при живом соединении, поэтому всё, что пришло, пока PWA был
+  // свёрнут (или пока сокет молча умер), можно узнать только вот так.
+  //
+  // silent — досинхронизация поверх уже показанной ленты: не трогаем
+  // loadingHistory/historyReady, иначе на ровном месте мигнёт скелет.
+  const syncFromServer = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    // Возврат в приложение и переподключение сокета случаются почти
+    // одновременно (свернули → развернули → реконнект → open), и оба хотят
+    // досинхронизации. Один запрос на двоих: второй всё равно вернул бы то же
+    // самое, а это пять HTTP-запросов.
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
+    const generation = syncGenerationRef.current;
+    const isStale = () => !mountedRef.current || syncGenerationRef.current !== generation;
+    if (!silent) setLoadingHistory(true);
+    try {
+      // Раньше это были пять последовательных await — сеть между ними
+      // отдаёт JS-поток браузеру, и он успевает отрисовать промежуточные
+      // кадры (шапка → потом баннер закрепа → потом лента), из-за чего
+      // было видно, как страница "достраивается". Promise.all не зависимые
+      // друг от друга запросы, все setState ниже происходят одним синхронным
+      // блоком без пауз для рендера между ними — один кадр вместо пяти.
+      const [historyRes, unreadRes, readsRes, pinnedRes, presenceRes] = await Promise.all([
+        apiClient.getChatMessages(),
+        apiClient.getChatUnreadCount(),
+        apiClient.getChatReadStates(),
+        apiClient.getPinnedChatMessage(),
+        apiClient.getChatPresence(),
+      ]);
+      if (isStale()) return;
+      setMessages((prev) => mergeFreshPage(prev, historyRes.messages));
+      setHasMoreHistory(historyRes.messages.length >= HISTORY_PAGE_SIZE);
+      setReads(readsRes.reads);
+      setPinnedMessage(pinnedRes.message);
+      setPresence(presenceRes.entries);
+      // Мы смотрим прямо в ленту — то, что пришло, пока нас не было, читается
+      // сейчас; показать бейдж и тут же его погасить было бы миганием.
+      if (isOnChatPageRef.current) {
+        void markRead();
+      } else {
+        setUnreadCount(unreadRes.unread_count);
+      }
+    } catch {
+      // остаёмся с тем, что уже есть; следующая попытка — на ближайшем
+      // возврате в приложение или реконнекте WS
+    } finally {
+      syncInFlightRef.current = false;
+      if (!isStale() && !silent) {
+        setLoadingHistory(false);
+        setHistoryReady(true);
+      }
+    }
+  }, [markRead]);
+
+  // Обработчики WS/visibility живут в эффекте с deps [userId] — брать функцию
+  // оттуда через ref, чтобы её пересоздание не роняло и не переподнимало сокет.
+  const syncRef = useRef(syncFromServer);
+  useEffect(() => {
+    syncRef.current = syncFromServer;
+  }, [syncFromServer]);
+
   // Начальная загрузка: последняя страница истории + текущие unread/read состояния
   useEffect(() => {
     if (!userId) return;
-    let cancelled = false;
 
-    // Сам по себе этот эффект уже растянут по времени последовательными await,
-    // но он всё равно стартует в тот же тик, что и телеметрия HomePage (t=0) —
-    // задержка перед стартом разводит его с остальным холодным залпом на входе.
-    const startTimer = setTimeout(async () => {
-      setLoadingHistory(true);
-      try {
-        // Раньше это были пять последовательных await — сеть между ними
-        // отдаёт JS-поток браузеру, и он успевает отрисовать промежуточные
-        // кадры (шапка → потом баннер закрепа → потом лента), из-за чего
-        // было видно, как страница "достраивается". Promise.all не зависимые
-        // друг от друга запросы, все setState ниже происходят одним синхронным
-        // блоком без пауз для рендера между ними — один кадр вместо пяти.
-        const [historyRes, unreadRes, readsRes, pinnedRes, presenceRes] = await Promise.all([
-          apiClient.getChatMessages(),
-          apiClient.getChatUnreadCount(),
-          apiClient.getChatReadStates(),
-          apiClient.getPinnedChatMessage(),
-          apiClient.getChatPresence(),
-        ]);
-        if (cancelled) return;
-        setMessages(historyRes.messages);
-        setHasMoreHistory(historyRes.messages.length >= HISTORY_PAGE_SIZE);
-        setUnreadCount(unreadRes.unread_count);
-        setReads(readsRes.reads);
-        setPinnedMessage(pinnedRes.message);
-        setPresence(presenceRes.entries);
-      } catch {
-        // WS всё равно досинхронизирует новые события
-      } finally {
-        if (!cancelled) {
-          setLoadingHistory(false);
-          setHistoryReady(true);
-        }
-      }
-    }, HISTORY_FETCH_DELAY_MS);
-
+    // Сам по себе этот запрос уже растянут по времени, но он всё равно
+    // стартует в тот же тик, что и телеметрия HomePage (t=0) — задержка перед
+    // стартом разводит его с остальным холодным залпом на входе.
+    const startTimer = setTimeout(() => { void syncRef.current(); }, HISTORY_FETCH_DELAY_MS);
     return () => {
-      cancelled = true;
       clearTimeout(startTimer);
+      syncGenerationRef.current += 1;
     };
   }, [userId]);
 
@@ -213,13 +285,32 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     connectionStateRef.current = connectionState;
   }, [connectionState]);
 
+  // Время последнего полученного 'pong' — по нему health-check при возврате в
+  // приложение отличает живой сокет от того, который только считается живым.
+  const lastPongAtRef = useRef(0);
+  // Первый open — это старт, история уже едет отдельным запросом. Каждый
+  // следующий — восстановление после обрыва, и вот его надо догонять.
+  const hasConnectedOnceRef = useRef(false);
+
   useEffect(() => {
     if (!userId) return;
 
     setConnectionState('connecting');
+    hasConnectedOnceRef.current = false;
 
     const wsOptions = {
-      onOpen: () => setConnectionState('connected'),
+      onOpen: () => {
+        setConnectionState('connected');
+        if (hasConnectedOnceRef.current) {
+          // Соединение восстановилось после разрыва: за время разрыва события
+          // шли мимо нас, WS их не переиграет — добираем состояние по HTTP.
+          void syncRef.current({ silent: true });
+        }
+        hasConnectedOnceRef.current = true;
+      },
+      onPong: () => {
+        lastPongAtRef.current = Date.now();
+      },
       onEvent: (event: ChatWsEvent) => {
         if (event.type === 'message') {
           const incoming = event.data;
@@ -296,29 +387,57 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       apiClient.createChatWebSocket(wsOptions);
     }, WS_CONNECT_DELAY_MS);
 
-    // Телефон разблокировали — не ждём, пока браузер сам заметит мёртвый
-    // сокет (может тянуться долго), а сразу форсируем реконнект. Дебаунс —
-    // чтобы серия visibilitychange (быстрое переключение между табами/аппами)
-    // не долбила сервер новыми соединениями поверх уже идущего реконнекта.
     let lastForceReconnect = 0;
-    const handleVisibility = () => {
+    const forceReconnect = () => {
       const now = Date.now();
-      if (
-        document.visibilityState === 'visible' &&
-        connectionStateRef.current !== 'connected' &&
-        now - lastForceReconnect > 5000
-      ) {
-        lastForceReconnect = now;
-        apiClient.closeChatWebSocket();
-        setConnectionState('connecting');
-        apiClient.createChatWebSocket(wsOptions);
+      if (now - lastForceReconnect < FORCE_RECONNECT_DEBOUNCE_MS) return;
+      lastForceReconnect = now;
+      // Если отложенный первый коннект ещё не сработал — снимаем его, иначе
+      // он поднимет второй сокет поверх нашего, и на сервере повиснет лишний
+      // «зритель» чата.
+      clearTimeout(connectTimer);
+      apiClient.closeChatWebSocket();
+      setConnectionState('connecting');
+      apiClient.createChatWebSocket(wsOptions);
+    };
+
+    // Вернулись в приложение (разблокировали телефон, переключились обратно с
+    // другой апки). Здесь два независимых дела, и делать надо оба.
+    let pongTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+
+      // Первое: пока PWA был свёрнут, всё пришедшее прошло мимо ленты — WS
+      // доставляет только то, что случилось при живом соединении, и никогда
+      // не переигрывает пропущенное. Единственный способ увидеть ответ,
+      // написанный, пока нас не было, — сходить за историей самим. Делаем это
+      // всегда, а не только при мёртвом сокете: сообщение могло прийти и в
+      // тот зазор, пока сокет умирал.
+      void syncRef.current({ silent: true });
+
+      // Второе: поднять соединение, если оно отвалилось. Раньше проверка
+      // ограничивалась connectionState !== 'connected', и этого мало —
+      // мобильная ОС рвёт TCP молча, событие close до нас не доходит, а
+      // readyState остаётся OPEN до первой неудачной записи. Приложение
+      // считало себя онлайн и молчало часами. Поэтому не верим состоянию, а
+      // спрашиваем сокет: нет 'pong' за PONG_TIMEOUT_MS — пересоздаём.
+      if (connectionStateRef.current !== 'connected' || !apiClient.pingChatWebSocket()) {
+        forceReconnect();
+        return;
       }
+      const pingedAt = Date.now();
+      if (pongTimer) clearTimeout(pongTimer);
+      pongTimer = setTimeout(() => {
+        pongTimer = null;
+        if (lastPongAtRef.current < pingedAt) forceReconnect();
+      }, PONG_TIMEOUT_MS);
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
     const typingTimers = typingTimersRef.current;
     return () => {
       clearTimeout(connectTimer);
+      if (pongTimer) clearTimeout(pongTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       apiClient.closeChatWebSocket();
       typingTimers.forEach((timer) => clearTimeout(timer));

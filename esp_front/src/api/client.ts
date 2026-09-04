@@ -433,6 +433,9 @@ class ApiClient {
     onEvent?: (event: ChatWsEvent) => void;
     onError?: (error: any) => void;
     onClose?: (code: number, reason: string) => void;
+    // Ответ на наш pingChatWebSocket() — единственное доказательство, что
+    // сокет жив на самом деле, а не только по мнению readyState.
+    onPong?: () => void;
   } = {}, attempt: number = 0) {
     const wsKey = 'chat';
     const wsUrl = `${getWebSocketBaseUrl()}/chat/ws`;
@@ -450,7 +453,11 @@ class ApiClient {
         ws.send('pong');
         return;
       }
-      if (event.data === 'pong' || event.data === 'AUTH_OK') return;
+      if (event.data === 'pong') {
+        options.onPong?.();
+        return;
+      }
+      if (event.data === 'AUTH_OK') return;
       if (event.data.startsWith('ERROR')) {
         options.onError?.(event.data);
         return;
@@ -500,6 +507,20 @@ class ApiClient {
     const ws = this.wsConnections.get('chat');
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send('typing');
+    }
+  }
+
+  // Health-check сокета: сервер на 'ping' отвечает 'pong' (см. handle_ws).
+  // Возвращает false, если слать было некуда — соединения нет вовсе, и это
+  // само по себе ответ: живым его считать нельзя.
+  pingChatWebSocket(): boolean {
+    const ws = this.wsConnections.get('chat');
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send('ping');
+      return true;
+    } catch {
+      return false;
     }
   }
 
