@@ -1681,20 +1681,30 @@ export const ChatPage: React.FC = () => {
       // Как у видео: файл почищен ретеншеном (или thumbnail_key указывает на
       // уже удалённое медиа) — явное "недоступно" вместо вечного скелетона,
       // который выглядел бы как зависшая загрузка.
+      const aspect = mediaAspect(message);
+      // Рамка одна и та же и для кадра, и для заглушки на его месте. Пропорции
+      // поэтому считаем ДО ветки ошибки, а не после неё.
+      //
+      // Раньше заглушка брала свои 260x200 из CSS, а живая рамка стояла в
+      // пропорциях снимка (137..371px по высоте при клампе 0.7..1.9). То есть
+      // протухшее вертикальное фото роняло высоту пузыря на 171px, а
+      // горизонтальное — поднимало на 63. Причём происходит это асинхронно, по
+      // мере того как возвращаются 404 от S3: лента дёргалась по одному разу
+      // на каждое протухшее фото в ней.
+      const frameStyle = aspect ? { aspectRatio: String(aspect), height: 'auto' } : undefined;
       if (mediaErrors.has(message.seq)) {
         return (
-          <div className="chat-media-error">
+          <div className="chat-media-error" style={frameStyle}>
             <ImageOff size={22} />
             <span>Фото удалено: срок истёк</span>
           </div>
         );
       }
       const feedUrl = message.thumbnail_key ? apiClient.getChatMediaSrc(message.thumbnail_key) : url;
-      const aspect = mediaAspect(message);
       return (
         <div
           className={`chat-media-thumb ${message.media_preview ? '' : 'chat-media-skeleton'}`}
-          style={aspect ? { aspectRatio: String(aspect), height: 'auto' } : undefined}
+          style={frameStyle}
           onClick={(e) => {
             if (suppressClickIfLongPress(e)) return;
             // В лайтбокс отдаём и превью: оно уже в кэше браузера и подменяет
@@ -1732,7 +1742,7 @@ export const ChatPage: React.FC = () => {
       // явно, а не битый плеер.
       if (mediaErrors.has(message.seq)) {
         return (
-          <div className="chat-media-error">
+          <div className={`chat-media-error ${message.media_kind === 'circle' ? 'chat-media-error--circle' : ''}`}>
             <VideoOff size={22} />
             <span>Видео удалено: срок истёк</span>
           </div>
