@@ -16,6 +16,7 @@ from app.schemas.chat import (
     PresenceResponse,
     PushStatusResponse,
     PushSubscriptionIn,
+    ReadAtResponse,
     ReadReceiptsResponse,
     ShareVideoIn,
     UnreadCountResponse,
@@ -151,6 +152,19 @@ async def read_states(user_id: int = Depends(get_current_user_id_dep)):
     для любого сообщения сравнением его seq с last_read_seq."""
     worker = BackgroundWorker.get_instance()
     reads = await worker.chat_service.get_read_states()
+    return {"reads": reads}
+
+
+@router.get("/read_at", response_model=ReadAtResponse)
+async def read_at(
+    seq: int = Query(..., description="Сообщение, про которое спрашиваем"),
+    user_id: int = Depends(get_current_user_id_dep),
+):
+    """Когда каждый из юзеров прочитал именно это сообщение — под карточку
+    "Прочитали". В /read_states этого нет и не будет: там позиции всех разом на
+    каждый вход в чат, а тут одно сообщение и только по тапу."""
+    worker = BackgroundWorker.get_instance()
+    reads = await worker.chat_service.get_read_at(seq)
     return {"reads": reads}
 
 

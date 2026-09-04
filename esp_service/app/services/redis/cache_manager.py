@@ -477,12 +477,21 @@ class CacheManager:
 
     # ───────────────────── ЧАТ ─────────────────────
     # Один общий чат на всех — без сущности "conversation". Сообщения нумеруются
-    # инкрементным seq (а не Stream ID), потому что непрочитанные считаются как
-    # простое вычитание chat:seq - last_read_seq, без сканирования истории.
+    # сквозным инкрементным seq (а не Stream ID): тем же числом адресуются
+    # позиции прочтения, и сравнивать их надо простым "<=" (см. set_chat_read).
     CHAT_SEQ_KEY = "chat:seq"
     CHAT_MESSAGES_ZSET = "chat:messages"
     CHAT_MSG_PREFIX = "chat:msg:"
     CHAT_READ_PREFIX = "chat:read:"
+    # История сдвигов фронтира: ZSET на юзера, score = seq, до которого дочитал,
+    # member = "<seq>|<iso>". Отдельной записи на каждое прочитанное сообщение
+    # тут нет намеренно: читают не по одному, а диапазонами — одно событие read
+    # переносит фронтир сразу через все накопившиеся сообщения, и время у них
+    # общее, других времён просто не существует. Поэтому храним сам сдвиг, а
+    # время конкретного сообщения восстанавливаем поиском первого чекпоинта не
+    # левее него (см. get_chat_read_at). Размер — по числу событий read внутри
+    # retention-окна, а не по числу сообщений.
+    CHAT_READ_HIST_PREFIX = "chat:read_hist:"
     CHAT_PINNED_KEY = "chat:pinned"
 
     async def chat_next_seq(self) -> int:
@@ -630,15 +639,32 @@ class CacheManager:
         вызов с тем же (или меньшим) seq, например просто открыл чат заново
         без новых сообщений, не должен сдвигать "прочитано" на текущее время.
         Возвращает актуальный read_at (при повторном вызове — сохранённый ранее),
-        чтобы вызывающая сторона рассылала именно его, а не текущее время."""
+        чтобы вызывающая сторона рассылала именно его, а не текущее время.
+
+        Каждый реальный сдвиг фронтира дописывается чекпоинтом в историю: сам
+        хэш помнит только последнюю позицию, а вопрос "когда прочитано вот это
+        сообщение" задаётся про любое место ленты (см. get_chat_read_at)."""
         if not await self._ensure_connection():
             return None
         key = f"{self.CHAT_READ_PREFIX}{user_id}"
         existing = await self.redis_client.hgetall(key)
-        if existing and int(existing.get("last_read_seq", 0)) >= seq:
+        prev_seq = int(existing.get("last_read_seq", 0)) if existing else 0
+        if existing and prev_seq >= seq:
             return existing.get("read_at")
         now_iso = datetime.now(tz=self.IZHEVSK_TZ).isoformat()
-        await self.redis_client.hset(key, mapping={"last_read_seq": seq, "read_at": now_iso})
+        mapping = {"last_read_seq": seq, "read_at": now_iso}
+        # Граница истории. Всё, что <= hist_from, юзер прочитал до того, как мы
+        # начали писать чекпоинты, — точного времени для этих сообщений нет и
+        # никогда не будет. Без этой границы поиск "первый чекпоинт не левее
+        # сообщения" ответил бы на них ПОЗДНЕЙШИМ чекпоинтом, то есть заявил бы,
+        # что прочитанное месяц назад прочитано сегодня: ровно та ошибка в
+        # большую сторону, из-за которой в карточке и появилось "раньше".
+        if not existing or "hist_from" not in existing:
+            mapping["hist_from"] = prev_seq
+        await self.redis_client.hset(key, mapping=mapping)
+        await self.redis_client.zadd(
+            f"{self.CHAT_READ_HIST_PREFIX}{user_id}", {f"{seq}|{now_iso}": seq}
+        )
         return now_iso
 
     async def get_chat_read(self, user_id: int) -> Optional[dict]:
@@ -664,6 +690,57 @@ class CacheManager:
                 "read_at": r["read_at"] if r else None,
             })
         return reads
+
+    async def get_chat_read_at(self, user_id: int, seq: int) -> Optional[str]:
+        """Когда юзер прочитал именно это сообщение.
+
+        Фронтир движется скачками, поэтому время сообщения — это время того
+        сдвига, который через него перешагнул: первый чекпоинт со score >= seq.
+        None означает "точного времени нет" и бывает в трёх случаях: юзер до
+        сообщения ещё не дочитал; сообщение старше границы истории (hist_from);
+        истории нет вовсе (юзер не открывал чат после появления чекпоинтов).
+        Все три на UI одинаковы — честное "раньше" вместо выдуманной минуты."""
+        if not await self._ensure_connection():
+            return None
+        data = await self.redis_client.hgetall(f"{self.CHAT_READ_PREFIX}{user_id}")
+        if not data or seq <= int(data.get("hist_from", 0)):
+            return None
+        found = await self.redis_client.zrangebyscore(
+            f"{self.CHAT_READ_HIST_PREFIX}{user_id}", seq, "+inf", start=0, num=1
+        )
+        if not found:
+            return None
+        # member = "<seq>|<iso>": seq в ключе только ради уникальности члена —
+        # два чекпоинта с одинаковым временем иначе схлопнулись бы в один.
+        _, _, iso = found[0].partition("|")
+        return iso or None
+
+    async def get_all_chat_read_at(self, seq: int) -> list:
+        """Время прочтения одного сообщения всеми юзерами — под карточку
+        "Прочитали" в меню сообщения. Отдельным запросом, а не полем в
+        /chat/read_states: снимок отдаёт позиции всех и приезжает на каждый вход
+        в чат, а этот вопрос задаётся про одно сообщение и только по тапу."""
+        if not await self._ensure_connection():
+            return []
+        return [
+            {"user_id": u["user_id"], "read_at": await self.get_chat_read_at(u["user_id"], seq)}
+            for u in await self.list_users()
+        ]
+
+    async def trim_chat_read_history(self) -> None:
+        """Выбрасывает чекпоинты, которые уже никому не ответят: те, что левее
+        самого старого живого сообщения. Строго левее — чекпоинт со score,
+        равным его seq, как раз и есть ответ для этого сообщения."""
+        if not await self._ensure_connection():
+            return
+        oldest = await self.redis_client.zrange(self.CHAT_MESSAGES_ZSET, 0, 0)
+        if not oldest:
+            return
+        min_seq = int(oldest[0])
+        for u in await self.list_users():
+            await self.redis_client.zremrangebyscore(
+                f"{self.CHAT_READ_HIST_PREFIX}{u['user_id']}", "-inf", f"({min_seq}"
+            )
 
     async def get_chat_unread_count(self, user_id: int) -> int:
         """Непрочитанные — это реально лежащие в ленте чужие сообщения новее

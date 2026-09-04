@@ -53,6 +53,17 @@ class ReadReceiptsResponse(BaseModel):
     reads: List[ReadReceiptOut]
 
 
+class ReadAtEntry(BaseModel):
+    user_id: int
+    # None — точного времени нет: не дочитал, либо прочитал до того, как мы
+    # начали писать историю прочтений. На UI и то и другое — "раньше".
+    read_at: Optional[str] = None
+
+
+class ReadAtResponse(BaseModel):
+    reads: List[ReadAtEntry]
+
+
 class MarkReadResponse(BaseModel):
     user_id: int
     # Дублирует то, что и так лежит в /read_states — нужно именно в этом ответе,

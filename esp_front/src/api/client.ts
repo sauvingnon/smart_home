@@ -377,6 +377,13 @@ class ApiClient {
     return this.fetch('/chat/read_states');
   }
 
+  // Время прочтения ОДНОГО сообщения каждым — спрашивается по тапу, под
+  // карточку "Прочитали". read_at: null значит "точного времени нет" (не
+  // дочитал, либо прочитал ещё до того, как бэк начал вести историю).
+  async getChatReadAt(seq: number): Promise<{ reads: { user_id: number; read_at: string | null }[] }> {
+    return this.fetch(`/chat/read_at?seq=${seq}`);
+  }
+
   async getChatUnreadCount(): Promise<{ unread_count: number }> {
     return this.fetch('/chat/unread_count');
   }

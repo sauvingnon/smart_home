@@ -2021,6 +2021,44 @@ export const ChatPage: React.FC = () => {
       })
     : [];
 
+  // Точное время прочтения ИМЕННО этого сообщения. В reads такого времени нет
+  // и быть не может: там лежит одна позиция на человека (фронтир) и момент,
+  // когда он до неё дочитал. Бэк держит историю сдвигов фронтира и по seq
+  // отвечает, какой сдвиг через это сообщение перешагнул. Спрашиваем по
+  // открытию меню, а не тянем историю в снимок: вопрос задаётся про одно
+  // сообщение и только по тапу.
+  const actionSeq = actionTarget && actionTarget.type !== 'system' ? actionTarget.seq : null;
+  const [exactReadAt, setExactReadAt] = useState<{ seq: number; times: Map<number, string> } | null>(null);
+  useEffect(() => {
+    if (actionSeq === null) return;
+    let cancelled = false;
+    apiClient.getChatReadAt(actionSeq)
+      .then((res) => {
+        if (cancelled) return;
+        const times = new Map<number, string>();
+        for (const r of res.reads) if (r.read_at) times.set(r.user_id, r.read_at);
+        setExactReadAt({ seq: actionSeq, times });
+      })
+      // Молча: карточка и без ответа печатает осмысленное "раньше".
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [actionSeq]);
+
+  // Что печатать в строке читателя.
+  const readerReadLabel = (r: ChatReadState, target: ChatMessage): string => {
+    const exact = exactReadAt?.seq === target.seq ? exactReadAt.times.get(r.user_id) : undefined;
+    if (exact) return formatReadDateTime(exact);
+    // Истории на это сообщение нет. Либо оно прочитано до того, как бэк начал
+    // её вести, либо человек дочитал прямо сейчас — уже после того, как ответ
+    // на getChatReadAt уехал. Второй случай ловится старым правилом: время из
+    // reads описывает ЭТО сообщение ровно тогда, когда фронтир стоит на нём.
+    if (r.last_read_seq === target.seq && r.read_at) return formatReadDateTime(r.read_at);
+    // Фронтир ушёл дальше, времени того момента у нас нет. Печатать read_at
+    // было бы враньём в большую сторону: у сообщения трёхдневной давности он
+    // утверждал бы, что его прочли сегодня в 14:30.
+    return 'раньше';
+  };
+
   // Одна строка под заголовком "Чат": печатает > кто в сети. "Был(а) в сети
   // N назад" тут был третьим вариантом и убран намеренно — если сейчас никого
   // нет, строка просто пропадает, а не сообщает, когда кто-то заходил.
@@ -2760,19 +2798,8 @@ export const ChatPage: React.FC = () => {
                     <span className="chat-action-reader-name">
                       {r.user_id === userId ? 'Вы' : r.display_name}
                     </span>
-                    {/* Время показываем только когда оно про ЭТО сообщение.
-                        read_at — момент, когда человек дочитал до своего
-                        текущего фронтира, а фронтир почти всегда стоит на
-                        конце ленты. Печатать его у сообщения трёхдневной
-                        давности значит утверждать, что его прочли сегодня в
-                        14:30, хотя прочли три дня назад: ошибка всегда в одну
-                        сторону, всегда в большую. Точное время есть ровно
-                        тогда, когда фронтир совпал с сообщением; во всех
-                        остальных случаях честный ответ — "раньше". */}
                     <span className="chat-action-reader-time">
-                      {r.last_read_seq === actionTarget.seq && r.read_at
-                        ? formatReadDateTime(r.read_at)
-                        : 'раньше'}
+                      {readerReadLabel(r, actionTarget)}
                     </span>
                   </div>
                 ))}

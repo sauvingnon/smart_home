@@ -663,6 +663,9 @@ class ChatService:
     async def get_read_states(self) -> list:
         return await self.cache.get_all_chat_reads()
 
+    async def get_read_at(self, seq: int) -> list:
+        return await self.cache.get_all_chat_read_at(seq)
+
     async def get_unread_count(self, user_id: int) -> int:
         return await self.cache.get_chat_unread_count(user_id)
 
@@ -682,5 +685,9 @@ class ChatService:
         pinned_seq = await self.cache.get_chat_pinned_seq()
         if pinned_seq is not None and pinned_seq in expired_seqs:
             await self.unpin_message()
+
+        # История прочтений живёт по тому же сроку, что и лента: чекпоинты
+        # левее самого старого уцелевшего сообщения отвечать больше не на что.
+        await self.cache.trim_chat_read_history()
 
         logger.info(f"🧹 Чат: удалено {removed} сообщений старше {days} дней")
