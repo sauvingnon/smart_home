@@ -94,6 +94,11 @@ export function useChatListAnchor(
   // поверх якоря.
   const prependingRef = useRef(false);
 
+  // Позицию ленты сейчас держит наложенный поверх оверлей (меню действий), и
+  // двигать её нельзя вообще. Флаг отдельный от prependingRef, хотя смысл
+  // родственный: там позицией владеет якорь, тут — чужая геометрия на экране.
+  const frozenRef = useRef(false);
+
   const setStick = useCallback((next: boolean) => {
     stickRef.current = next;
   }, []);
@@ -127,6 +132,7 @@ export function useChatListAnchor(
     if (!el) return;
     if (!stickRef.current) return;
     if (prependingRef.current) return;
+    if (frozenRef.current) return;
     if (isTouchingRef.current) {
       pendingPinRef.current = true;
       return;
@@ -241,6 +247,32 @@ export function useChatListAnchor(
     prependingRef.current = true;
     return { seq: first.dataset.seq, top: first.getBoundingClientRect().top };
   }, [containerRef]);
+
+  /**
+   * Заморозка на время оверлея, привязанного к экранным координатам ленты.
+   *
+   * Меню действий снимает геометрию пузыря один раз, при открытии, и по ней
+   * ставит и себя, и копию пузыря поверх блюра. CSS ленту на это время уже
+   * запирал (.chat-page--menu-open, overflow: hidden), но запирал только от
+   * ПАЛЬЦА — pin() продолжал двигать её изнутри на каждое пришедшее сообщение.
+   * Меню и копия при этом оставались на старых координатах: копия расходилась
+   * с оригиналом, а само меню оказывалось у чужого сообщения — юзер держал
+   * одно, а "Удалить" вставало под другим (применилось бы всё равно к тому,
+   * что он держал, но выглядит это ровно как промах).
+   *
+   * Коррекцию padding (см. наблюдатель контейнера ниже) заморозка НЕ трогает
+   * намеренно: та как раз удерживает контент на месте при изменении отступов,
+   * то есть работает на ту же цель.
+   */
+  const freeze = useCallback(() => {
+    frozenRef.current = true;
+  }, []);
+
+  /** Оверлей закрылся — сверяем инвариант за всё время, что молчали. */
+  const unfreeze = useCallback(() => {
+    frozenRef.current = false;
+    pin();
+  }, [pin]);
 
   /** Догрузка кончилась (страница вставлена, запрос упал, история исчерпана) —
       низ снова под обычными правилами. */
@@ -364,6 +396,8 @@ export function useChatListAnchor(
     /** Текущее значение без ожидания рендера — для обработчиков и эффектов. */
     isStuckNow: useCallback(() => stickRef.current, []),
     settle,
+    freeze,
+    unfreeze,
     scrollToBottom,
     captureTopAnchor,
     restoreTopAnchor,
