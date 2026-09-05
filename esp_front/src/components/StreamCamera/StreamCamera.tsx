@@ -11,11 +11,15 @@ interface CameraStreamProps {
 
 export const CameraStream: React.FC<CameraStreamProps> = ({
   cameraId = 'cam1',
-  cameraStatus = 'offline',
+  cameraStatus,
   onFrameStall,
 }) => {
   // Пока бэк явно не сказал "streaming"/"connected" — соединяться незачем:
   // во время offline/recording/never_connected сокет всё равно бесполезен.
+  // Отдельно про recording: плата при записи держит сокет открытым, но кадры
+  // пишет на SD, а не в канал (см. wsTask в my_cam.ino) — то есть открытый
+  // вьюер-сокет тут не «почти работает», а не заработает вообще, пока запись
+  // не кончится.
   const streamReady = cameraStatus === 'streaming' || cameraStatus === 'connected';
 
   const {
@@ -26,16 +30,21 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     reconnect,
   } = useCamera(cameraId, { disabled: !streamReady });
 
-  // Вызываем onFrameStall один раз при начале зависания кадров во время стрима
+  // Кадры встали, хотя по последнему известному статусу поток должен идти —
+  // просим родителя перезапросить статус, не дожидаясь очередного тика опроса.
+  // Условием тут раньше было ровно 'streaming', но старт записи камера
+  // предваряет stream_state:off, и сервер на этот момент успевает откатить
+  // режим в 'connected' — в этом окне стук по статусу как раз и нужен, иначе
+  // «идёт запись» доезжает до экрана только следующим поллингом.
   const stalledFiredRef = useRef(false);
   useEffect(() => {
-    if (frameStalled && cameraStatus === 'streaming' && !stalledFiredRef.current) {
+    if (frameStalled && streamReady && !stalledFiredRef.current) {
       stalledFiredRef.current = true;
       onFrameStall?.();
     } else if (!frameStalled) {
       stalledFiredRef.current = false;
     }
-  }, [frameStalled, cameraStatus, onFrameStall]);
+  }, [frameStalled, streamReady, onFrameStall]);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const [hasFrame, setHasFrame] = useState(false);
@@ -75,6 +84,14 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           icon: <Video size={48} strokeWidth={1.5} className="recording-icon" />,
           title: 'Идёт запись',
           hint: 'Стрим недоступен во время записи'
+        };
+      case undefined:
+        // Статус ещё не доехал (или запрос статуса упал) — «камера отключена»
+        // тут было бы враньём: мы про неё просто ничего не знаем.
+        return {
+          icon: <div className="spinner" />,
+          title: 'Проверяем камеру',
+          hint: 'Запрашиваем текущий статус'
         };
       default:
         return {

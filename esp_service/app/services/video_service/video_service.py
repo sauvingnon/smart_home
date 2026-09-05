@@ -18,6 +18,26 @@ import os
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 from config import CAMERA_ID, CAMERA_ACCESS_KEY, MEDIA_RETENTION_DAYS
 
+# Прошивка (my_cam/my_cam.ino) шлёт в телеметрии state: ЧИСЛОМ — это индекс
+# enum SystemState: 0=STATE_IDLE, 1=STATE_STREAMING, 2=STATE_RECORDING.
+# Здесь же раньше ждали имена ("STREAMING"/"RECORDING"), поэтому ни одно
+# значение никогда не совпадало: каждая телеметрия (раз в 5с) валилась в
+# дефолт CONNECTED и затирала RECORDING, выставленный по record:started.
+# Из-за этого фронт видел "connected", считал камеру готовой отдавать поток,
+# держал вьюер-сокет открытым и ждал кадры, которых во время записи камера
+# физически не шлёт (в wsTask при STATE_RECORDING кадры уходят на SD, а не в
+# сокет). Имена оставлены на случай прошивки, шлющей state текстом.
+_CAMERA_STATE_MAP = {
+    "0":         CameraMode.CONNECTED,
+    "1":         CameraMode.STREAMING,
+    "2":         CameraMode.RECORDING,
+    "IDLE":      CameraMode.CONNECTED,
+    "STREAMING": CameraMode.STREAMING,
+    "RECORDING": CameraMode.RECORDING,
+    "OFFLINE":   CameraMode.OFFLINE,
+}
+
+
 class VideoService:
     """Сервис управления камерами — базовая версия (только подключение и метрики)"""
     
@@ -358,16 +378,10 @@ class VideoService:
         # Обновляем время последней активности
         state.last_seen = _get_izhevsk_time()
         
-        # ---- Метрики (fps:30;quality_mode:2;tmp:45.5;state:STREAMING;fan:1) ----
+        # ---- Метрики (fps:30;quality_mode:2;tmp:45.5;state:1;fan:1;heap:120000) ----
         if text.startswith("fps:"):
             try:
                 metrics = state.metrics
-                _STATE_MAP = {
-                    "STREAMING": CameraMode.STREAMING,
-                    "RECORDING": CameraMode.RECORDING,
-                    "IDLE":      CameraMode.CONNECTED,
-                    "OFFLINE":   CameraMode.OFFLINE,
-                }
                 for part in text.split(';'):
                     if ':' not in part:
                         continue
@@ -379,7 +393,17 @@ class VideoService:
                     elif key == 'tmp':
                         metrics.temperature = float(val)
                     elif key == 'state':
-                        state.mode = _STATE_MAP.get(val, CameraMode.CONNECTED)
+                        # Неизвестное значение НЕ трогает режим: молча сбросить
+                        # его в CONNECTED — значит соврать фронту, что камера
+                        # готова стримить, когда она, например, пишет на SD.
+                        mapped = _CAMERA_STATE_MAP.get(val.strip().upper())
+                        if mapped is None:
+                            logger.warning(
+                                f"⚠️ [{camera_id}] Неизвестный state в телеметрии: {val!r}, "
+                                f"оставляем режим {state.mode.value}"
+                            )
+                        else:
+                            state.mode = mapped
                     elif key == 'fan':
                         metrics.fan_mode = int(val)
 
@@ -401,6 +425,13 @@ class VideoService:
             return
         elif text == "stream_state:error:recording_active":
             logger.warning(f"⚠️ [{camera_id}] Нельзя управлять стримом во время записи")
+            # Плата сама сказала, что пишет — значит кадров в сокет не будет.
+            # Фиксируем RECORDING сразу, не дожидаясь ближайшей телеметрии:
+            # именно этот отказ приходит в ответ на stream_state:on, который мы
+            # шлём при подключении первого зрителя, и без него зритель до 5с
+            # смотрит в пустой сокет.
+            if camera_id in self.cameras:
+                self.cameras[camera_id].mode = CameraMode.RECORDING
             return
         elif text == "stream_state:error:camera_init_failed":
             logger.error(f"🔴 [{camera_id}] Камера не смогла инициализироваться")
@@ -477,6 +508,11 @@ class VideoService:
         # ---- size ----
         elif text == "size:ok":
             logger.info(f"✅ [{camera_id}] Разрешение изменено успешно")
+            return
+        elif text == "size:error:recording_active":
+            logger.warning(f"⚠️ [{camera_id}] Нельзя менять разрешение во время записи")
+            if camera_id in self.cameras:
+                self.cameras[camera_id].mode = CameraMode.RECORDING
             return
         elif text == "size:error":
             logger.error(f"❌ [{camera_id}] Не удалось изменить разрешение")
