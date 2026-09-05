@@ -124,7 +124,22 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
       <div className="camera-viewport">
         {connectionState === 'connected' && (
           <>
-            {!hasFrame && (
+            {/* Сокет открыт, но кадров нет дольше 2с. Спиннер "Загружаем
+                поток..." тут врёт: он обещает прогресс, которого не будет.
+                Плата во время записи канал не рвёт и не закрывает — она просто
+                пишет кадры на SD вместо сокета (wsTask при STATE_RECORDING в
+                my_cam.ino), так что ждать можно бесконечно. Показываем ту же
+                табличку, что и у остальных "камера не стримит" состояний;
+                следом onFrameStall перезапросит статус, и её сменит точный
+                "Идёт запись". */}
+            {!hasFrame && frameStalled && (
+              <div className="camera-state disabled">
+                <Video size={48} strokeWidth={1.5} />
+                <span>Камера занята</span>
+                <span className="disabled-hint">Кадров нет — уточняем статус камеры</span>
+              </div>
+            )}
+            {!hasFrame && !frameStalled && (
               <div className="camera-state">
                 <div className="spinner" />
                 <span>Загружаем поток...</span>
