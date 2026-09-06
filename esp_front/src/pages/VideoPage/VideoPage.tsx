@@ -25,7 +25,6 @@ import './VideoPage.css'
 import { useTheme } from '../../context/ThemeContext'
 import { usePageVisit } from '../../hooks/usePageVisit'
 import { useOnTabReselect } from '../../context/NavBarContext'
-import { useAuth } from '../../context/AuthContext'
 
 interface VideoItem {
     key: string
@@ -70,7 +69,6 @@ export const VideosPage = () => {
   usePageVisit('video')
   useOnTabReselect(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
   const { theme } = useTheme()
-  const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const [videos, setVideos] = useState<VideoItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -551,10 +549,13 @@ export const VideosPage = () => {
                                         {formatDate(video.start_time || video.last_modified)}
                                       </div>
                                       <div className="video-card-actions">
-                                        {/* Только админам: пересылка уводит на /chat, а он пока
-                                            админский (отлаживается). Неадмину кнопка обещала
-                                            действие и выкидывала обратно на главную. */}
-                                        {isAdmin && (
+                                        {/* Пересылка доступна всем. Ограничение по админу тут
+                                            стояло, пока /chat был админским и отлаживался: неадмину
+                                            кнопка обещала действие и выкидывала обратно на главную.
+                                            Чат давно открыт всем — роут без проверки, вкладка в
+                                            навбаре без проверки, и POST /chat/share_video на бэке
+                                            требует только авторизации, — так что прятать кнопку
+                                            стало не от чего. */}
                                         <button
                                           className="download-btn small"
                                           onClick={(e) => handleShare(video, e)}
@@ -566,7 +567,6 @@ export const VideosPage = () => {
                                             : <MessageCircle size={18} />
                                           }
                                         </button>
-                                        )}
                                         <button
                                           className="download-btn small"
                                           onClick={(e) => handleDownload(video, e)}
