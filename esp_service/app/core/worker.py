@@ -444,11 +444,31 @@ class BackgroundWorker:
             logger.debug(f"🚽 Активность туалета: {activity_name}. Статус {self.toilet_status.value}")
 
     async def _check_house_power_status(self):
-        """Плата, датчик двери и камера мертвы одновременно — вероятнее, что дом
-        обесточен целиком, а не что у одного устройства барахлит своя связь.
+        """Плата, датчик двери, туалет и камера мертвы одновременно —
+        вероятнее, что дом обесточен целиком, а не что у одного устройства
+        барахлит своя связь. Четыре независимых источника (свой heartbeat,
+        своя точка подключения к сети) должны замолчать разом — случайная
+        пропажа связи у одного из них тут ничего не запускает, остальные три
+        продолжат отвечать и all_dead не станет True.
         У камеры нет отдельного DEAD (WS-разрыв — уже сам по себе жёсткий сигнал,
         см. video_service._disconnect_camera), поэтому "не в активном
         соединении" (не CONNECTED/STREAMING/RECORDING) — её эквивалент dead.
+
+        У датчика двери для ЭТОЙ проверки порог понижен с DEAD (20 мин, 4
+        пропущенных heartbeat'а при цикле в 5 мин) до OFFLINE (10 мин, 2
+        пропущенных подряд) — на общий статус датчика в интерфейсе это не
+        влияет, там он по-прежнему считается просто OFFLINE, а не DEAD.
+        Понижать порог безопасно именно потому, что он не единственное
+        условие: пока плата, туалет и камера не молчат синхронно с ним те же
+        10 минут, ложного алерта не будет при любом пороге у одного датчика.
+        Общий DEAD (20 мин) для датчика был откалиброван под его собственный
+        бейдж статуса — там действительно нужен запас на нестабильный WiFi
+        без ложных "устройство сдохло", но для этой проверки, где он не
+        единственный голос, а один из четырёх, это избыточная задержка.
+
+        Плата и туалет используют свой полный DEAD (5 мин, тот же темп
+        heartbeat в минуту) — они и так самые быстрые, снижать их незачем.
+
         Шлём пуш строго на переходах (пропали → появились), не на каждый тик,
         пока висит."""
         camera = self.video_service.cameras.get("cam1")
@@ -457,17 +477,18 @@ class BackgroundWorker:
         )
         all_dead = (
             self.device_status == DeviceStatus.DEAD
-            and self.sensor_status == DeviceStatus.DEAD
+            and self.sensor_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD)
+            and self.toilet_status == DeviceStatus.DEAD
             and not camera_alive
         )
 
         if all_dead and not self._house_powered_off:
             self._house_powered_off = True
-            logger.error("🚨 Плата, датчик двери и камера мертвы одновременно — похоже, дом обесточен")
+            logger.error("🚨 Плата, датчик двери, туалет и камера мертвы одновременно — похоже, дом обесточен")
             await self._notify_house_power(offline=True)
         elif not all_dead and self._house_powered_off:
             self._house_powered_off = False
-            logger.info("✅ Плата, датчик и камера снова на связи")
+            logger.info("✅ Плата, датчик, туалет и камера снова на связи")
             await self._notify_house_power(offline=False)
 
     async def _notify_house_power(self, offline: bool):
@@ -484,9 +505,9 @@ class BackgroundWorker:
         каждое из двух событий — оба остаются в шторке своей строкой,
         независимо друг от друга и от чата."""
         payload = (
-            {"title": "Похоже, дом обесточен", "body": "Плата, датчик двери и камера пропали одновременно", "url": "/videos/settings", "tag": "house-power-down"}
+            {"title": "Похоже, дом обесточен", "body": "Плата, датчик двери, туалет и камера пропали одновременно", "url": "/videos/settings", "tag": "house-power-down"}
             if offline else
-            {"title": "Связь восстановлена", "body": "Плата, датчик и камера снова на связи", "url": "/videos/settings", "tag": "house-power-up"}
+            {"title": "Связь восстановлена", "body": "Плата, датчик, туалет и камера снова на связи", "url": "/videos/settings", "tag": "house-power-up"}
         )
         users = await self.cache.list_users()
         for user in users:
@@ -593,10 +614,6 @@ class BackgroundWorker:
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.sensor_id)
 
-                # Плата + датчик + камера разом мертвы — похоже на обесточку дома,
-                # а не сбой одного устройства. Проверяем после апдейта первых двух.
-                await self._check_house_power_status()
-
                 # Туалет
                 old_status = self.toilet_status
                 new_status = self._update_toilet_status()
@@ -611,6 +628,12 @@ class BackgroundWorker:
                     await self.cache.record_downtime_start(self.toilet_id)
                 elif old_status in (DeviceStatus.OFFLINE, DeviceStatus.DEAD) and new_status == DeviceStatus.ONLINE:
                     await self.cache.record_downtime_end(self.toilet_id)
+
+                # Плата + датчик + туалет + камера разом мертвы — похоже на
+                # обесточку дома, а не сбой одного устройства. Проверяем после
+                # апдейта всех четырёх — иначе последний из них (тут туалет)
+                # попадал бы в проверку с задержкой в целый тик heartbeat_interval.
+                await self._check_house_power_status()
 
             except Exception as e:
                 logger.exception(f"❌ Ошибка в проверке heartbeat: {e}")
