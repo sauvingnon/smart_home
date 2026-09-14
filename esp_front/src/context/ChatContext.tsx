@@ -14,9 +14,11 @@ type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 // они просто увидят готовое сообщение через WS, когда оно появится.
 export interface PendingUpload {
   localId: string;
-  type: 'image' | 'audio' | 'video';
+  type: 'image' | 'audio' | 'video' | 'file';
   previewUrl: string | null;
   progress: number;
+  // Только у type === 'file' — превью тут показывает имя, не картинку.
+  fileName?: string;
 }
 
 export interface TypingUser {
@@ -200,6 +202,7 @@ export const previewForMessage = (message: ChatMessage): string => {
   if (message.type === 'image') return '📷 Фото';
   if (message.type === 'audio') return '🎤 Голосовое сообщение';
   if (message.type === 'video') return '🎬 Видео';
+  if (message.type === 'file') return `📎 ${message.file_name || 'Файл'}`;
   return 'Новое сообщение';
 };
 
@@ -840,10 +843,18 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ? `${Date.now()}-${Math.random().toString(36).slice(2)}`
       : null;
     if (localId && payload.file) {
-      const previewUrl = payload.type === 'audio' ? null : URL.createObjectURL(payload.file);
+      const previewUrl = payload.type === 'audio' || payload.type === 'file'
+        ? null
+        : URL.createObjectURL(payload.file);
       setPendingUploads((prev) => [
         ...prev,
-        { localId, type: payload.type as 'image' | 'audio' | 'video', previewUrl, progress: 0 },
+        {
+          localId,
+          type: payload.type as 'image' | 'audio' | 'video' | 'file',
+          previewUrl,
+          progress: 0,
+          fileName: payload.type === 'file' ? payload.fileName : undefined,
+        },
       ]);
     }
     try {

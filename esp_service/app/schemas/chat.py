@@ -16,7 +16,7 @@ class ChatMessageOut(BaseModel):
     seq: int
     user_id: int
     username: str
-    type: str  # "text" | "image" | "audio" | "video" | "system"
+    type: str  # "text" | "image" | "audio" | "video" | "file" | "system"
     text: str
     media_key: str
     media_kind: str  # "" | "circle" (видео-кружок)
@@ -32,6 +32,14 @@ class ChatMessageOut(BaseModel):
     # Крошка-заглушка: 16px кадр data-URI'ем в самом сообщении. Приезжает по WS
     # вместе с сообщением и рисуется размытым пятном, пока из S3 едет превью.
     media_preview: str = ""
+    # Имя и размер исходного файла — заполнены у любого вложения (не только
+    # type=="file"), но реально нужны на фронте только там: показать иконку +
+    # имя + вес вместо превью-картинки.
+    file_name: str = ""
+    file_size: int = 0
+    # Файл вычищен ротацией по квоте чат-медиа (см. ChatService._evict_message_media)
+    # — S3-объекта уже нет, но само сообщение (и file_name/file_size) осталось.
+    media_removed: bool = False
     ts: str
     # Ответ на сообщение. Автор и текст цитаты лежат снимком прямо здесь —
     # исходник может быть уже удалён или вне подгруженной страницы истории.

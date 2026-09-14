@@ -6,7 +6,10 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
-    mem_limit: 100m
+    # Сообщения чата больше не удаляются по времени (только медиа — по квоте
+    # объёма, см. ChatService), поэтому подняли лимит контейнера со 100m до
+    # 512m — страховка на годы вперёд, сам по себе текст растёт медленно.
+    mem_limit: 512m
     mem_reservation: 50m
     cpus: "0.5"
     healthcheck:

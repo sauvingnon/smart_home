@@ -560,6 +560,11 @@ class CacheManager:
         data["media_w"] = int(data.get("media_w") or 0)
         data["media_h"] = int(data.get("media_h") or 0)
         data["media_preview"] = data.get("media_preview", "")
+        # Имя/размер файла и флаг "медиа вычищено по квоте" — появились вместе
+        # с произвольными вложениями, у сообщений до этого их просто нет.
+        data["file_name"] = data.get("file_name", "")
+        data["file_size"] = int(data.get("file_size") or 0)
+        data["media_removed"] = bool(data.get("media_removed"))
         return data
 
     async def get_chat_messages(self, before_seq: Optional[int] = None, limit: int = 50) -> list:
@@ -586,6 +591,16 @@ class CacheManager:
         messages = [self._decode_chat_message(data) for data in rows if data]
         messages.reverse()
         return messages
+
+    async def get_all_chat_seqs(self) -> list:
+        """Все seq в хронологическом порядке (старые первыми) — только для
+        ручной чистки истории (см. chat_cleanup.py). Обычная лента так не
+        грузится (она постранично с конца, см. get_chat_messages), поэтому
+        отдельный метод."""
+        if not await self._ensure_connection():
+            return []
+        seqs = await self.redis_client.zrange(self.CHAT_MESSAGES_ZSET, 0, -1)
+        return [int(s) for s in seqs]
 
     async def get_chat_message(self, seq: int) -> Optional[dict]:
         """Одно сообщение по seq — нужно для баннера закреплённого сообщения."""
@@ -696,27 +711,47 @@ class CacheManager:
         key = f"{self.CHAT_REACT_PUSH_PREFIX}{author_id}:{actor_id}"
         return bool(await self.redis_client.set(key, "1", ex=ttl_seconds, nx=True))
 
-    async def get_expired_chat_messages(self, older_than_days: int = 30) -> list:
-        """Сообщения старше N дней (seq растёт вместе с временем — как только
-        встретили ещё не протухшее, дальше можно не проверять)."""
+    # Сообщения чата больше не чистятся по времени (см. историю в памяти
+    # проекта) — только их файлы, и только по общему объёму. Счётчик и очередь
+    # на вытеснение ниже обслуживают эту ротацию (см.
+    # ChatService._enforce_media_quota / _evict_message_media).
+    CHAT_MEDIA_BYTES_KEY = "chat:media_bytes"
+    CHAT_MEDIA_REFS_ZSET = "chat:media_refs"
+
+    async def add_chat_media_usage(self, seq: int, size: int) -> int:
+        """Учитывает новый файл в общем объёме чат-медиа и ставит его seq в
+        очередь на вытеснение по возрасту. Возвращает новый общий объём."""
         if not await self._ensure_connection():
-            return []
-        cutoff = datetime.now(tz=self.IZHEVSK_TZ) - timedelta(days=older_than_days)
-        seqs = await self.redis_client.zrange(self.CHAT_MESSAGES_ZSET, 0, -1)
-        expired = []
-        for s in seqs:
-            data = await self.redis_client.hgetall(f"{self.CHAT_MSG_PREFIX}{s}")
-            if not data:
-                continue
-            try:
-                ts = datetime.fromisoformat(data["ts"])
-            except (KeyError, ValueError):
-                continue
-            if ts >= cutoff:
-                break
-            data["seq"] = int(s)
-            expired.append(data)
-        return expired
+            return 0
+        if size > 0:
+            await self.redis_client.zadd(self.CHAT_MEDIA_REFS_ZSET, {str(seq): seq})
+        total = await self.redis_client.incrby(self.CHAT_MEDIA_BYTES_KEY, size)
+        return int(total)
+
+    async def get_chat_media_bytes(self) -> int:
+        if not await self._ensure_connection():
+            return 0
+        val = await self.redis_client.get(self.CHAT_MEDIA_BYTES_KEY)
+        return int(val) if val else 0
+
+    async def peek_oldest_chat_media_ref(self) -> Optional[int]:
+        """Seq самого старого сообщения, чьё медиа ещё числится в квоте — без
+        удаления из очереди: вызывающая сторона сама решает, снимать ли его
+        (см. release_chat_media_usage), уже после того как реально почистила файл."""
+        if not await self._ensure_connection():
+            return None
+        oldest = await self.redis_client.zrange(self.CHAT_MEDIA_REFS_ZSET, 0, 0)
+        return int(oldest[0]) if oldest else None
+
+    async def release_chat_media_usage(self, seq: int, size: int) -> None:
+        """Снимает сообщение с учёта квоты — вызывается и при обычном удалении
+        своего сообщения автором, и при вытеснении по квоте. size==0 — просто
+        убрать протухшую ссылку из очереди, ничего не декрементируя."""
+        if not await self._ensure_connection():
+            return
+        await self.redis_client.zrem(self.CHAT_MEDIA_REFS_ZSET, str(seq))
+        if size > 0:
+            await self.redis_client.decrby(self.CHAT_MEDIA_BYTES_KEY, size)
 
     async def delete_chat_messages(self, seqs: list) -> int:
         """Удаляет сообщения по seq (из hash'ей, из ленты и вместе с реакциями к
@@ -826,21 +861,6 @@ class CacheManager:
             {"user_id": u["user_id"], "read_at": await self.get_chat_read_at(u["user_id"], seq)}
             for u in await self.list_users()
         ]
-
-    async def trim_chat_read_history(self) -> None:
-        """Выбрасывает чекпоинты, которые уже никому не ответят: те, что левее
-        самого старого живого сообщения. Строго левее — чекпоинт со score,
-        равным его seq, как раз и есть ответ для этого сообщения."""
-        if not await self._ensure_connection():
-            return
-        oldest = await self.redis_client.zrange(self.CHAT_MESSAGES_ZSET, 0, 0)
-        if not oldest:
-            return
-        min_seq = int(oldest[0])
-        for u in await self.list_users():
-            await self.redis_client.zremrangebyscore(
-                f"{self.CHAT_READ_HIST_PREFIX}{u['user_id']}", "-inf", f"({min_seq}"
-            )
 
     async def get_chat_unread_count(self, user_id: int) -> int:
         """Непрочитанные — это реально лежащие в ленте чужие сообщения новее

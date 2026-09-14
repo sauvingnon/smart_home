@@ -10,6 +10,7 @@
   --accent-blue: #3b82f6;
   --accent-sky: #0ea5e9;
   --accent-orange: #f97316;
+  --accent-green: #22c55e;
   --bg-gradient-from: #e0f2fe;
   --bg-gradient-to: #f0f9ff;
   /* Раньше плоский iOS-Messages blue (#007aff), никак не связанный с
@@ -35,6 +36,7 @@
   --accent-blue: #3b82f6;
   --accent-sky: #0ea5e9;
   --accent-orange: #fbbf24;
+  --accent-green: #4ade80;
   --bg-gradient-from: #0f172a;
   --bg-gradient-to: #1e1b4b;
   --bubble-mine-bg: linear-gradient(135deg, var(--accent-sky), var(--accent-blue));
@@ -1460,6 +1462,25 @@
   height: 52px;
 }
 
+.chat-upload-preview--file {
+  width: 240px;
+  height: 52px;
+}
+
+.chat-upload-preview--file .chat-upload-overlay {
+  padding: 0 12px;
+}
+
+.chat-upload-filename {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 13px;
+}
+
 .chat-upload-preview img,
 .chat-upload-preview video {
   width: 100%;
@@ -1615,6 +1636,17 @@
 
 .chat-lightbox-image--zoomed {
   cursor: grab;
+}
+
+.chat-lightbox-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: #fff;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
 }
 
 /* Как в модалке на странице "Видео" — не голый плеер на подложке, а
@@ -1815,6 +1847,90 @@
   width: 200px;
   border-radius: 50%;
   white-space: normal;
+}
+
+/* Как голосовое (VoiceMessage.css) — без своей подложки, просто строка
+   поверх фона самого пузыря: у "своего" сообщения это цветной градиент, у
+   чужого — стеклянная поверхность, а .chat-bubble уже задаёт им обоим
+   правильный color, который тут наследуется, а не переопределяется. */
+.chat-file-card,
+.chat-file-removed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 220px;
+  max-width: 100%;
+  min-height: 46px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* .chat-file-card теперь <button> (сами качаем байты ради прогресса/галочки,
+   не отдаём это нативной <a download>) — снимаем браузерные стили кнопки. */
+.chat-file-card {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+}
+
+.chat-file-card:disabled {
+  cursor: default;
+}
+
+.chat-file-removed {
+  cursor: default;
+  font-size: 13px;
+  line-height: 1.3;
+  opacity: 0.75;
+}
+
+.chat-file-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-blue);
+}
+
+.chat-bubble-outer.mine .chat-file-icon,
+.chat-file-removed svg {
+  flex: 0 0 auto;
+  color: inherit;
+}
+
+.chat-file-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chat-file-size {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.chat-file-download-icon {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+.chat-file-download-icon--done {
+  opacity: 1;
+  color: var(--accent-green);
 }
 
 .chat-video-play-overlay {

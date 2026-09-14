@@ -27,7 +27,7 @@ export interface ChatMessage {
   seq: number;
   user_id: number;
   username: string;
-  type: 'text' | 'image' | 'audio' | 'video' | 'system';
+  type: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system';
   text: string;
   media_key: string;
   media_kind: string; // '' | 'circle'
@@ -42,6 +42,13 @@ export interface ChatMessage {
   // Крошка-заглушка: 16px кадр data-URI'ем прямо в сообщении. Приезжает по WS
   // вместе с ним и рисуется размытым пятном, пока из S3 едет превью.
   media_preview: string;
+  // Имя и вес исходного файла — заполнены у любого вложения, но на экране
+  // нужны только у type === 'file' (иконка + имя + вес вместо превью).
+  file_name: string;
+  file_size: number;
+  // Файл вычищен ротацией по квоте чат-медиа — S3-объекта уже нет, но
+  // сообщение (и file_name/file_size) осталось.
+  media_removed: boolean;
   ts: string;
   // Ответ на сообщение. Автор и текст цитаты — снимком с момента ответа, а не
   // ссылкой: исходник может быть уже удалён или вне подгруженной истории.
@@ -319,7 +326,7 @@ class ApiClient {
   }
 
   async sendChatMessage(payload: {
-    type: 'text' | 'image' | 'audio' | 'video';
+    type: 'text' | 'image' | 'audio' | 'video' | 'file';
     text?: string;
     mediaKind?: string;
     file?: Blob;

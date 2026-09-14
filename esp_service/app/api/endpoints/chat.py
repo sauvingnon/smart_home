@@ -69,6 +69,7 @@ async def send_message(
 
     media_bytes = await file.read() if file else None
     content_type = file.content_type if file else None
+    file_name = file.filename if file else None
     thumb_bytes = await thumb.read() if thumb else None
     thumb_content_type = thumb.content_type if thumb else None
 
@@ -86,6 +87,7 @@ async def send_message(
             media_w=media_w,
             media_h=media_h,
             media_preview=media_preview,
+            file_name=file_name,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

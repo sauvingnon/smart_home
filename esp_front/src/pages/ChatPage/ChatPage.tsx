@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMe
 import { flushSync } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
-import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, ImageOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Users, MessageCircle, CornerUpLeft, Pencil, Check, Download } from 'lucide-react';
+import { Send, Mic, Trash2, Loader2, Bell, BellOff, Paperclip, X, Play, Video, VideoOff, ImageOff, Pin, PinOff, Copy, ChevronDown, ChevronLeft, Users, MessageCircle, CornerUpLeft, Pencil, Check, Download, FileText, FileX } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useChat, previewForMessage } from '../../context/ChatContext';
@@ -17,7 +17,8 @@ import { useChatListAnchor } from './useChatListAnchor';
 import type { TopAnchor } from './useChatListAnchor';
 import './ChatPage.css';
 
-const MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024; // синхронно с CHAT_MEDIA_MAX_BYTES на бэке
+const MAX_CHAT_FILE_BYTES = 100 * 1024 * 1024; // синхронно с CHAT_MEDIA_MAX_BYTES на бэке
+const DOWNLOADED_FILES_KEY = 'chat_downloaded_files_v1'; // локальная отметка "уже скачивал" — per-device, сервер про неё не знает
 const MAX_RECORD_MS = 60_000;
 const MIN_RECORD_MS = 2_000; // короче — считаем случайным тапом, не отправляем
 const HOLD_THRESHOLD_MS = 400; // дольше этого — считаем "держит", отпустил — отправить сразу
@@ -298,8 +299,9 @@ const audioFileName = (mimeType: string) => {
 };
 
 // file.type у видео из галереи иногда пустой (некоторые Android-пикеры не
-// проставляют MIME) — тогда сервер отклонит файл как "недопустимый тип" без
-// объяснений. Подстраховываемся расширением из имени файла.
+// проставляют MIME) — тогда sendGalleryFile принял бы видео за фото и погнал
+// бы его в prepareImage, который его просто не откроет. Подстраховываемся
+// расширением из имени файла.
 const EXT_TO_VIDEO_MIME: Record<string, string> = {
   mp4: 'video/mp4',
   m4v: 'video/mp4',
@@ -350,6 +352,20 @@ export const ChatPage: React.FC = () => {
   const [fullImageReady, setFullImageReady] = useState(false);
   const [downloadingMedia, setDownloadingMedia] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0); // -1 = подготовка, 0-100 = прогресс, как на странице "Видео"
+  // media_key текущей закачки — чтобы спиннер показывался ровно на той карточке
+  // файла, которую скачивают, а не на всех сразу (общий тост внизу один на всех).
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  // Отметка "уже скачивал этот файл" — только для галочки в UI, хранится в
+  // localStorage на этом устройстве (сервер ничего про скачивания не знает,
+  // никакого кеша байтов мы не ведём — см. project_chat_attachments).
+  const [downloadedKeys, setDownloadedKeys] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(DOWNLOADED_FILES_KEY);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
   // Зум фото в лайтбоксе: scale — обычный стейт (щипок должен трекать палец 1:1,
   // без пружины), x/y — motion-values, их же двигает drag (см. проп style на
   // <motion.img> ниже) — так панорамирование зумленного фото и его сброс живут
@@ -1061,10 +1077,34 @@ export const ChatPage: React.FC = () => {
     input.click();
   };
 
+  // Тот же паттерн, что и openGalleryPicker (см. комментарий там про свежий
+  // узел на каждое открытие) — но без accept-фильтра: сюда идёт произвольный
+  // файл, не только фото/видео.
+  const openFilePicker = () => {
+    if (sending) return;
+
+    textInputRef.current?.blur();
+    setInputFocused(false);
+    filePickerRef.current?.remove();
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.hidden = true;
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      input.remove();
+      if (filePickerRef.current === input) filePickerRef.current = null;
+      if (file) void sendChatFile(file);
+    }, { once: true });
+    document.body.appendChild(input);
+    filePickerRef.current = input;
+    input.click();
+  };
+
   const sendGalleryFile = async (file: File) => {
     if (sending) return;
     if (file.size > MAX_CHAT_FILE_BYTES) {
-      alert(`Файл слишком большой (${(file.size / (1024 * 1024)).toFixed(1)} МБ). Максимум — 50 МБ.`);
+      alert(`Файл слишком большой (${(file.size / (1024 * 1024)).toFixed(1)} МБ). Максимум — 100 МБ.`);
       return;
     }
     if (connectionState !== 'connected') {
@@ -1096,6 +1136,38 @@ export const ChatPage: React.FC = () => {
       setSendError(null);
     } catch (err) {
       console.error('Не удалось отправить файл из галереи', err);
+      setSendError(errorMessage(err));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Произвольное вложение (pdf/doc/zip и т.п.) — в отличие от sendGalleryFile,
+  // без prepareImage/guessVideoMimeType: файл уходит как есть, сервер его не
+  // транскодирует и не строит превью, ленте нужны только имя и вес.
+  const sendChatFile = async (file: File) => {
+    if (sending) return;
+    if (file.size > MAX_CHAT_FILE_BYTES) {
+      alert(`Файл слишком большой (${(file.size / (1024 * 1024)).toFixed(1)} МБ). Максимум — 100 МБ.`);
+      return;
+    }
+    if (connectionState !== 'connected') {
+      setSendError('Нет соединения — дождись переподключения и отправь ещё раз');
+      return;
+    }
+
+    setSending(true);
+    try {
+      await sendMessage({
+        type: 'file',
+        file,
+        fileName: file.name || 'file',
+        replyTo: replyTarget?.seq ?? null,
+      });
+      setReplyTarget(null);
+      setSendError(null);
+    } catch (err) {
+      console.error('Не удалось отправить файл', err);
       setSendError(errorMessage(err));
     } finally {
       setSending(false);
@@ -1562,16 +1634,19 @@ export const ChatPage: React.FC = () => {
     return false;
   };
 
-  // Скачивание медиа из лайтбокса — тот же паттерн (стрим чанков с прогрессом),
-  // что и на странице "Видео" (см. handleDownload в VideoPage.tsx).
-  const handleDownloadMedia = async () => {
-    if (!lightbox || downloadingMedia) return;
+  // Скачивание медиа — общий путь для лайтбокса (фото/видео) И карточек файлов
+  // в ленте: стрим чанков с прогрессом, тот же паттерн что на странице "Видео"
+  // (см. handleDownload в VideoPage.tsx). key — media_key, по нему подсвечиваем
+  // спиннер на нужной карточке и потом помечаем файл как "скачан" (галочка).
+  const downloadMedia = async (src: string, filename: string, key: string) => {
+    if (downloadingMedia) return;
 
+    setDownloadingKey(key);
     setDownloadingMedia(true);
     setDownloadProgress(-1);
 
     try {
-      const response = await fetch(lightbox.src, { credentials: 'include' });
+      const response = await fetch(src, { credentials: 'include' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       if (!response.body) throw new Error('No response body');
 
@@ -1595,18 +1670,41 @@ export const ChatPage: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = lightbox.mediaKey?.split('/').pop() || `chat_media_${Date.now()}`;
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+
+      setDownloadedKeys((prev) => {
+        if (prev.has(key)) return prev;
+        const next = new Set(prev).add(key);
+        try {
+          localStorage.setItem(DOWNLOADED_FILES_KEY, JSON.stringify([...next]));
+        } catch {
+          // приватный режим/квота — переживём без сохранённой отметки
+        }
+        return next;
+      });
     } catch (error) {
       console.error('Failed to download chat media:', error);
       alert('Не удалось скачать файл');
     } finally {
       setDownloadingMedia(false);
       setDownloadProgress(0);
+      setDownloadingKey(null);
     }
+  };
+
+  const handleDownloadMedia = () => {
+    if (!lightbox) return;
+    const key = lightbox.mediaKey || lightbox.src;
+    downloadMedia(lightbox.src, lightbox.mediaKey?.split('/').pop() || `chat_media_${Date.now()}`, key);
+  };
+
+  const handleDownloadFile = (message: ChatMessage) => {
+    if (!message.media_key) return;
+    downloadMedia(apiClient.getChatMediaSrc(message.media_key), message.file_name || 'file', message.media_key);
   };
 
   const IMAGE_MIN_SCALE = 1;
@@ -1893,7 +1991,7 @@ export const ChatPage: React.FC = () => {
           )}
         </div>
       )}
-      {message.media_key && (isMediaBubble ? (
+      {(message.media_key || message.media_removed) && (isMediaBubble ? (
         <div className={`chat-media-frame ${message.media_kind === 'circle' ? 'chat-media-frame--circle' : ''}`}>
           {renderMedia(message, isMine)}
           <span className="chat-bubble-time chat-bubble-time--overlay">{formatTime(message.ts)}</span>
@@ -2080,7 +2178,10 @@ export const ChatPage: React.FC = () => {
     );
   };
 
-  const isMediaMessage = (message: ChatMessage): boolean => !!message.media_key
+  // media_removed — файл вычищен ротацией по квоте чат-медиа, media_key уже
+  // пуст, но по типу сообщение всё ещё "медийное" (рисуем плашку "удалено", а
+  // не молча теряем контент, см. renderMedia).
+  const isMediaMessage = (message: ChatMessage): boolean => (!!message.media_key || message.media_removed)
     && (message.type === 'image' || message.type === 'video');
 
   // У голосового тап принадлежит плееру (play/pause, перемотка по волне) и
@@ -2117,7 +2218,68 @@ export const ChatPage: React.FC = () => {
   };
 
   const renderMedia = (message: ChatMessage, isMine: boolean) => {
+    // Файл вычищен ротацией по квоте чат-медиа (см. ChatService._evict_message_media
+    // на бэке) — media_key уже пуст, дальше строить url не из чего. Показываем
+    // явную плашку вместо того, чтобы молча ничего не отрисовать.
+    if (message.media_removed) {
+      if (message.type === 'image') {
+        return (
+          <div className="chat-media-error">
+            <ImageOff size={22} />
+            <span>Фото удалено: нет места</span>
+          </div>
+        );
+      }
+      if (message.type === 'video') {
+        return (
+          <div className={`chat-media-error ${message.media_kind === 'circle' ? 'chat-media-error--circle' : ''}`}>
+            <VideoOff size={22} />
+            <span>Видео удалено: нет места</span>
+          </div>
+        );
+      }
+      return (
+        <div className="chat-file-removed">
+          <FileX size={20} />
+          <span>{message.file_name || (message.type === 'audio' ? 'Голосовое сообщение' : 'Файл')} удалён: закончилось место в чате</span>
+        </div>
+      );
+    }
     const url = apiClient.getChatMediaSrc(message.media_key);
+    if (message.type === 'file') {
+      // Раньше было `<a href download>` — нативное скачивание браузером без
+      // возможности показать прогресс/галочку. Теперь сами тянем байты через
+      // downloadMedia (см. выше), поэтому это кнопка, а не ссылка.
+      const isDownloadingThis = downloadingKey === message.media_key;
+      const isDownloaded = !!message.media_key && downloadedKeys.has(message.media_key);
+      return (
+        <button
+          type="button"
+          className="chat-file-card"
+          disabled={isDownloadingThis}
+          onClick={(e) => {
+            // Как у голосового (см. claimClick в VoiceMessage.tsx): тап по
+            // карточке не должен всплывать до пузыря, иначе одновременно со
+            // скачиванием открывалось бы меню сообщения. Удержание не трогаем —
+            // оно живёт на pointer-событиях, которые всплывают своим ходом.
+            e.stopPropagation();
+            if (suppressClickIfLongPress(e)) return;
+            handleDownloadFile(message);
+          }}
+        >
+          <span className="chat-file-icon"><FileText size={22} /></span>
+          <span className="chat-file-info">
+            <span className="chat-file-name">{message.file_name || 'Файл'}</span>
+            <span className="chat-file-size">{formatFileSize(message.file_size)}</span>
+          </span>
+          {isDownloadingThis
+            ? <Loader2 size={18} className="spin chat-file-download-icon" />
+            : isDownloaded
+              ? <Check size={18} className="chat-file-download-icon chat-file-download-icon--done" />
+              : <Download size={18} className="chat-file-download-icon" />}
+        </button>
+      );
+    }
     if (message.type === 'image') {
       // Место под кадр занято ещё до того, как приедет его тело: сообщение
       // прилетает по WS мгновенно, а байты идут из S3 через бэкенд и отстают.
@@ -2794,7 +2956,7 @@ export const ChatPage: React.FC = () => {
           >
             <div className="chat-bubble-col">
             <div className="chat-bubble chat-bubble--uploading">
-              <div className={`chat-upload-preview ${upload.type === 'audio' ? 'chat-upload-preview--audio' : ''}`}>
+              <div className={`chat-upload-preview ${upload.type === 'audio' ? 'chat-upload-preview--audio' : ''} ${upload.type === 'file' ? 'chat-upload-preview--file' : ''}`}>
                 {upload.type === 'image' && upload.previewUrl && (
                   <img src={upload.previewUrl} alt="" />
                 )}
@@ -2806,6 +2968,12 @@ export const ChatPage: React.FC = () => {
                 )}
                 <div className="chat-upload-overlay">
                   {upload.type === 'audio' && <Mic size={18} />}
+                  {upload.type === 'file' && (
+                    <>
+                      <FileText size={18} />
+                      <span className="chat-upload-filename">{upload.fileName}</span>
+                    </>
+                  )}
                   <svg className="chat-upload-ring" viewBox="0 0 40 40">
                     <circle className="chat-upload-ring-track" cx="20" cy="20" r="17" />
                     <circle
@@ -2884,6 +3052,17 @@ export const ChatPage: React.FC = () => {
               title="Галерея"
             >
               <Paperclip size={20} />
+            </button>
+          )}
+          {!recording && (
+            <button
+              className="chat-icon-button"
+              disabled={sending}
+              // Тот же резон не держать фокус, что и у кнопки галереи выше.
+              onClick={openFilePicker}
+              title="Прикрепить файл"
+            >
+              <FileText size={20} />
             </button>
           )}
 
@@ -3094,6 +3273,14 @@ export const ChatPage: React.FC = () => {
                   }}
                 />
               </motion.div>
+            )}
+            {/* Пока грузится оригинал, на превью стоит мыльное превью из ленты
+                (см. useEffect с прелоадером выше) — без крутилки непонятно,
+                грузится оно или просто зависло. Без процентов, просто спиннер. */}
+            {lightbox.type === 'image' && lightbox.thumbSrc && !fullImageReady && (
+              <div className="chat-lightbox-loading">
+                <Loader2 size={36} className="spin" />
+              </div>
             )}
           </motion.div>
         )}

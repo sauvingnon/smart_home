@@ -1,6 +1,7 @@
 # app/services/chat_service/chat_service.py
 import asyncio
 import json
+import mimetypes
 import os
 import tempfile
 import uuid
@@ -18,7 +19,16 @@ from logger import logger
 
 # Жёсткие лимиты на аплоад — сервер не транскодирует, кодирование на клиенте,
 # поэтому единственная защита от раздутия Garage/трафика — потолок на размер.
-CHAT_MEDIA_MAX_BYTES = 50 * 1024 * 1024  # 50 МБ
+CHAT_MEDIA_MAX_BYTES = 100 * 1024 * 1024  # 100 МБ
+
+# Общий бюджет на все медиа/файлы, загруженные в чат людьми (не видео с камеры —
+# у него свой бакет-путь и свой retention по дням). Держим отдельным счётчиком в
+# Redis (см. add_chat_media_usage), а не пересчётом ListObjects по префиксу —
+# при превышении удаляем самые старые загрузки, пока не впишемся обратно
+# (см. _enforce_media_quota). Само сообщение при этом не трогаем, только файл —
+# один срок хранения на всё (текст+медиа) означал бы, что чей-то текст пропадает
+# только потому, что кто-то другой залил тяжёлое видео.
+CHAT_MEDIA_QUOTA_BYTES = 10 * 1024 * 1024 * 1024  # 10 ГБ
 
 # Окно, в течение которого автор может удалить своё сообщение. Проверяется на
 # сервере, а не только в UI: клиент может соврать, а удаление необратимо.
@@ -51,12 +61,6 @@ CHAT_PREVIEW_MAX_CHARS = 2048
 # ленты, и мусор в них не должен её ломать.
 MEDIA_DIMENSION_MAX = 20000
 
-ALLOWED_MEDIA_TYPES = {
-    "image/jpeg", "image/png", "image/webp",
-    "audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4",  # audio/mp4 — дефолт MediaRecorder на iOS Safari
-    "video/webm", "video/mp4", "video/quicktime",  # .mov — типичный формат iPhone-галереи
-}
-
 _EXT_BY_CONTENT_TYPE = {
     "image/jpeg": "jpg",
     "image/png": "png",
@@ -74,7 +78,28 @@ _PUSH_BODY_BY_TYPE = {
     "image": "📷 Фото",
     "audio": "🎤 Голосовое сообщение",
     "video": "🎬 Видео",
+    "file": "📎 Файл",
 }
+
+# Максимальная длина сохраняемого имени файла — приходит от клиента (File.name),
+# доверять произвольной длине/содержимому нельзя: длинное имя раздуло бы хэш
+# сообщения в Redis не хуже второго media_preview.
+CHAT_FILE_NAME_MAX_CHARS = 255
+
+
+def _resolve_extension(content_type: Optional[str], file_name: Optional[str]) -> str:
+    """Расширение для ключа в S3. Имя файла от клиента точнее MIME-типа для
+    произвольных документов (docx/xlsx и т.п. часто приходят как generic
+    application/octet-stream) — приоритет ему, затем известная карта для
+    привычных медиатипов, и только потом угадывание через mimetypes."""
+    if file_name and "." in file_name:
+        ext = file_name.rsplit(".", 1)[-1].lower()
+        if ext and len(ext) <= 12 and ext.isalnum():
+            return ext
+    if content_type in _EXT_BY_CONTENT_TYPE:
+        return _EXT_BY_CONTENT_TYPE[content_type]
+    guessed = mimetypes.guess_extension(content_type) if content_type else None
+    return guessed.lstrip(".") if guessed else "bin"
 
 # Базовый набор реакций — тот же на клиенте (REACTION_EMOJI в api/client.ts).
 # Список закрытый: без него в Redis приехала бы любая строка, которую клиент
@@ -253,6 +278,7 @@ class ChatService:
         media_w: int = 0,
         media_h: int = 0,
         media_preview: str = "",
+        file_name: Optional[str] = None,
     ) -> dict:
         text = (text or "").strip()
         # Браузер иногда шлёт content-type с параметрами (audio/webm;codecs=opus) —
@@ -267,8 +293,11 @@ class ChatService:
             raise ValueError("Нет медиафайла")
         if media_bytes and len(media_bytes) > CHAT_MEDIA_MAX_BYTES:
             raise ValueError("Файл слишком большой")
-        if media_bytes and content_type not in ALLOWED_MEDIA_TYPES:
-            raise ValueError(f"Недопустимый тип файла: {content_type}")
+        # Тип файла больше не фильтруем белым списком — чат теперь принимает
+        # произвольные вложения (pdf/doc/zip и т.п.), не только фото/видео/голос.
+        # Единственная защита от раздутия хранилища — размер (выше) и квота на
+        # весь объём чат-медиа (см. _enforce_media_quota).
+        file_name = (file_name or "").strip()[:CHAT_FILE_NAME_MAX_CHARS]
 
         # Пропорции и крошку-превью считает клиент — он и так держит картинку
         # декодированной, а сервер её не открывает. Но раз числа и строка
@@ -289,10 +318,11 @@ class ChatService:
         # поменять местами без побочных эффектов).
         media_key = ""
         thumbnail_key = ""
+        file_size = len(media_bytes) if media_bytes else 0
         if media_bytes:
-            ext = _EXT_BY_CONTENT_TYPE.get(content_type, "bin")
+            ext = _resolve_extension(content_type, file_name)
             media_key = f"chat/{uuid.uuid4().hex}.{ext}"
-            ok = await self.s3.save_chat_media(media_key, media_bytes, content_type)
+            ok = await self.s3.save_chat_media(media_key, media_bytes, content_type or "application/octet-stream")
             if not ok:
                 raise RuntimeError("Не удалось сохранить медиафайл")
             if msg_type == "video":
@@ -301,11 +331,15 @@ class ChatService:
                 thumbnail_key = await self._save_image_thumbnail(thumb_bytes, thumb_content_type)
 
         seq = await self.cache.chat_next_seq()
-        return await self._finalize_message(
+        message = await self._finalize_message(
             seq, user_id, msg_type, text, media_key, media_kind,
             thumbnail_key=thumbnail_key, reply_to=reply_to,
             media_w=media_w, media_h=media_h, media_preview=media_preview,
+            file_name=file_name, file_size=file_size,
         )
+        if file_size > 0:
+            await self._enforce_media_quota(seq, file_size)
+        return message
 
     async def _save_image_thumbnail(self, thumb_bytes: bytes, content_type: Optional[str]) -> str:
         """Уменьшенная копия фото для ленты. В отличие от видео (там первый кадр
@@ -413,6 +447,7 @@ class ChatService:
         media_kind: Optional[str], shared: bool = False, thumbnail_key: str = "",
         reply_to: Optional[int] = None,
         media_w: int = 0, media_h: int = 0, media_preview: str = "",
+        file_name: str = "", file_size: int = 0,
     ) -> dict:
         user = await self.cache.get_user(user_id)
         message = {
@@ -427,22 +462,37 @@ class ChatService:
             "media_w": media_w,
             "media_h": media_h,
             "media_preview": media_preview,
+            # Имя/размер исходного файла — нужны для бабла типа "file" (иконка +
+            # имя + вес вместо превью-картинки), но пишем для любого вложения:
+            # дёшево, а после чистки по квоте (media_removed) это единственное,
+            # что остаётся напоминанием, каким файлом был этот аплоад.
+            "file_name": file_name,
+            "file_size": file_size,
+            "media_removed": "",
             **await self._reply_snapshot(reply_to),
             # Проставляется только правкой — у нового сообщения его нет.
             "edited_at": None,
-            # shared — сообщение ссылается на чужой объект в S3 (архив камеры), а не
-            # на свою загрузку. Нужно, чтобы trim_old_messages не удалял по истечении
-            # чатового retention файл, которым всё ещё владеет и распоряжается камера.
+            # shared — сообщение ссылается на чужой объект в S3 (архив камеры), а
+            # не на свою загрузку. Нужно, чтобы ни ручное удаление, ни вытеснение
+            # по квоте чат-медиа (_evict_message_media) не трогали файл, которым
+            # всё ещё владеет и распоряжается retention камеры.
             "shared": "1" if shared else "",
             "ts": _get_izhevsk_time().isoformat(),
         }
 
         await self.cache.save_chat_message(seq, message)
         # Строго после сохранения: хэш сообщения хранит только строки (см.
-        # _encode_chat_message), и список, попавший в него до save, лёг бы в
-        # Redis литералом "[]". У нового сообщения реакций и так нет — поле
-        # нужно лишь затем, чтобы форма сообщения была одинаковой везде.
+        # _encode_chat_message — она читает message ДО этой правки, копию не
+        # мутирует), и список, попавший в него до save, лёг бы в Redis
+        # литералом "[]". У нового сообщения реакций и так нет — поле нужно
+        # лишь затем, чтобы форма сообщения была одинаковой везде.
         message["reactions"] = []
+        # "" -> False: в Redis это поле хранится строкой "1"/"" (как shared
+        # выше), но наружу (ChatMessageOut.media_removed: bool, и WS-событие
+        # тоже отдаёт этот же dict) должен уйти настоящий bool — иначе Pydantic
+        # роняет весь ответ на POST /chat/messages с ResponseValidationError,
+        # хотя сообщение к этому моменту уже сохранено и разослано.
+        message["media_removed"] = bool(message["media_removed"])
         await self.broadcast({"type": "message", "data": message})
         await self._push_to_offline_users(message)
 
@@ -677,9 +727,11 @@ class ChatService:
         if _get_izhevsk_time() - ts > CHAT_DELETE_WINDOW:
             raise PermissionError("Сообщение старше часа — удалить уже нельзя")
 
-        # Порядок тот же, что в trim_old_messages: сначала медиа в S3, потом
-        # запись в Redis, потом снять закрепление, если удалили закреплённое.
+        # Сначала медиа в S3, потом снятие с учёта квоты, потом запись в Redis,
+        # потом снять закрепление, если удалили закреплённое.
         await self._delete_message_media(message)
+        if message.get("file_size"):
+            await self.cache.release_chat_media_usage(seq, int(message["file_size"]))
 
         await self.cache.delete_chat_messages([seq])
 
@@ -688,6 +740,27 @@ class ChatService:
 
         await self.broadcast({"type": "deleted", "data": {"seq": seq}})
         logger.info(f"🗑 Чат: юзер {user_id} удалил своё сообщение {seq}")
+
+    async def admin_delete_message(self, seq: int) -> bool:
+        """То же самое, что delete_message, но без проверки автора и часового
+        окна — только для ручной чистки старой истории (см. chat_cleanup.py).
+        Из API/фронта не вызывается ни при каких условиях.
+        """
+        message = await self.cache.get_chat_message(seq)
+        if not message:
+            return False
+
+        await self._delete_message_media(message)
+        if message.get("file_size"):
+            await self.cache.release_chat_media_usage(seq, int(message["file_size"]))
+
+        await self.cache.delete_chat_messages([seq])
+
+        if await self.cache.get_chat_pinned_seq() == seq:
+            await self.unpin_message()
+
+        await self.broadcast({"type": "deleted", "data": {"seq": seq}})
+        return True
 
     async def _delete_message_media(self, message: dict) -> None:
         """Всё, что сообщение занимает в S3: сам файл и превью к нему. Превью
@@ -706,6 +779,45 @@ class ChatService:
                 await self.s3.delete_video(key)
             except Exception as e:
                 logger.warning(f"⚠️ Не удалось удалить медиа чата {key}: {e}")
+
+    async def _enforce_media_quota(self, seq: int, file_size: int) -> None:
+        """Регистрирует новый файл в счётчике объёма чат-медиа и, если суммарно
+        перевалили за CHAT_MEDIA_QUOTA_BYTES, чистит самые старые загрузки, пока
+        не впишемся обратно. Ротация по объёму, а не по времени — стираем только
+        файл, само сообщение с текстом/подписью остаётся в ленте (см.
+        _evict_message_media)."""
+        total = await self.cache.add_chat_media_usage(seq, file_size)
+        while total > CHAT_MEDIA_QUOTA_BYTES:
+            oldest_seq = await self.cache.peek_oldest_chat_media_ref()
+            if oldest_seq is None:
+                break
+            await self._evict_message_media(oldest_seq)
+            total = await self.cache.get_chat_media_bytes()
+
+    async def _evict_message_media(self, seq: int) -> int:
+        """Стирает файл (не само сообщение) самого старого сообщения в очереди
+        на вытеснение и снимает его с учёта квоты. Возвращает, сколько байт
+        освободили — 0, если к этому моменту медиа уже не было (сообщение успели
+        удалить вручную) или оно shared (чужой архив камеры, туда мы не лезем;
+        в очередь такое не должно попадать вовсе, но проверяем на всякий)."""
+        message = await self.cache.get_chat_message(seq)
+        file_size = int(message.get("file_size") or 0) if message else 0
+        if message and message.get("media_key") and not message.get("shared"):
+            await self._delete_message_media(message)
+            updated = await self.cache.update_chat_message(seq, {
+                "media_key": "", "thumbnail_key": "", "media_w": 0, "media_h": 0,
+                "media_preview": "", "media_removed": "1",
+            })
+            if updated:
+                await self._with_reactions(updated)
+                await self.broadcast({"type": "edited", "data": updated})
+                if await self.cache.get_chat_pinned_seq() == seq:
+                    await self.broadcast({"type": "pinned", "data": updated})
+            logger.info(f"🧹 Чат: по квоте медиа (10 ГБ) удалён файл сообщения {seq} ({file_size} Б)")
+        else:
+            file_size = 0
+        await self.cache.release_chat_media_usage(seq, file_size)
+        return file_size
 
     @staticmethod
     def _aggregate_reactions(raw: dict) -> list:
@@ -845,26 +957,3 @@ class ChatService:
 
     async def get_unread_count(self, user_id: int) -> int:
         return await self.cache.get_chat_unread_count(user_id)
-
-    async def trim_old_messages(self, days: int):
-        """Удаляет сообщения (и их медиа в S3) старше `days`. Без дефолта
-        нарочно: срок хранения — один MEDIA_RETENTION_DAYS в config.py, общий
-        с записями камеры (см. worker._chat_retention_loop), и здесь не
-        должно быть второго числа, с которым он может незаметно разойтись."""
-        expired = await self.cache.get_expired_chat_messages(older_than_days=days)
-        if not expired:
-            return
-        for msg in expired:
-            await self._delete_message_media(msg)
-        expired_seqs = [m["seq"] for m in expired]
-        removed = await self.cache.delete_chat_messages(expired_seqs)
-
-        pinned_seq = await self.cache.get_chat_pinned_seq()
-        if pinned_seq is not None and pinned_seq in expired_seqs:
-            await self.unpin_message()
-
-        # История прочтений живёт по тому же сроку, что и лента: чекпоинты
-        # левее самого старого уцелевшего сообщения отвечать больше не на что.
-        await self.cache.trim_chat_read_history()
-
-        logger.info(f"🧹 Чат: удалено {removed} сообщений старше {days} дней")
