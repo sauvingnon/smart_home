@@ -573,16 +573,29 @@ export const ChatPage: React.FC = () => {
   // ставим низ истории и только после этого включаем обычную обработку новых
   // сообщений. Это не постоянный нижний якорь: после старта пользователь
   // прокручивает ленту как обычно, в том числе под fixed-полем.
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (initialListPositionedRef.current) return;
     if (!historyReady || !inputBarMeasured || !headerMeasured) return;
 
-    // Запоминаем уже показанный хвост до первого passive-эффекта сообщений:
-    // иначе он принял бы загруженную историю за только что добавленное
-    // сообщение и устроил второй, уже smooth, скролл.
-    lastSeqRef.current = messages[messages.length - 1]?.seq ?? null;
-    initialListPositionedRef.current = true;
-    scrollListToBottom('auto');
+    // После коммита React шапка/поле уже измерены, но WebKit ещё может держать
+    // старую scroll-геометрию до ближайшего кадра. Это особенно видно на
+    // границе «ровно экран»: вызов scrollToBottom в том же тике получает
+    // нулевой scroll range, хотя кадром позже он уже есть. Ждём один кадр,
+    // а сам scrollListToBottom ждёт ещё один перед записью scrollTop — ровно
+    // тот стабильный момент, в который работает автоскролл нового сообщения.
+    //
+    // Флаг ставим внутри колбэка, а не до requestAnimationFrame: в StrictMode
+    // React пробно монтирует и тут же чистит effect; ранний флаг оставил бы
+    // второй, настоящий маунт без стартового позиционирования.
+    const raf = requestAnimationFrame(() => {
+      if (initialListPositionedRef.current) return;
+      // Запоминаем уже показанный хвост до первого эффекта сообщений: иначе
+      // он принял бы загруженную историю за только что добавленное сообщение.
+      lastSeqRef.current = messages[messages.length - 1]?.seq ?? null;
+      initialListPositionedRef.current = true;
+      scrollListToBottom('auto');
+    });
+    return () => cancelAnimationFrame(raf);
   }, [historyReady, inputBarMeasured, headerMeasured, messages, scrollListToBottom]);
 
   // Мутации ленты — три ветки, и каждая заканчивается обращением к одному и
@@ -599,7 +612,7 @@ export const ChatPage: React.FC = () => {
   // к каждому новому сообщению. В обратном случае показывается стрелка "вниз"
   // (она следует из режима залипания сама, гасить её вручную больше не надо).
   useEffect(() => {
-    // См. layout-эффект выше: до первого позиционирования не смешиваем
+    // См. стартовый эффект выше: до первого позиционирования не смешиваем
     // начальную историю с новым сообщением и не пишем scrollTop по устаревшей
     // геометрии поля ввода.
     if (!initialListPositionedRef.current) return;
