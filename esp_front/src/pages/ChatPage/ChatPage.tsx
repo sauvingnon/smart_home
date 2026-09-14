@@ -2759,8 +2759,14 @@ export const ChatPage: React.FC = () => {
         )}
       </div>
 
-      <div
+      <motion.div
         className="chat-messages"
+        // layoutScroll — обязателен: внутри ленты у фоток motion.img с
+        // layoutId (см. renderMedia и лайтбокс), а сама лента скроллится и
+        // программно (автоскролл, доезд истории). Без этого пропа framer
+        // принимает скролл ленты за изменение геометрии картинки и лишний
+        // раз анимирует/перемеряет её — та самая пропажа/появление превью.
+        layoutScroll
         ref={listRef}
         onScroll={handleScroll}
         onTouchStart={handleMessagesTouchStart}
@@ -2960,7 +2966,7 @@ export const ChatPage: React.FC = () => {
         ))}
         </div>
 
-      </div>
+      </motion.div>
 
       <AnimatePresence>
         {showScrollDown && (
