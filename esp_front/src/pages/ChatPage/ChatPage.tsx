@@ -438,6 +438,11 @@ export const ChatPage: React.FC = () => {
   const [scrollBtnSize, setScrollBtnSize] = useState(38);
   const [headerPadTop, setHeaderPadTop] = useState(76);
   const [messagesPadBottom, setMessagesPadBottom] = useState(78);
+  // Стартовую позицию ленты нельзя считать по стартовым заглушкам 76/78px:
+  // история нередко уже лежит в кэше к моменту маунта страницы, а реальная
+  // высота fixed-шапки и fixed-поля становится известна только после раскладки.
+  const [inputBarMeasured, setInputBarMeasured] = useState(false);
+  const [headerMeasured, setHeaderMeasured] = useState(false);
   // Последний созданный (см. openGalleryPicker) одноразовый файловый инпут —
   // держим только чтобы убрать за собой, если пикер закрыли без выбора.
   const filePickerRef = useRef<HTMLInputElement | null>(null);
@@ -447,6 +452,10 @@ export const ChatPage: React.FC = () => {
   const [composerKey, setComposerKey] = useState(0);
   const composerRefocusRef = useRef(false);
   const lastSeqRef = useRef<number | null>(null);
+  // До первого позиционирования история и её геометрия приезжают независимо.
+  // Новые сообщения не должны успеть запустить обычный автоскролл между этими
+  // двумя событиями — иначе снова попадём в расчёт по старому padding-bottom.
+  const initialListPositionedRef = useRef(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
   const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
@@ -553,6 +562,29 @@ export const ChatPage: React.FC = () => {
     return () => clearTimeout(timer);
   }, [sendError]);
 
+  // Первый нижний якорь — отдельный от обычного автоскролла случай.
+  //
+  // Когда история уже в кэше, сообщения приходят в DOM в том же коммите, что
+  // и сама страница. А высота fixed-поля и fixed-шапки к этому моменту ещё
+  // измеряется из настоящего layout. Если вызвать scrollToBottom из эффекта
+  // messages прямо сейчас, в пограничном случае «ровно экран» скроллить ещё
+  // некуда: старый нижний padding не создал overflow, и последующая поправка
+  // уже не может сдвинуть scrollTop. Поэтому ждём оба замера, один раз
+  // ставим низ истории и только после этого включаем обычную обработку новых
+  // сообщений. Это не постоянный нижний якорь: после старта пользователь
+  // прокручивает ленту как обычно, в том числе под fixed-полем.
+  useLayoutEffect(() => {
+    if (initialListPositionedRef.current) return;
+    if (!historyReady || !inputBarMeasured || !headerMeasured) return;
+
+    // Запоминаем уже показанный хвост до первого passive-эффекта сообщений:
+    // иначе он принял бы загруженную историю за только что добавленное
+    // сообщение и устроил второй, уже smooth, скролл.
+    lastSeqRef.current = messages[messages.length - 1]?.seq ?? null;
+    initialListPositionedRef.current = true;
+    scrollListToBottom('auto');
+  }, [historyReady, inputBarMeasured, headerMeasured, messages, scrollListToBottom]);
+
   // Мутации ленты — три ветки, и каждая заканчивается обращением к одному и
   // тому же владельцу скролла, а не своей собственной записью scrollTop.
   //
@@ -567,26 +599,26 @@ export const ChatPage: React.FC = () => {
   // к каждому новому сообщению. В обратном случае показывается стрелка "вниз"
   // (она следует из режима залипания сама, гасить её вручную больше не надо).
   useEffect(() => {
+    // См. layout-эффект выше: до первого позиционирования не смешиваем
+    // начальную историю с новым сообщением и не пишем scrollTop по устаревшей
+    // геометрии поля ввода.
+    if (!initialListPositionedRef.current) return;
     const last = messages[messages.length - 1];
     if (!last) return;
-    // Первое заполнение ленты при заходе на страницу — прыгаем вниз мгновенно
-    // (как Telegram/WhatsApp), а не анимированно: 'smooth' на моментальном же
-    // requestAnimationFrame ещё и гонится с коррекцией по ResizeObserver за
-    // тот же scrollTop, если картинки/видео в ленте досчитывают размеры чуть
-    // позже первого рендера — smooth-анимация может "выиграть" гонку и
-    // застрять на промежуточной, ещё не окончательной высоте контента.
-    const isInitialLoad = lastSeqRef.current === null;
+    // Этот же seq уже стоял в DOM на первом кадре и был записан layout-
+    // эффектом. Это не новая мутация и не повод запускать второй скролл.
+    if (last.seq === lastSeqRef.current) return;
     // Сравниваем по НАПРАВЛЕНИЮ, а не просто на неравенство. Удаление
     // последнего сообщения тоже меняет last.seq — но на меньший, и по "!=="
     // это неотличимо от прихода нового: лента уезжала в smooth-скролл прямо
     // поверх схлопывания удаляемого пузыря, а окно smooth-скролла на это время
     // глушит удержание низа. Вниз тянемся только когда лента реально выросла
     // с конца.
-    const isAppend = isInitialLoad || last.seq > lastSeqRef.current!;
+    const isAppend = lastSeqRef.current === null || last.seq > lastSeqRef.current;
     if (isAppend) {
       lastSeqRef.current = last.seq;
       if (last.user_id === userId || isStuckNow()) {
-        scrollListToBottom(isInitialLoad ? 'auto' : 'smooth');
+        scrollListToBottom('smooth');
       }
       return;
     }
@@ -608,7 +640,7 @@ export const ChatPage: React.FC = () => {
   // под инпут/навбар. Держим её всегда впритык над реальной верхней гранью
   // .chat-input-bar, чей отступ от низа экрана меняется (растущий textarea,
   // скрытие BottomNavBar при фокусе, safe-area) — поэтому меряем, а не хардкодим.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const bar = inputBarRef.current;
     if (!bar) return;
     const recalc = () => {
@@ -627,6 +659,7 @@ export const ChatPage: React.FC = () => {
       // сообщение несёт свой зазор под собой само (--chat-row-gap) — иначе отступ до бара
       // сложился бы дважды.
       setMessagesPadBottom(rect.height);
+      setInputBarMeasured(true);
     };
     recalc();
     const ro = new ResizeObserver(recalc);
@@ -663,11 +696,12 @@ export const ChatPage: React.FC = () => {
   // инпута), так что и под неё лента с баннерами больше не подстраивается
   // сама — меряем реальную высоту (с учётом safe-area) и подкладываем это
   // как padding-top всей странице.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const header = headerRef.current;
     if (!header) return;
     const recalc = () => {
       setHeaderPadTop(header.getBoundingClientRect().bottom);
+      setHeaderMeasured(true);
     };
     recalc();
     const ro = new ResizeObserver(recalc);
