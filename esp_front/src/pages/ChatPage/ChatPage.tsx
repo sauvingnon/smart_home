@@ -316,6 +316,16 @@ const guessVideoMimeType = (file: File): string | null => {
   return ext ? EXT_TO_VIDEO_MIME[ext] ?? null : null;
 };
 
+// Тот же резон, что у guessVideoMimeType выше — один пикер теперь отдаёт и
+// фото, и видео, и произвольные файлы разом, дальше их различает контент.
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'avif']);
+
+const looksLikeImage = (file: File): boolean => {
+  if (file.type) return file.type.startsWith('image/');
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  return ext ? IMAGE_EXTENSIONS.has(ext) : false;
+};
+
 const formatLastSeen = (iso: string): string => {
   const diffMin = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
   if (diffMin < 1) return 'только что';
@@ -1064,37 +1074,18 @@ export const ChatPage: React.FC = () => {
 
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*,video/*';
+    // Без accept-фильтра: одна кнопка отдаёт и фото/видео, и произвольные
+    // файлы — раньше тут был отдельный "Прикрепить файл" со своим пикером,
+    // но фильтр по accept ни на что не влиял (те же опции в системном
+    // пикере что с ним, что без), так что второй пикер был чистой
+    // дублирующей кнопкой без смысла. sendGalleryFile сама разбирает, что
+    // за файл пришёл.
     input.hidden = true;
     input.addEventListener('change', () => {
       const file = input.files?.[0];
       input.remove();
       if (filePickerRef.current === input) filePickerRef.current = null;
       if (file) void sendGalleryFile(file);
-    }, { once: true });
-    document.body.appendChild(input);
-    filePickerRef.current = input;
-    input.click();
-  };
-
-  // Тот же паттерн, что и openGalleryPicker (см. комментарий там про свежий
-  // узел на каждое открытие) — но без accept-фильтра: сюда идёт произвольный
-  // файл, не только фото/видео.
-  const openFilePicker = () => {
-    if (sending) return;
-
-    textInputRef.current?.blur();
-    setInputFocused(false);
-    filePickerRef.current?.remove();
-
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.hidden = true;
-    input.addEventListener('change', () => {
-      const file = input.files?.[0];
-      input.remove();
-      if (filePickerRef.current === input) filePickerRef.current = null;
-      if (file) void sendChatFile(file);
     }, { once: true });
     document.body.appendChild(input);
     filePickerRef.current = input;
@@ -1119,7 +1110,7 @@ export const ChatPage: React.FC = () => {
       if (videoMime) {
         const videoFile = videoMime === file.type ? file : new Blob([file], { type: videoMime });
         await sendMessage({ type: 'video', file: videoFile, fileName: file.name || 'video.mp4', replyTo });
-      } else {
+      } else if (looksLikeImage(file)) {
         const prepared = await prepareImage(file);
         await sendMessage({
           type: 'image',
@@ -1131,43 +1122,16 @@ export const ChatPage: React.FC = () => {
           preview: prepared.preview,
           replyTo,
         });
+      } else {
+        // Не фото и не видео — произвольное вложение (pdf/doc/zip и т.п.):
+        // без prepareImage, файл уходит как есть, сервер его не
+        // транскодирует и не строит превью, ленте нужны только имя и вес.
+        await sendMessage({ type: 'file', file, fileName: file.name || 'file', replyTo });
       }
       setReplyTarget(null);
       setSendError(null);
     } catch (err) {
       console.error('Не удалось отправить файл из галереи', err);
-      setSendError(errorMessage(err));
-    } finally {
-      setSending(false);
-    }
-  };
-
-  // Произвольное вложение (pdf/doc/zip и т.п.) — в отличие от sendGalleryFile,
-  // без prepareImage/guessVideoMimeType: файл уходит как есть, сервер его не
-  // транскодирует и не строит превью, ленте нужны только имя и вес.
-  const sendChatFile = async (file: File) => {
-    if (sending) return;
-    if (file.size > MAX_CHAT_FILE_BYTES) {
-      alert(`Файл слишком большой (${(file.size / (1024 * 1024)).toFixed(1)} МБ). Максимум — 100 МБ.`);
-      return;
-    }
-    if (connectionState !== 'connected') {
-      setSendError('Нет соединения — дождись переподключения и отправь ещё раз');
-      return;
-    }
-
-    setSending(true);
-    try {
-      await sendMessage({
-        type: 'file',
-        file,
-        fileName: file.name || 'file',
-        replyTo: replyTarget?.seq ?? null,
-      });
-      setReplyTarget(null);
-      setSendError(null);
-    } catch (err) {
-      console.error('Не удалось отправить файл', err);
       setSendError(errorMessage(err));
     } finally {
       setSending(false);
@@ -3049,20 +3013,9 @@ export const ChatPage: React.FC = () => {
               // намеренно НЕ удерживается: пикер закрывает клавиатуру сам, и
               // поле обязано уйти из фокуса вместе с ней (см. openGalleryPicker).
               onClick={openGalleryPicker}
-              title="Галерея"
+              title="Прикрепить"
             >
               <Paperclip size={20} />
-            </button>
-          )}
-          {!recording && (
-            <button
-              className="chat-icon-button"
-              disabled={sending}
-              // Тот же резон не держать фокус, что и у кнопки галереи выше.
-              onClick={openFilePicker}
-              title="Прикрепить файл"
-            >
-              <FileText size={20} />
             </button>
           )}
 
