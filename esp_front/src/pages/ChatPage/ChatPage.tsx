@@ -674,12 +674,11 @@ export const ChatPage: React.FC = () => {
   // инпута), так что и под неё лента с баннерами больше не подстраивается
   // сама — меряем реальную высоту (с учётом safe-area) и подкладываем это
   // как padding-top всей странице.
-  useLayoutEffect(() => {
+  useEffect(() => {
     const header = headerRef.current;
     if (!header) return;
     const recalc = () => {
       setHeaderPadTop(header.getBoundingClientRect().bottom);
-      setHeaderMeasured(true);
     };
     recalc();
     const ro = new ResizeObserver(recalc);
