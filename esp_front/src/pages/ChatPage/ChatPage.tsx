@@ -2303,7 +2303,11 @@ export const ChatPage: React.FC = () => {
           {message.media_preview && (
             <span className="chat-media-blur" style={{ backgroundImage: `url("${message.media_preview}")` }} />
           )}
-          <img
+          {/* layoutId — тот же, что у картинки в лайтбоксе: framer сам считает
+              рамку тут и рамку там и вместо мгновенного скачка в полный размер
+              анимирует переход между ними (см. лайтбокс ниже). */}
+          <motion.img
+            layoutId={`chat-lightbox-photo-${message.seq}`}
             src={feedUrl}
             alt=""
             className="chat-media-image"
@@ -3165,6 +3169,12 @@ export const ChatPage: React.FC = () => {
                 пружинит обратно в 0 (dragConstraints top:0 bottom:0). */}
             {lightbox.type === 'image' ? (
               <motion.img
+                // Тот же layoutId, что у миниатюры в ленте (см. renderMedia) —
+                // вместо мгновенного скачка в полный размер framer сам
+                // анимирует рамку из превью в развёрнутый кадр (и обратно на
+                // закрытии, пока миниатюра всё ещё висит в ленте под бэкдропом).
+                layoutId={lightbox.seq !== undefined ? `chat-lightbox-photo-${lightbox.seq}` : undefined}
+                transition={{ layout: { type: 'spring', stiffness: 300, damping: 30, mass: 0.9 } }}
                 src={lightbox.thumbSrc && !fullImageReady ? lightbox.thumbSrc : lightbox.src}
                 alt=""
                 className={`chat-lightbox-image ${imgScale > 1 ? 'chat-lightbox-image--zoomed' : ''}`}
