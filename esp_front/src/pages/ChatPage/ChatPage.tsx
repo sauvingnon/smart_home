@@ -2175,7 +2175,12 @@ export const ChatPage: React.FC = () => {
       Крошку под кадром гасим тем же движением: она своё отработала, а держать
       под каждым фото в ленте живой слой с blur-фильтром незачем. */
   const revealMedia = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    e.currentTarget.style.opacity = '1';
+    // Проявляем классом, а не inline-стилем. Фото в ленте — motion.img с
+    // layoutId, общим с лайтбоксом: доиграв переход обратно в ленту, framer
+    // вычищает с узла все inline-стили, которыми он рулил, а вместе с ними
+    // уходил и наш opacity:1. Оставался CSS-ный opacity:0 — после закрытия
+    // лайтбокса на месте фото была пустая рамка до следующей перерисовки.
+    e.currentTarget.classList.add('chat-media-revealed');
     const frame = e.currentTarget.parentElement;
     frame?.classList.remove('chat-media-skeleton');
     frame?.querySelector<HTMLElement>('.chat-media-blur')?.style.setProperty('opacity', '0');

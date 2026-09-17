@@ -1610,10 +1610,21 @@
   object-fit: cover;
   display: block;
   /* Проявляем из нуля: скелетон под кадром не должен просвечивать сквозь него
-     и не должен моргать сменой картинки на переливку. opacity ставит onLoad
-     в ChatPage.tsx. */
+     и не должен моргать сменой картинки на переливку. Класс .chat-media-revealed
+     вешает onLoad (revealMedia в ChatPage.tsx). */
   opacity: 0;
   transition: opacity 0.28s ease;
+}
+
+/* Кадр загружен. Именно классом, а не inline-стилем: у фото в ленте это
+   motion.img с layoutId, общим с лайтбоксом, и framer, доиграв переход
+   обратно в ленту, снимает с узла свои inline-стили (в том числе opacity).
+   Inline-проявление уходило вместе с ними, и после закрытия лайтбокса на
+   месте фото оставалась пустая рамка. Два класса в селекторе — чтобы
+   перебить opacity:0 у базового правила. */
+.chat-media-image.chat-media-revealed,
+.chat-video-thumb-el.chat-media-revealed {
+  opacity: 1;
 }
 
 .chat-lightbox-backdrop {
