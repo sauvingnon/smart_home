@@ -50,6 +50,27 @@ const BUBBLE_POP_MS = 280;
 // Держим в паре с одноимённой длительностью анимации в ChatPage.css.
 const DEEP_LINK_HIGHLIGHT_MS = 2200;
 
+// Hero-перелёт фото между миниатюрой в ленте и раскрытым кадром в лайтбоксе.
+// Один объект на ОБА узла (см. renderMedia и сам лайтбокс) — и вот почему это
+// принципиально: ведёт перелёт тот узел, который в этот момент появляется, то
+// есть при открытии кадр лайтбокса, а при закрытии миниатюра. Пока transition
+// стоял только на лайтбоксе, обратный путь ехал на дефолте framer (tween 0.45s
+// с другой кривой) — туда и обратно фото летало по-разному.
+//
+// Tween, а не пружина. Перекрёстное затухание миниатюры и полного кадра framer
+// ведёт ПО ПРОГРЕССУ этой самой анимации, а пружина 300/30 визуально доезжает
+// за ~360 мс, но формально живёт ещё столько же (хвост до restDelta): замерено
+// — геометрия вставала на место к 460 мс, а подмена прозрачностей случалась
+// только на 780-й, отдельным поздним щелчком уже поверх стоящего кадра. У
+// tween прогресс кончается ровно там же, где движение.
+const HERO_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
+const HERO_TRANSITION = { layout: { duration: 0.34, ease: HERO_EASE } };
+
+// Зум в лайтбоксе, когда он не идёт под пальцем: двойной тап и защёлкивание
+// обратно в единицу. Пружина почти критическая (ζ≈0.89) — перелёта нет вовсе:
+// на фото во весь экран даже пара процентов промаха читается как рывок.
+const ZOOM_TRANSITION = { type: 'spring' as const, stiffness: 320, damping: 32 };
+
 // Появление и уход меню действий. Одно число на все слои сразу (скрим, копия
 // пузыря, стопка карточек): AnimatePresence держит группу, пока не доиграет
 // самый долгий ребёнок, — пока длительности расходились, копия пузыря ещё
@@ -133,7 +154,17 @@ const ReactionsRow: React.FC<{ children: React.ReactNode }> = ({ children }) => 
       if (prev === null || Math.abs(next - prev) < 0.5) return;
       const clip = clipRef.current;
       if (clip) clip.style.overflow = 'hidden';
-      if (typeof height.get() !== 'number') height.set(prev);
+      if (typeof height.get() !== 'number') {
+        height.set(prev);
+        // И тем же движением — напрямую в узел. MotionValue доезжает до DOM
+        // только на СВОЁМ кадре рендера framer'а, а этот кадр уже размечен:
+        // строка в нём успевала измениться целиком, без всякой анимации.
+        // Замерено на снятии последней реакции: два кадра пузырь стоял уже
+        // схлопнутым, потом раскрывался обратно и только тогда закрывался
+        // пружиной. Колбэк ResizeObserver выполняется после раскладки, но до
+        // отрисовки, так что синхронная запись успевает в тот же кадр.
+        if (clip) clip.style.height = `${prev}px`;
+      }
       running = animate(height, next, {
         ...REACTIONS_HEIGHT_SPRING,
         onComplete: () => {
@@ -200,6 +231,10 @@ const formatDateDivider = (iso: string): string => {
     ? { day: 'numeric', month: 'long' }
     : { day: 'numeric', month: 'long', year: 'numeric' });
 };
+
+// Сколько проявляется приехавший кадр (см. revealMedia). Держим в паре с
+// затуханием крошки-заглушки под ним — .chat-media-blur в ChatPage.css.
+const MEDIA_REVEAL_MS = 280;
 
 // В ленте кадр занимает 260px по ширине — превью в 400px хватает и на
 // 2x-экран, а весит десятки килобайт против пары мегабайт оригинала.
@@ -376,11 +411,33 @@ export const ChatPage: React.FC = () => {
       return new Set();
     }
   });
-  // Зум фото в лайтбоксе: scale — обычный стейт (щипок должен трекать палец 1:1,
-  // без пружины), x/y — motion-values, их же двигает drag (см. проп style на
-  // <motion.img> ниже) — так панорамирование зумленного фото и его сброс живут
-  // в одном месте, а не расходятся с внутренним состоянием drag у framer.
-  const [imgScale, setImgScale] = useState(1);
+  // Зум фото в лайтбоксе. Живой масштаб — motion-value, как и x/y: их двигает
+  // drag (см. проп style на <motion.img> ниже), так панорамирование зумленного
+  // фото и его сброс живут в одном месте, а не расходятся с внутренним
+  // состоянием drag у framer.
+  //
+  // Раньше масштаб был обычным стейтом, и каждый кадр щипка перерисовывал ВСЮ
+  // страницу чата — ленту со всеми пузырями, медиа и плеерами — ради одного
+  // числа в transform. Это ровно то, от чего уводили кольцо громкости, волну
+  // записи и высоту строки реакций; щипок оставался последним местом, где лента
+  // билась о палец. Теперь на жест приходится максимум один рендер, и тот
+  // случается, только когда меняется РЕЖИМ (см. zoomed ниже).
+  const imgScale = useMotionValue(1);
+  // Синхронный двойник для обработчиков: следующий масштаб они считают от
+  // текущего, не дожидаясь рендера.
+  const imgScaleRef = useRef(1);
+  // Единственное, что из зума нужно самой разметке: режим drag (панорама против
+  // свайпа-закрытия) и курсор. Булево — значит повторные setZoomed(true) внутри
+  // одного щипка React гасит сам, без перерисовки.
+  const [zoomed, setZoomed] = useState(false);
+  // Рамки панорамирования. Отдельным стейтом, а не из живого масштаба: тянуть
+  // фото начинают уже ПОСЛЕ щипка, поэтому и считаем их в конце жеста — иначе
+  // это был бы ре-рендер на кадр, ради которого всё и затевалось.
+  const [panBound, setPanBound] = useState(0);
+  // Анимации зума (двойной тап, защёлкивание в единицу) — их надо уметь
+  // оборвать, если палец тронул фото раньше, чем они доиграли: иначе анимация
+  // продолжит писать в те же motion-values поверх жеста.
+  const zoomAnimsRef = useRef<{ stop: () => void }[]>([]);
   const imgX = useMotionValue(0);
   const imgY = useMotionValue(0);
   const pinchStartRef = useRef<{ dist: number; scale: number } | null>(null);
@@ -389,6 +446,8 @@ export const ChatPage: React.FC = () => {
   // закрытия (см. onDragEnd на <motion.img> ниже).
   const pinchEndedAtRef = useRef(0);
   const lastTapRef = useRef(0);
+  // Хвост колеса/трекпада — см. handleImageWheel.
+  const wheelSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [showParticipants, setShowParticipants] = useState(false);
   // Статусы подписок тянем только при открытии шита: на самом экране чата они
@@ -724,6 +783,7 @@ export const ChatPage: React.FC = () => {
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
       if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
       if (meterRafRef.current) cancelAnimationFrame(meterRafRef.current);
+      if (wheelSettleRef.current) clearTimeout(wheelSettleRef.current);
       meterAudioCtxRef.current?.close().catch(() => {});
       // Одноразовый файловый инпут (см. openGalleryPicker) висит на body, а не
       // в поддереве страницы — сам он с ней не уйдёт.
@@ -749,12 +809,32 @@ export const ChatPage: React.FC = () => {
     };
   }, [lightbox]);
 
-  // Сброс зума при открытии нового медиа/закрытии — иначе следующее фото
-  // открылось бы уже приближенным состоянием предыдущего.
-  useEffect(() => {
-    setImgScale(1);
+  // Сброс зума и панорамы — иначе следующее фото открылось бы в состоянии
+  // предыдущего. Две ветки, и они намеренно разные.
+  //
+  // Открытие — молча и ДО первого кадра, потому это layout-эффект: обычный
+  // выполняется после отрисовки, то есть один кадр нового фото успевал
+  // показаться в масштабе прошлого.
+  //
+  // Закрытие — анимацией в ноль, одновременно с hero-перелётом обратно в
+  // ленту. Motion-values общие с уже уходящим узлом (AnimatePresence держит его
+  // в DOM до конца перелёта), поэтому мгновенное обнуление было видно: фото,
+  // которое отвели пальцем или разглядывали в зуме, прыгало в центр за кадр до
+  // того, как начать лететь в ленту.
+  useLayoutEffect(() => {
+    if (!lightbox) {
+      // Проверка — чтобы на самом первом монтировании страницы (лайтбокса ещё
+      // не было ни разу) не запускать три анимации в уже стоящие значения.
+      if (imgScaleRef.current !== 1 || imgX.get() !== 0 || imgY.get() !== 0) resetImageZoom(true);
+      return;
+    }
+    stopZoomAnims();
+    imgScaleRef.current = 1;
+    imgScale.set(1);
     imgX.set(0);
     imgY.set(0);
+    setZoomed(false);
+    setPanBound(0);
   }, [lightbox?.src]);
 
   // В ленту грузится превью, а не оригинал — значит на открытии лайтбокса
@@ -1580,6 +1660,15 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  // Когда отпустили палец, которым открыли меню. Нужно, чтобы отличить click,
+  // синтезированный САМИМ этим жестом, от настоящего тапа по уже открытому
+  // меню — см. onClickCapture у .chat-action-stack.
+  const longPressEndedAtRef = useRef(0);
+  const handleBubblePointerUp = () => {
+    if (longPressFiredRef.current) longPressEndedAtRef.current = Date.now();
+    cancelLongPress();
+  };
+
   const cancelLongPressIfMoved = (e: React.PointerEvent) => {
     const origin = longPressOriginRef.current;
     if (!origin || !longPressTimerRef.current) return;
@@ -1675,17 +1764,50 @@ export const ChatPage: React.FC = () => {
   const IMAGE_MAX_SCALE = 4;
   // Если зум почти вернулся к исходному размеру — досрочно защёлкиваем ровно
   // на 1 и сбрасываем панорамирование. Без этого порога щипок/колесо могли
-  // оставить фото в промежуточном состоянии вроде 1.04x, где imgScale > 1
+  // оставить фото в промежуточном состоянии вроде 1.04x, где масштаб > 1
   // формально верно, drag остаётся в режиме панорамирования (см. проп drag
   // на <motion.img>) — и свайп вниз для закрытия лайтбокса перестаёт работать,
   // хотя визуально зум уже незаметен.
   const ZOOM_SNAP_BACK = 1.08;
   const clampImageScale = (s: number) => Math.min(IMAGE_MAX_SCALE, Math.max(IMAGE_MIN_SCALE, s));
 
-  const resetImageZoom = () => {
-    setImgScale(1);
-    imgX.set(0);
-    imgY.set(0);
+  const stopZoomAnims = () => {
+    zoomAnimsRef.current.forEach((a) => a.stop());
+    zoomAnimsRef.current = [];
+  };
+
+  // Рамки панорамирования — по итогу жеста, см. panBound выше.
+  const commitPanBound = () => setPanBound(160 * (imgScaleRef.current - 1));
+
+  /** Единственная точка записи масштаба. animated — там, где значение НЕ идёт
+      под пальцем (двойной тап, защёлкивание): щипку и колесу анимация только
+      добавила бы задержки между пальцем и кадром. */
+  const setImageScale = (next: number, animated = false) => {
+    stopZoomAnims();
+    imgScaleRef.current = next;
+    if (animated) zoomAnimsRef.current.push(animate(imgScale, next, ZOOM_TRANSITION));
+    else imgScale.set(next);
+    setZoomed(next > 1);
+  };
+
+  const resetImageZoom = (animated = false) => {
+    stopZoomAnims();
+    imgScaleRef.current = 1;
+    if (animated) {
+      // Панораму возвращаем вместе с масштабом: отведённое в сторону
+      // увеличенное фото иначе прыгало в центр одним кадром.
+      zoomAnimsRef.current.push(
+        animate(imgScale, 1, ZOOM_TRANSITION),
+        animate(imgX, 0, ZOOM_TRANSITION),
+        animate(imgY, 0, ZOOM_TRANSITION),
+      );
+    } else {
+      imgScale.set(1);
+      imgX.set(0);
+      imgY.set(0);
+    }
+    setZoomed(false);
+    setPanBound(0);
   };
 
   // Единая точка применения нового масштаба — что бы его ни двигало (колесо,
@@ -1695,17 +1817,31 @@ export const ChatPage: React.FC = () => {
     if (clamped <= ZOOM_SNAP_BACK) {
       resetImageZoom();
     } else {
-      setImgScale(clamped);
+      setImageScale(clamped);
     }
   };
 
   const toggleImageZoom = () => {
-    if (imgScale > 1) resetImageZoom();
-    else setImgScale(2.5);
+    if (imgScaleRef.current > 1) {
+      resetImageZoom(true);
+    } else {
+      setImageScale(2.5, true);
+      commitPanBound();
+    }
   };
+
+  // Двойной тап и dblclick — один и тот же жест, но на тач-экране браузер
+  // присылает ОБА: пару тапов ловит handleImageTouchStart, а следом по ней же
+  // синтезируется dblclick (проверено: touchstart touchend click touchstart
+  // touchend click dblclick). Два toggleImageZoom подряд гасят друг друга —
+  // двойной тап по фото не увеличивал его вообще никогда, зум включался и в
+  // тот же миг выключался. Отметка ниже отдаёт жест тому, кто его обработал
+  // первым; мыши она не мешает — там touch-события не приходят вовсе.
+  const touchZoomAtRef = useRef(0);
 
   const handleImageDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (Date.now() - touchZoomAtRef.current < 700) return;
     toggleImageZoom();
   };
 
@@ -1714,7 +1850,12 @@ export const ChatPage: React.FC = () => {
   // не нужно — обрабатывается тем же путём.
   const handleImageWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    applyImageScale(imgScale - e.deltaY * 0.0015);
+    applyImageScale(imgScaleRef.current - e.deltaY * 0.0015);
+    // Колесо (и пинч по трекпаду, который браузер отдаёт тем же событием) идёт
+    // очередью коротких событий без внятного конца — рамки панорамирования
+    // досчитываем, когда очередь замолчала.
+    if (wheelSettleRef.current) clearTimeout(wheelSettleRef.current);
+    wheelSettleRef.current = setTimeout(commitPanBound, 150);
   };
 
   const getTouchDistance = (touches: React.TouchList) =>
@@ -1722,12 +1863,17 @@ export const ChatPage: React.FC = () => {
 
   const handleImageTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
-      pinchStartRef.current = { dist: getTouchDistance(e.touches), scale: imgScale };
+      // Палец пришёл — недоигравшее защёлкивание/двойной тап уступают ему.
+      stopZoomAnims();
+      pinchStartRef.current = { dist: getTouchDistance(e.touches), scale: imgScaleRef.current };
       return;
     }
     if (e.touches.length === 1) {
       const now = Date.now();
-      if (now - lastTapRef.current < 300) toggleImageZoom();
+      if (now - lastTapRef.current < 300) {
+        touchZoomAtRef.current = now;
+        toggleImageZoom();
+      }
       lastTapRef.current = now;
     }
   };
@@ -1743,7 +1889,11 @@ export const ChatPage: React.FC = () => {
     if (e.touches.length < 2) {
       if (pinchStartRef.current) pinchEndedAtRef.current = Date.now();
       pinchStartRef.current = null;
-      if (imgScale <= ZOOM_SNAP_BACK) resetImageZoom();
+      // Защёлкивание в единицу — уже анимацией: сюда приезжают и масштаб, и
+      // отведённая в сторону панорама, а оба разом прыгали в исходное одним
+      // кадром прямо под пальцем.
+      if (imgScaleRef.current <= ZOOM_SNAP_BACK) resetImageZoom(true);
+      else commitPanBound();
     }
   };
 
@@ -2175,15 +2325,30 @@ export const ChatPage: React.FC = () => {
       Крошку под кадром гасим тем же движением: она своё отработала, а держать
       под каждым фото в ленте живой слой с blur-фильтром незачем. */
   const revealMedia = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
     // Проявляем классом, а не inline-стилем. Фото в ленте — motion.img с
     // layoutId, общим с лайтбоксом: доиграв переход обратно в ленту, framer
     // вычищает с узла все inline-стили, которыми он рулил, а вместе с ними
     // уходил и наш opacity:1. Оставался CSS-ный opacity:0 — после закрытия
     // лайтбокса на месте фото была пустая рамка до следующей перерисовки.
-    e.currentTarget.classList.add('chat-media-revealed');
-    const frame = e.currentTarget.parentElement;
+    img.classList.add('chat-media-revealed');
+    // Само проявление — одноразовой анимацией, а не CSS-переходом на opacity.
+    // Переход сидел бы на узле всегда, в том числе во время hero-перелёта, где
+    // opacity этого же узла ведёт framer: его покадровые записи переход
+    // превращал в низкочастотный фильтр, и пара "миниатюра + кадр" на середине
+    // пути проваливалась по суммарной непрозрачности (подробности — у
+    // .chat-media-image в ChatPage.css). Анимация живёт свои 280 мс и узлу
+    // после себя ничего не навязывает.
+    img.animate?.(
+      [{ opacity: 0 }, { opacity: 1 }],
+      { duration: MEDIA_REVEAL_MS, easing: 'ease' },
+    );
+    const frame = img.parentElement;
     frame?.classList.remove('chat-media-skeleton');
-    frame?.querySelector<HTMLElement>('.chat-media-blur')?.style.setProperty('opacity', '0');
+    // Крошка гаснет классом (а не inline-стилем) ради одной строчки в CSS:
+    // вместе с прозрачностью ей там выключается и visibility — погасший слой
+    // с blur-фильтром иначе остаётся в компоновщике под каждым фото ленты.
+    frame?.querySelector<HTMLElement>('.chat-media-blur')?.classList.add('chat-media-blur--gone');
   };
 
   const renderMedia = (message: ChatMessage, isMine: boolean) => {
@@ -2313,6 +2478,10 @@ export const ChatPage: React.FC = () => {
               анимирует переход между ними (см. лайтбокс ниже). */}
           <motion.img
             layoutId={`chat-lightbox-photo-${message.seq}`}
+            // Та же кривая, что и у кадра в лайтбоксе: при ЗАКРЫТИИ перелёт
+            // ведёт этот узел, и без transition он ехал по дефолту framer —
+            // туда и обратно фото летало по-разному. См. HERO_TRANSITION.
+            transition={HERO_TRANSITION}
             src={feedUrl}
             alt=""
             className="chat-media-image"
@@ -2890,10 +3059,18 @@ export const ChatPage: React.FC = () => {
                       <motion.div
                         className={`chat-bubble ${isMediaBubble ? 'chat-bubble--media' : ''} ${linkedSeq === message.seq ? 'chat-bubble--linked' : ''}`}
                         animate={{ scale: poppedSeq === message.seq ? BUBBLE_POP_SCALE : 1 }}
-                        transition={{ type: 'spring', stiffness: 520, damping: 17 }}
+                        // Демпфирование поднято с 17 до 32 (ζ 0.37 → 0.70).
+                        // Ровно тот же диагноз, по которому копию пузыря над
+                        // блюром уже перевели на tween: при ζ≈0.37 пружина
+                        // несколько раз перелетает цель, а пузырь — это текст
+                        // на стеклянной подложке, и каждый перелёт стоит
+                        // перерастрировки и того и другого. Перелёт остаётся
+                        // (иначе это не "поп"), но один и короткий: подпрыгнул
+                        // и встал, а не подрожал полсекунды.
+                        transition={{ type: 'spring', stiffness: 520, damping: 32 }}
                         onPointerDown={(e) => startLongPress(message, e)}
                         onPointerMove={cancelLongPressIfMoved}
-                        onPointerUp={cancelLongPress}
+                        onPointerUp={handleBubblePointerUp}
                         onPointerCancel={cancelLongPress}
                         onClick={(e) => { if (!isMediaBubble && !isVoiceBubble && !suppressClickIfLongPress(e)) setActionTarget(message); }}
                         onContextMenu={(e) => { e.preventDefault(); setActionTarget(message); }}
@@ -3185,10 +3362,10 @@ export const ChatPage: React.FC = () => {
                 // анимирует рамку из превью в развёрнутый кадр (и обратно на
                 // закрытии, пока миниатюра всё ещё висит в ленте под бэкдропом).
                 layoutId={lightbox.seq !== undefined ? `chat-lightbox-photo-${lightbox.seq}` : undefined}
-                transition={{ layout: { type: 'spring', stiffness: 300, damping: 30, mass: 0.9 } }}
+                transition={HERO_TRANSITION}
                 src={lightbox.thumbSrc && !fullImageReady ? lightbox.thumbSrc : lightbox.src}
                 alt=""
-                className={`chat-lightbox-image ${imgScale > 1 ? 'chat-lightbox-image--zoomed' : ''}`}
+                className={`chat-lightbox-image ${zoomed ? 'chat-lightbox-image--zoomed' : ''}`}
                 onClick={(e) => e.stopPropagation()}
                 onDoubleClick={handleImageDoubleClick}
                 onWheel={handleImageWheel}
@@ -3205,18 +3382,15 @@ export const ChatPage: React.FC = () => {
                   }
                 }}
                 style={{ x: imgX, y: imgY, scale: imgScale }}
-                drag={imgScale > 1 ? true : 'y'}
-                dragConstraints={imgScale > 1
-                  ? {
-                    left: -160 * (imgScale - 1), right: 160 * (imgScale - 1),
-                    top: -160 * (imgScale - 1), bottom: 160 * (imgScale - 1),
-                  }
+                drag={zoomed ? true : 'y'}
+                dragConstraints={zoomed
+                  ? { left: -panBound, right: panBound, top: -panBound, bottom: panBound }
                   : { top: 0, bottom: 0 }}
-                dragElastic={imgScale > 1 ? 0.15 : 0.8}
+                dragElastic={zoomed ? 0.15 : 0.8}
                 onDragEnd={(_, info) => {
                   // При зуме drag только панорамирует фото, закрытие свайпом
                   // вниз работает только пока оно в исходном размере.
-                  if (imgScale > 1) return;
+                  if (imgScaleRef.current > 1) return;
                   // Резкий анзум (быстрый пинч обратно к 1x) на тач-устройствах
                   // рождает фантомный drag-жест той же рукой — без этой паузы
                   // он тут же трактовался бы как свайп-закрытие. Закрыть можно
@@ -3314,7 +3488,17 @@ export const ChatPage: React.FC = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: MENU_OUT_MS / 1000, ease: 'easeOut' }}
-              onClick={closeActionMenu}
+              // Закрываем по pointerdown, а НЕ по click. Долгое нажатие,
+              // которым меню открывают, заканчивается отпусканием пальца, и на
+              // это отпускание браузер синтезирует click в той же точке — а там
+              // уже лежит бэкдроп, он накрыл сообщение 300 мс назад. Меню
+              // открывалось и тем же самым жестом закрывалось (воспроизведено:
+              // pointerdown приходит по .chat-bubble, а click после отпускания
+              // — по .chat-action-backdrop). У настоящего "тапа мимо меню"
+              // pointerdown свой, и он приходит уже по бэкдропу — то есть
+              // закрытие тапом работает как работало, только на полсотни
+              // миллисекунд раньше.
+              onPointerDown={closeActionMenu}
             />
 
             {/* Копия сообщения поверх размытого фона. Поднять оригинал по
@@ -3386,6 +3570,19 @@ export const ChatPage: React.FC = () => {
               exit={{ opacity: 0, transition: { duration: MENU_OUT_MS / 1000, ease: 'easeOut' } }}
               transition={{ duration: MENU_IN_MS / 1000, ease: 'easeOut' }}
               onClick={(e) => e.stopPropagation()}
+              // Тот же синтезированный click (см. бэкдроп выше) может попасть и
+              // в саму стопку: меню встаёт над сообщением, когда под ним не
+              // помещается, и палец, державший верхнюю кромку пузыря,
+              // оказывается ровно на пункте меню. Отпускание жеста нажимало бы
+              // пункт, которого никто не выбирал, — вплоть до "Удалить".
+              // Гасим в перехвате, до кнопок, и только в первые мгновения после
+              // отпускания: настоящий выбор пункта в это окно не попадает.
+              onClickCapture={(e) => {
+                if (Date.now() - longPressEndedAtRef.current < 350) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              }}
             >
               {/* Ряд базовых реакций — первой карточкой стопки, вплотную к
                   самому сообщению (как в Telegram). Своя уже поставленная
