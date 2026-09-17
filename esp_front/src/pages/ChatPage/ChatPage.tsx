@@ -525,7 +525,11 @@ export const ChatPage: React.FC = () => {
   const headerRef = useRef<HTMLDivElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
   const inputRowRef = useRef<HTMLDivElement>(null);
-  const [scrollBtnBottom, setScrollBtnBottom] = useState(90);
+  // Насколько кнопка "вниз" поднята над нижней кромкой: собственная высота
+  // поля ввода плюс зазор. Отступ самой кромки от края экрана сюда НЕ входит —
+  // его держит CSS-переменная --chat-bottom-offset, общая у кнопки и поля
+  // (см. .chat-scroll-bottom-btn в ChatPage.css, там же почему).
+  const [scrollBtnLift, setScrollBtnLift] = useState(80);
   const [scrollBtnSize, setScrollBtnSize] = useState(38);
   const [headerPadTop, setHeaderPadTop] = useState(76);
   const [messagesPadBottom, setMessagesPadBottom] = useState(78);
@@ -709,8 +713,8 @@ export const ChatPage: React.FC = () => {
     if (!bar) return;
     const recalc = () => {
       const rect = bar.getBoundingClientRect();
-      const clearance = Math.max(0, window.innerHeight - rect.top);
-      setScrollBtnBottom(clearance + 12);
+      // Только собственная высота бара — где проходит нижняя кромка, знает CSS.
+      setScrollBtnLift(rect.height + 12);
       // Тут НЕ clearance (полное расстояние от бара до низа экрана) — та часть
       // (84px/safe-area под BottomNavBar) уже вычтена из высоты .chat-messages
       // самим .chat-page.padding-bottom (см. ChatPage.css), лента получает её
@@ -728,27 +732,34 @@ export const ChatPage: React.FC = () => {
     const ro = new ResizeObserver(recalc);
     ro.observe(bar);
     window.addEventListener('resize', recalc);
-    // .chat-input-bar анимирует свой bottom при фокусе/расфокусе (см. .chat-page--composing) —
-    // ResizeObserver на это не реагирует (размер бара не меняется, только позиция), поэтому
-    // recalc() выше застревал на значении из самого начала transition. Досчитываем ещё раз,
-    // когда анимация bottom реально закончится.
-    const onTransitionEnd = (e: TransitionEvent) => {
-      if (e.propertyName === 'bottom') recalc();
-    };
-    bar.addEventListener('transitionend', onTransitionEnd);
+    // Слушателя transitionend тут больше нет. Он был нужен, пока JS считал
+    // положение кнопки целиком: переезд бара при фокусе меняет не размер, а
+    // позицию, ResizeObserver на это не реагирует, и кнопку приходилось
+    // досчитывать по концу перехода — то есть двигать её отдельным, запоздалым
+    // движением. Теперь обоих двигает одна CSS-переменная, и мерить положение
+    // бара незачем: отсюда нужна только его высота, а её ResizeObserver ловит.
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', recalc);
-      bar.removeEventListener('transitionend', onTransitionEnd);
     };
-  }, [inputFocused]);
+  }, []);
 
-  // Размер кнопки — 1.2 от реальной высоты пилюли поля ввода (а не хардкод),
-  // чтобы она всегда была соразмерна инпуту, а не своей произвольной величиной.
+  // Размер кнопки — от реальной высоты пилюли поля ввода (а не хардкод), чтобы
+  // она была соразмерна инпуту при любом шрифте и масштабе. Но ЗАЖАТЫЙ, и вот
+  // почему: пилюля растёт вместе с набираемым текстом, и без потолка кнопка
+  // росла вместе с ней — на четырёх строках ввода это давало круг 127px,
+  // почти треть ширины экрана. Коэффициент 0.8 (а не 1.2): кнопка — спутник
+  // поля, а не главный элемент экрана, и дефолт стейта выше — ровно 0.8 от
+  // однострочной пилюли.
+  const SCROLL_BTN_MIN = 34;
+  const SCROLL_BTN_MAX = 44;
   useEffect(() => {
     const row = inputRowRef.current;
     if (!row) return;
-    const recalc = () => setScrollBtnSize(row.getBoundingClientRect().height * 1.2);
+    const recalc = () => setScrollBtnSize(Math.round(Math.min(
+      SCROLL_BTN_MAX,
+      Math.max(SCROLL_BTN_MIN, row.getBoundingClientRect().height * 0.8),
+    )));
     recalc();
     const ro = new ResizeObserver(recalc);
     ro.observe(row);
@@ -3154,7 +3165,11 @@ export const ChatPage: React.FC = () => {
         {showScrollDown && (
           <motion.button
             className="chat-scroll-bottom-btn"
-            style={{ bottom: scrollBtnBottom, width: scrollBtnSize, height: scrollBtnSize }}
+            style={{
+              bottom: `calc(var(--chat-bottom-offset) + ${scrollBtnLift}px)`,
+              width: scrollBtnSize,
+              height: scrollBtnSize,
+            }}
             initial={{ x: 48, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 48, opacity: 0 }}
